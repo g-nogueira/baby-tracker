@@ -24,6 +24,8 @@ export function startNap(context: MutationContext): NapMutation {
         kind: 'asleep',
         startedAt: occurredAt,
         endedAt: null,
+        createdBy: context.caregiverId,
+        updatedBy: context.caregiverId,
         version: 1,
         deletedAt: null,
       },
@@ -59,6 +61,7 @@ export function stopNap(session: NapSession, context: MutationContext): NapMutat
       phase: {
         ...session.phase,
         endedAt: occurredAt,
+        updatedBy: context.caregiverId,
         version: session.phase.version + 1,
       },
     },
@@ -90,6 +93,7 @@ export function deleteNap(session: NapSession, context: MutationContext): NapMut
       deletedAt: occurredAt,
       phase: {
         ...session.phase,
+        updatedBy: context.caregiverId,
         version: session.phase.version + 1,
         deletedAt: occurredAt,
       },

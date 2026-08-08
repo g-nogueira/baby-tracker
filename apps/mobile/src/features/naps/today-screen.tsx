@@ -11,7 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { useNaps } from './use-naps';
+
+const clockFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 const palette = {
   background: '#F7F4EF',
@@ -25,8 +31,17 @@ const palette = {
 };
 
 export function TodayScreen() {
-  const { activeNap, error, isLoading, naps, pendingOperationCount, remove, start, stop } =
-    useNaps();
+  const {
+    activeNap,
+    error,
+    isLoading,
+    isMutating,
+    naps,
+    pendingOperationCount,
+    remove,
+    start,
+    stop,
+  } = useNaps();
   const now = useClock(activeNap !== null);
 
   if (isLoading) {
@@ -47,7 +62,7 @@ export function TodayScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>TODAY</Text>
-            <Text style={styles.title}>Arthur</Text>
+            <Text style={styles.title}>{LOCAL_DEVELOPMENT_IDENTITY.childDisplayName}</Text>
           </View>
           {pendingOperationCount > 0 ? (
             <View
@@ -80,8 +95,13 @@ export function TodayScreen() {
           <Pressable
             accessibilityHint={activeNap ? 'Stops the current nap' : 'Starts a nap now'}
             accessibilityRole="button"
+            disabled={isMutating}
             onPress={activeNap ? stop : start}
-            style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.primaryAction,
+              isMutating && styles.disabled,
+              pressed && styles.pressed,
+            ]}
           >
             <Text style={styles.primaryActionIcon}>{activeNap ? '■' : '☾'}</Text>
             <Text style={styles.primaryActionLabel}>{activeNap ? 'Stop nap' : 'Start nap'}</Text>
@@ -97,7 +117,9 @@ export function TodayScreen() {
           {naps.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No naps yet</Text>
-              <Text style={styles.emptyText}>Tap Start nap when Arthur falls asleep.</Text>
+              <Text style={styles.emptyText}>
+                Tap Start nap when {LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} falls asleep.
+              </Text>
             </View>
           ) : (
             naps.map((nap) => (
@@ -148,7 +170,7 @@ function useClock(isRunning: boolean): Date {
 
   useEffect(() => {
     if (!isRunning) return;
-    const timer = setInterval(() => setNow(new Date()), 1_000);
+    const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, [isRunning]);
 
@@ -156,19 +178,20 @@ function useClock(isRunning: boolean): Date {
 }
 
 function latestAwakeStatus(naps: NapSession[], now: Date): string {
-  const latest = naps.find((nap) => nap.endedAt !== null);
-  if (!latest?.endedAt) return 'Awake';
-  return `Awake · ${formatDuration(elapsedMilliseconds(latest.endedAt, now))}`;
+  const latestEndedAt = naps.reduce<string | null>((latest, nap) => {
+    if (nap.endedAt === null) return latest;
+    return latest === null || nap.endedAt > latest ? nap.endedAt : latest;
+  }, null);
+  if (latestEndedAt === null) return 'Awake';
+  return `Awake · ${formatDuration(elapsedMilliseconds(latestEndedAt, now))}`;
 }
 
 function formatClock(instant: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(
-    new Date(instant),
-  );
+  return clockFormatter.format(new Date(instant));
 }
 
 function confirmDelete(nap: NapSession, remove: (nap: NapSession) => Promise<void>): void {
-  Alert.alert('Delete this nap?', 'It will remain recoverable until it synchronizes.', [
+  Alert.alert('Delete this nap?', 'This removes the nap from the timeline.', [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: () => void remove(nap) },
   ]);
@@ -239,6 +262,7 @@ const styles = StyleSheet.create({
   primaryActionIcon: { color: '#FFFFFF', fontSize: 20 },
   primaryActionLabel: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+  disabled: { opacity: 0.55 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-baby_tracker}
       POSTGRES_USER: ${POSTGRES_USER:-baby_tracker}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__BabyTracker: Host=postgres;Port=5432;Database=${POSTGRES_DB:-baby_tracker};Username=${POSTGRES_USER:-baby_tracker};Password=${POSTGRES_PASSWORD:-development-only}
+      ConnectionStrings__BabyTracker: Host=postgres;Port=5432;Database=${POSTGRES_DB:-baby_tracker};Username=${POSTGRES_USER:-baby_tracker};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:5080:8080"
     depends_on:

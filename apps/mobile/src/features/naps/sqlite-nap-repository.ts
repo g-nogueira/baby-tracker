@@ -15,6 +15,9 @@ interface SessionRow {
   phase_id: string;
   phase_started_at: string;
   phase_ended_at: string | null;
+  phase_kind: 'asleep' | 'awake';
+  phase_created_by: string;
+  phase_updated_by: string;
   phase_version: number;
   phase_deleted_at: string | null;
 }
@@ -34,10 +37,14 @@ const SELECT_NAPS = `
     phase.id AS phase_id,
     phase.started_at AS phase_started_at,
     phase.ended_at AS phase_ended_at,
+    phase.kind AS phase_kind,
+    phase.created_by AS phase_created_by,
+    phase.updated_by AS phase_updated_by,
     phase.version AS phase_version,
     phase.deleted_at AS phase_deleted_at
   FROM sleep_sessions AS session
-  INNER JOIN sleep_phases AS phase ON phase.sleep_session_id = session.id
+  INNER JOIN sleep_phases AS phase
+    ON phase.sleep_session_id = session.id AND phase.kind = 'asleep'
   WHERE session.kind = 'nap'
 `;
 
@@ -54,7 +61,7 @@ export class SQLiteNapRepository {
         AND session.child_id = ?
         AND session.deleted_at IS NULL
         AND session.started_at < ?
-        AND COALESCE(session.ended_at, session.started_at) >= ?
+        AND (session.ended_at IS NULL OR session.ended_at >= ?)
         ORDER BY session.started_at DESC`,
       childId,
       nextDayStartedAt,
@@ -66,7 +73,14 @@ export class SQLiteNapRepository {
 
   public async save(mutation: NapMutation): Promise<void> {
     await this.database.withExclusiveTransactionAsync(async (transaction) => {
-      await upsertSession(transaction, mutation.session);
+      const sessionResult = await upsertSession(
+        transaction,
+        mutation.session,
+        mutation.operation.baseVersion,
+      );
+      if (sessionResult.changes === 0) {
+        throw new NapWriteConflictError();
+      }
       await upsertPhase(transaction, mutation.session);
       await transaction.runAsync(
         `INSERT INTO outbox_operations (
@@ -94,9 +108,17 @@ export class SQLiteNapRepository {
   }
 }
 
+export class NapWriteConflictError extends Error {
+  public constructor() {
+    super('This nap changed before your update was saved. Refresh and try again.');
+    this.name = 'NapWriteConflictError';
+  }
+}
+
 async function upsertSession(
   transaction: SQLiteDatabase,
   session: NapSession,
+  expectedVersion: number | null,
 ): Promise<SQLiteRunResult> {
   return transaction.runAsync(
     `INSERT INTO sleep_sessions (
@@ -108,7 +130,8 @@ async function upsertSession(
       status = excluded.status,
       updated_by = excluded.updated_by,
       version = excluded.version,
-      deleted_at = excluded.deleted_at`,
+      deleted_at = excluded.deleted_at
+    WHERE sleep_sessions.version = ?`,
     session.id,
     session.childId,
     session.kind,
@@ -120,6 +143,7 @@ async function upsertSession(
     session.updatedBy,
     session.version,
     session.deletedAt,
+    expectedVersion,
   );
 }
 
@@ -129,10 +153,12 @@ async function upsertPhase(
 ): Promise<SQLiteRunResult> {
   return transaction.runAsync(
     `INSERT INTO sleep_phases (
-      id, sleep_session_id, kind, started_at, ended_at, version, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      id, sleep_session_id, kind, started_at, ended_at,
+      created_by, updated_by, version, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       ended_at = excluded.ended_at,
+      updated_by = excluded.updated_by,
       version = excluded.version,
       deleted_at = excluded.deleted_at`,
     session.phase.id,
@@ -140,6 +166,8 @@ async function upsertPhase(
     session.phase.kind,
     session.phase.startedAt,
     session.phase.endedAt,
+    session.phase.createdBy,
+    session.phase.updatedBy,
     session.phase.version,
     session.phase.deletedAt,
   );
@@ -161,9 +189,11 @@ function mapSession(row: SessionRow): NapSession {
     phase: {
       id: row.phase_id,
       sleepSessionId: row.id,
-      kind: 'asleep',
+      kind: row.phase_kind,
       startedAt: row.phase_started_at,
       endedAt: row.phase_ended_at,
+      createdBy: row.phase_created_by,
+      updatedBy: row.phase_updated_by,
       version: row.phase_version,
       deletedAt: row.phase_deleted_at,
     },

@@ -424,7 +424,8 @@ flowchart TD
 - One database transaction for operation application, change-feed append, and Home Assistant outbox append.
 - A background worker publishes the HA outbox and retries safely.
 - Containerized deployment on the 24/7 CachyOS PC.
-- HTTPS exposure through the existing secure tunnel pattern; the service itself still authenticates every device request.
+- HTTPS exposure through the existing secure tunnel pattern is allowed only after device-flow and per-request authentication are implemented and tested.
+- Until then, the API remains bound to localhost and is not exposed through the tunnel.
 - Health, readiness, structured logs, and database-migration checks.
 
 ### 8.3 Availability behavior

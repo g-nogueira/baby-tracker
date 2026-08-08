@@ -5,9 +5,11 @@ export type SleepSessionStatus = 'active' | 'completed';
 export interface SleepPhase {
   id: string;
   sleepSessionId: string;
-  kind: 'asleep';
+  kind: 'asleep' | 'awake';
   startedAt: UtcInstant;
   endedAt: UtcInstant | null;
+  createdBy: string;
+  updatedBy: string;
   version: number;
   deletedAt: UtcInstant | null;
 }

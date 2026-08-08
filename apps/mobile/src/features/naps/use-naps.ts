@@ -1,7 +1,14 @@
-import { createUuidV7, deleteNap, startNap, stopNap, type NapSession } from '@baby-tracker/domain';
+import {
+  createUuidV7,
+  deleteNap,
+  startNap,
+  stopNap,
+  type NapMutation,
+  type NapSession,
+} from '@baby-tracker/domain';
 import { getRandomValues } from 'expo-crypto';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { SQLiteNapRepository } from './sqlite-nap-repository';
@@ -16,6 +23,8 @@ interface NapState {
 export function useNaps() {
   const database = useSQLiteContext();
   const repository = useMemo(() => new SQLiteNapRepository(database), [database]);
+  const mutationInFlight = useRef(false);
+  const [isMutating, setIsMutating] = useState(false);
   const [state, setState] = useState<NapState>({
     naps: [],
     pendingOperationCount: 0,
@@ -39,12 +48,19 @@ export function useNaps() {
   }, [refresh]);
 
   const mutate = useCallback(
-    async (mutationFactory: (now: Date) => ReturnType<typeof startNap>) => {
+    async (mutationFactory: (now: Date) => NapMutation) => {
+      if (mutationInFlight.current) return;
+
+      mutationInFlight.current = true;
+      setIsMutating(true);
       try {
         await repository.save(mutationFactory(new Date()));
         await refresh();
       } catch (error: unknown) {
         setState((current) => ({ ...current, error: errorMessage(error) }));
+      } finally {
+        mutationInFlight.current = false;
+        setIsMutating(false);
       }
     },
     [refresh, repository],
@@ -55,6 +71,7 @@ export function useNaps() {
   return {
     ...state,
     activeNap,
+    isMutating,
     start: () => mutate((now) => startNap(createContext(now))),
     stop: () => {
       if (activeNap === null) return Promise.resolve();

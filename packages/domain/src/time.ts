@@ -9,7 +9,14 @@ export function toUtcInstant(value: Date): UtcInstant {
 }
 
 export function elapsedMilliseconds(startedAt: UtcInstant, now: Date): number {
-  return Math.max(0, now.getTime() - new Date(startedAt).getTime());
+  const startTime = new Date(startedAt).getTime();
+  const endTime = now.getTime();
+
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+    throw new Error('Valid elapsed-time boundaries are required.');
+  }
+
+  return Math.max(0, endTime - startTime);
 }
 
 export function formatDuration(milliseconds: number): string {

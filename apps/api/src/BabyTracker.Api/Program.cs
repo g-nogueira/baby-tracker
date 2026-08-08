@@ -27,14 +27,6 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapGet("/", () => Results.Ok(new
-    {
-        service = "Baby Tracker API",
-        status = "ok",
-        apiVersion = 1
-    }))
-    .ExcludeFromDescription();
-
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("live")
