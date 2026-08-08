@@ -42,7 +42,7 @@ export function TodayScreen() {
     start,
     stop,
   } = useNaps();
-  const now = useClock(activeNap !== null);
+  const now = useClock();
 
   if (isLoading) {
     return (
@@ -165,14 +165,13 @@ function NapRow({ nap, now, onDelete }: { nap: NapSession; now: Date; onDelete: 
   );
 }
 
-function useClock(isRunning: boolean): Date {
+function useClock(): Date {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    if (!isRunning) return;
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
-  }, [isRunning]);
+  }, []);
 
   return now;
 }
