@@ -2,7 +2,7 @@ using Npgsql;
 
 namespace BabyTracker.Api.Infrastructure.Persistence;
 
-internal sealed class DatabaseMigrationService(
+internal sealed partial class DatabaseMigrationService(
     NpgsqlDataSource dataSource,
     ILogger<DatabaseMigrationService> logger) : IHostedService
 {
@@ -22,10 +22,7 @@ internal sealed class DatabaseMigrationService(
 
             foreach (var migration in DatabaseMigrations.All.Where(candidate => !applied.Contains(candidate.Version)))
             {
-                logger.LogInformation(
-                    "Applying database migration {MigrationVersion} {MigrationName}",
-                    migration.Version,
-                    migration.Name);
+                ApplyingDatabaseMigration(logger, migration.Version, migration.Name);
 
                 await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
                 await using var migrationCommand = new NpgsqlCommand(migration.Sql, connection, transaction);
@@ -51,6 +48,15 @@ internal sealed class DatabaseMigrationService(
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Information,
+        Message = "Applying database migration {MigrationVersion} {MigrationName}")]
+    private static partial void ApplyingDatabaseMigration(
+        ILogger logger,
+        long migrationVersion,
+        string migrationName);
 
     private static async Task EnsureHistoryTableAsync(
         NpgsqlConnection connection,
