@@ -61,7 +61,7 @@ export class SQLiteNapRepository {
         AND session.child_id = ?
         AND session.deleted_at IS NULL
         AND session.started_at < ?
-        AND (session.ended_at IS NULL OR session.ended_at >= ?)
+        AND (session.ended_at IS NULL OR session.ended_at > ?)
         ORDER BY session.started_at DESC`,
       childId,
       nextDayStartedAt,
@@ -71,8 +71,34 @@ export class SQLiteNapRepository {
     return rows.map(mapSession);
   }
 
+  public async latestCompletedEnd(childId: string): Promise<string | null> {
+    const row = await this.database.getFirstAsync<{ ended_at: string | null }>(
+      `SELECT MAX(ended_at) AS ended_at
+       FROM sleep_sessions
+       WHERE child_id = ?
+         AND kind = 'nap'
+         AND status = 'completed'
+         AND deleted_at IS NULL`,
+      childId,
+    );
+    return row?.ended_at ?? null;
+  }
+
+  public async active(childId: string): Promise<NapSession | null> {
+    const row = await this.database.getFirstAsync<SessionRow>(
+      `${SELECT_NAPS}
+       AND session.child_id = ?
+       AND session.status = 'active'
+       AND session.deleted_at IS NULL
+       LIMIT 1`,
+      childId,
+    );
+    return row === null ? null : mapSession(row);
+  }
+
   public async save(mutation: NapMutation): Promise<void> {
     await this.database.withExclusiveTransactionAsync(async (transaction) => {
+      await assertNoOverlap(transaction, mutation.session);
       const sessionResult = await upsertSession(
         transaction,
         mutation.session,
@@ -81,7 +107,14 @@ export class SQLiteNapRepository {
       if (sessionResult.changes === 0) {
         throw new NapWriteConflictError();
       }
-      await upsertPhase(transaction, mutation.session);
+      const phaseResult = await upsertPhase(
+        transaction,
+        mutation.session,
+        mutation.operation.baseVersion,
+      );
+      if (phaseResult.changes === 0) {
+        throw new NapWriteConflictError();
+      }
       await transaction.runAsync(
         `INSERT INTO outbox_operations (
           operation_id, entity_id, entity_type, action, base_version,
@@ -115,6 +148,35 @@ export class NapWriteConflictError extends Error {
   }
 }
 
+export class NapOverlapError extends Error {
+  public constructor() {
+    super('This nap overlaps another nap. Adjust its start or end time.');
+    this.name = 'NapOverlapError';
+  }
+}
+
+async function assertNoOverlap(transaction: SQLiteDatabase, session: NapSession): Promise<void> {
+  if (session.deletedAt !== null) return;
+
+  const row = await transaction.getFirstAsync<{ id: string }>(
+    `SELECT id
+     FROM sleep_sessions
+     WHERE child_id = ?
+       AND kind = 'nap'
+       AND id <> ?
+       AND deleted_at IS NULL
+       AND (? IS NULL OR started_at < ?)
+       AND (ended_at IS NULL OR ended_at > ?)
+     LIMIT 1`,
+    session.childId,
+    session.id,
+    session.endedAt,
+    session.endedAt,
+    session.startedAt,
+  );
+  if (row !== null) throw new NapOverlapError();
+}
+
 async function upsertSession(
   transaction: SQLiteDatabase,
   session: NapSession,
@@ -126,6 +188,7 @@ async function upsertSession(
       created_by, updated_by, version, deleted_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      started_at = excluded.started_at,
       ended_at = excluded.ended_at,
       status = excluded.status,
       updated_by = excluded.updated_by,
@@ -150,6 +213,7 @@ async function upsertSession(
 async function upsertPhase(
   transaction: SQLiteDatabase,
   session: NapSession,
+  expectedVersion: number | null,
 ): Promise<SQLiteRunResult> {
   return transaction.runAsync(
     `INSERT INTO sleep_phases (
@@ -157,10 +221,12 @@ async function upsertPhase(
       created_by, updated_by, version, deleted_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      started_at = excluded.started_at,
       ended_at = excluded.ended_at,
       updated_by = excluded.updated_by,
       version = excluded.version,
-      deleted_at = excluded.deleted_at`,
+      deleted_at = excluded.deleted_at
+    WHERE sleep_phases.version = ?`,
     session.phase.id,
     session.id,
     session.phase.kind,
@@ -170,6 +236,7 @@ async function upsertPhase(
     session.phase.updatedBy,
     session.phase.version,
     session.phase.deletedAt,
+    expectedVersion,
   );
 }
 
