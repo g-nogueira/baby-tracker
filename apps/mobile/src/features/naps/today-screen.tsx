@@ -14,8 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { calendarDayForInstant } from './calendar-day';
+import { formatLiveDuration } from './nap-clock';
 import { NapEditorSheet } from './nap-editor-sheet';
 import type { NapEditorState } from './nap-editor-state';
+import { NapRadialTimeline } from './nap-radial-timeline';
 import { useNaps } from './use-naps';
 
 const clockFormatter = new Intl.DateTimeFormat(undefined, {
@@ -71,7 +73,7 @@ export function TodayScreen() {
     start,
     stop,
   } = useNaps();
-  const now = useMinuteClock();
+  const now = useAdaptiveClock(activeNap !== null);
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,19 +101,24 @@ export function TodayScreen() {
     );
   }
 
-  const status = activeNap
-    ? `Napping · ${formatDuration(elapsedMilliseconds(activeNap.startedAt, now))}`
-    : latestAwakeStatus(latestCompletedEnd, now);
   const activeUndoPending = undo?.deletedNap.status === 'active';
 
-  const saveEditor = async () => {
-    if (editor === null) return;
+  const openNapControls = () => {
+    clearError();
+    setEditor(
+      activeNap === null
+        ? { mode: 'start', startedAt: new Date() }
+        : { mode: 'stop', nap: activeNap, endedAt: new Date() },
+    );
+  };
+
+  const saveEditor = async (candidate: NapEditorState) => {
     const saved =
-      editor.mode === 'start'
-        ? await start(editor.startedAt)
-        : editor.mode === 'stop'
-          ? await stop(editor.endedAt)
-          : await edit(editor.nap, editor.startedAt, editor.endedAt);
+      candidate.mode === 'start'
+        ? await start(candidate.startedAt)
+        : candidate.mode === 'stop'
+          ? await stop(candidate.endedAt)
+          : await edit(candidate.nap, candidate.startedAt, candidate.endedAt);
     if (saved !== null) setEditor(null);
   };
 
@@ -131,7 +138,13 @@ export function TodayScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          activeNap !== null && styles.contentWithTimer,
+          undo !== null && styles.contentWithUndo,
+        ]}
+      >
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>{isToday ? 'TODAY' : 'HISTORY'}</Text>
@@ -148,20 +161,6 @@ export function TodayScreen() {
           ) : null}
         </View>
 
-        <View accessibilityRole="summary" style={styles.statusCard}>
-          <View style={styles.napBadge}>
-            <Text style={styles.napBadgeText}>NAP STATUS</Text>
-          </View>
-          <Text style={styles.status}>{status}</Text>
-          <Text style={styles.statusHint}>
-            {activeNap
-              ? `Started at ${formatClock(activeNap.startedAt)}`
-              : latestCompletedEnd === null
-                ? 'No naps recorded yet'
-                : `Last nap ended at ${formatClock(latestCompletedEnd)}`}
-          </Text>
-        </View>
-
         {error ? (
           <View accessibilityRole="alert" style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
@@ -171,54 +170,21 @@ export function TodayScreen() {
           </View>
         ) : null}
 
-        <View style={styles.actions}>
-          {isToday ? (
-            <>
-              <Pressable
-                accessibilityHint={activeNap ? 'Stops the current nap now' : 'Starts a nap now'}
-                accessibilityLabel={activeNap ? 'Stop nap' : 'Start nap'}
-                accessibilityRole="button"
-                accessibilityState={{ busy: isMutating, disabled: isMutating || activeUndoPending }}
-                disabled={isMutating || activeUndoPending}
-                onPress={() => void (activeNap ? stop() : start())}
-                style={({ pressed }) => [
-                  styles.primaryAction,
-                  (isMutating || activeUndoPending) && styles.disabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text accessibilityElementsHidden style={styles.primaryActionIcon}>
-                  {activeNap ? '■' : '▶'}
-                </Text>
-                <Text style={styles.primaryActionLabel}>
-                  {activeNap ? 'Stop nap' : 'Start nap'}
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: isMutating || activeUndoPending }}
-                disabled={isMutating || activeUndoPending}
-                onPress={() => {
-                  clearError();
-                  setEditor(
-                    activeNap === null
-                      ? { mode: 'start', startedAt: new Date() }
-                      : { mode: 'stop', nap: activeNap, endedAt: new Date() },
-                  );
-                }}
-                style={styles.correctTimeButton}
-              >
-                <Text style={styles.correctTimeText}>
-                  {activeNap ? 'Stop at another time' : 'Start at another time'}
-                </Text>
-              </Pressable>
-            </>
-          ) : (
-            <Pressable accessibilityRole="button" onPress={goToToday} style={styles.primaryAction}>
-              <Text style={styles.primaryActionLabel}>Go to today</Text>
-            </Pressable>
-          )}
-        </View>
+        <NapRadialTimeline
+          activeNap={isToday ? activeNap : null}
+          disabled={isMutating || activeUndoPending}
+          isToday={isToday}
+          latestCompletedEnd={latestCompletedEnd}
+          naps={naps}
+          now={now}
+          onPressNap={openNapControls}
+        />
+
+        {!isToday ? (
+          <Pressable accessibilityRole="button" onPress={goToToday} style={styles.todayButton}>
+            <Text style={styles.todayButtonText}>Return to today</Text>
+          </Pressable>
+        ) : null}
 
         <View style={styles.dateNavigation}>
           <Pressable
@@ -255,7 +221,7 @@ export function TodayScreen() {
               <Text style={styles.emptyTitle}>No naps on this day</Text>
               <Text style={styles.emptyText}>
                 {isToday
-                  ? `Tap Start nap when ${LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} falls asleep.`
+                  ? `Tap the Nap circle when ${LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} falls asleep.`
                   : 'Use the arrows to review another day.'}
               </Text>
             </View>
@@ -279,6 +245,17 @@ export function TodayScreen() {
           )}
         </View>
       </ScrollView>
+
+      {activeNap !== null && isToday ? (
+        <ActiveNapTimer
+          isMutating={isMutating}
+          nap={activeNap}
+          now={now}
+          onOpen={openNapControls}
+          onStop={() => void stop()}
+          raised={undo !== null}
+        />
+      ) : null}
 
       {undo !== null ? (
         <View accessibilityLiveRegion="polite" style={styles.undoBanner}>
@@ -306,10 +283,61 @@ export function TodayScreen() {
             setEditor(nextEditor);
           }}
           onDelete={editor.mode === 'start' ? null : () => void deleteFromEditor()}
-          onSave={() => void saveEditor()}
+          onSave={(candidate) => void saveEditor(candidate)}
         />
       ) : null}
     </SafeAreaView>
+  );
+}
+
+function ActiveNapTimer({
+  isMutating,
+  nap,
+  now,
+  onOpen,
+  onStop,
+  raised,
+}: {
+  isMutating: boolean;
+  nap: NapSession;
+  now: Date;
+  onOpen: () => void;
+  onStop: () => void;
+  raised: boolean;
+}) {
+  const liveDuration = formatLiveDuration(elapsedMilliseconds(nap.startedAt, now));
+  return (
+    <View style={[styles.activeTimer, raised && styles.activeTimerRaised]}>
+      <Pressable
+        accessibilityHint="Opens nap controls"
+        accessibilityLabel={`Nap running for ${liveDuration}`}
+        accessibilityRole="button"
+        onPress={onOpen}
+        style={({ pressed }) => [styles.activeTimerBody, pressed && styles.timerPressed]}
+      >
+        <View style={styles.timerIconCircle}>
+          <Text style={styles.timerIcon}>z</Text>
+        </View>
+        <View style={styles.timerCopy}>
+          <Text style={styles.timerTitle}>Nap</Text>
+          <Text style={styles.timerValue}>{liveDuration}</Text>
+        </View>
+      </Pressable>
+      <Pressable
+        accessibilityLabel="Stop nap now"
+        accessibilityRole="button"
+        accessibilityState={{ busy: isMutating, disabled: isMutating }}
+        disabled={isMutating}
+        onPress={onStop}
+        style={({ pressed }) => [
+          styles.timerStop,
+          isMutating && styles.disabled,
+          pressed && styles.timerPressed,
+        ]}
+      >
+        <View style={styles.stopSquare} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -339,37 +367,23 @@ function NapRow({ nap, now, onEdit }: { nap: NapSession; now: Date; onEdit: () =
   );
 }
 
-function useMinuteClock(): Date {
+function useAdaptiveClock(showSeconds: boolean): Date {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const delay = 60_000 - (Date.now() % 60_000);
-    const timeout = setTimeout(() => {
-      setNow(new Date());
-      interval = setInterval(() => setNow(new Date()), 60_000);
-    }, delay);
+    const interval = setInterval(() => setNow(new Date()), showSeconds ? 1_000 : 60_000);
+    setNow(new Date());
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') setNow(new Date());
     });
 
     return () => {
-      clearTimeout(timeout);
-      if (interval !== null) clearInterval(interval);
+      clearInterval(interval);
       subscription.remove();
     };
-  }, []);
+  }, [showSeconds]);
 
   return now;
-}
-
-function latestAwakeStatus(latestEndedAt: string | null, now: Date): string {
-  if (latestEndedAt === null) return 'Awake';
-  return `Awake · ${formatDuration(elapsedMilliseconds(latestEndedAt, now))}`;
-}
-
-function formatClock(instant: string): string {
-  return clockFormatter.format(new Date(instant));
 }
 
 function formatTimeRange(nap: NapSession): string {
@@ -392,46 +406,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: palette.background,
   },
-  content: { paddingHorizontal: 20, paddingBottom: 96, gap: 20 },
+  content: { paddingHorizontal: 20, paddingBottom: 80, gap: 18 },
+  contentWithTimer: { paddingBottom: 126 },
+  contentWithUndo: { paddingBottom: 194 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 60,
+    minHeight: 54,
   },
-  eyebrow: { color: palette.muted, fontSize: 12, fontWeight: '700', letterSpacing: 1.6 },
-  title: { color: palette.ink, fontSize: 30, fontWeight: '700', letterSpacing: -0.7 },
+  eyebrow: { color: palette.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
+  title: { color: palette.ink, fontSize: 28, fontWeight: '700', letterSpacing: -0.6 },
   syncPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingHorizontal: 12,
-    minHeight: 36,
-    borderRadius: 18,
+    paddingHorizontal: 10,
+    minHeight: 34,
+    borderRadius: 17,
     backgroundColor: palette.surface,
   },
   syncDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#CB8A3A' },
-  syncText: { color: palette.muted, fontSize: 12, fontWeight: '600' },
-  statusCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 154,
-    gap: 8,
-    padding: 24,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-  },
-  napBadge: {
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: palette.napSoft,
-  },
-  napBadgeText: { color: palette.nap, fontSize: 11, fontWeight: '800', letterSpacing: 1.1 },
-  status: { color: palette.ink, fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  statusHint: { color: palette.muted, fontSize: 14, textAlign: 'center' },
+  syncText: { color: palette.muted, fontSize: 11, fontWeight: '600' },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -443,35 +439,18 @@ const styles = StyleSheet.create({
   errorText: { flex: 1, color: palette.danger, fontSize: 14 },
   dismissError: { minHeight: 44, justifyContent: 'center' },
   dismissErrorText: { color: palette.danger, fontSize: 13, fontWeight: '700' },
-  actions: { alignItems: 'center', gap: 4 },
-  primaryAction: {
-    minWidth: 180,
-    minHeight: 58,
-    paddingHorizontal: 24,
-    borderRadius: 29,
-    backgroundColor: palette.nap,
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#40377C',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 3,
-  },
-  primaryActionIcon: { color: '#FFFFFF', fontSize: 16 },
-  primaryActionLabel: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-  correctTimeButton: {
+  todayButton: {
+    alignSelf: 'center',
     minHeight: 44,
-    minWidth: 180,
+    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: palette.napSoft,
   },
-  correctTimeText: { color: palette.nap, fontSize: 14, fontWeight: '700' },
-  pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+  todayButtonText: { color: palette.nap, fontSize: 14, fontWeight: '800' },
   disabled: { opacity: 0.45 },
-  dateNavigation: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  dateNavigation: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dateButton: {
     width: 44,
     height: 44,
@@ -482,7 +461,7 @@ const styles = StyleSheet.create({
   },
   dateButtonText: { color: palette.nap, fontSize: 28, lineHeight: 31 },
   dateLabel: { flex: 1, alignItems: 'center' },
-  sectionTitle: { color: palette.ink, fontSize: 20, fontWeight: '700' },
+  sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '700' },
   sectionMeta: { color: palette.muted, fontSize: 13, marginTop: 2 },
   timeline: {
     borderRadius: 20,
@@ -494,12 +473,12 @@ const styles = StyleSheet.create({
   emptyState: { padding: 24, alignItems: 'center' },
   emptyTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },
   emptyText: { color: palette.muted, fontSize: 14, marginTop: 5, textAlign: 'center' },
-  timelineRow: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', paddingLeft: 18 },
+  timelineRow: { minHeight: 76, flexDirection: 'row', alignItems: 'stretch', paddingLeft: 18 },
   rowPressed: { backgroundColor: '#FAF8F5' },
   timelineMarker: { width: 4, borderRadius: 2, backgroundColor: palette.nap, marginVertical: 16 },
   timelineBody: {
     flex: 1,
-    minHeight: 78,
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -512,6 +491,56 @@ const styles = StyleSheet.create({
   rowTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },
   rowTime: { color: palette.muted, fontSize: 13, marginTop: 4 },
   editText: { color: palette.nap, fontSize: 13, fontWeight: '700' },
+  activeTimer: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    overflow: 'hidden',
+    borderRadius: 18,
+    backgroundColor: palette.ink,
+    shadowColor: '#000000',
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  activeTimerRaised: { bottom: 86 },
+  activeTimerBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+  },
+  timerIconCircle: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: palette.nap,
+  },
+  timerIcon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
+  timerCopy: { gap: 2 },
+  timerTitle: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },
+  timerValue: {
+    color: '#FFFFFF',
+    fontSize: 21,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  timerStop: {
+    width: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3A3733',
+  },
+  stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  timerPressed: { opacity: 0.78 },
   undoBanner: {
     position: 'absolute',
     left: 20,

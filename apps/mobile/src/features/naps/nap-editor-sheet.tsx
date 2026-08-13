@@ -1,6 +1,15 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useMemo, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import {
@@ -18,7 +27,7 @@ interface NapEditorSheetProps {
   onCancel: () => void;
   onChange: (editor: NapEditorState) => void;
   onDelete: (() => void) | null;
-  onSave: () => void;
+  onSave: (editor: NapEditorState) => void;
 }
 
 type PickerState = { field: 'startedAt' | 'endedAt'; mode: 'date' | 'time' } | null;
@@ -45,8 +54,10 @@ export function NapEditorSheet({
   onDelete,
   onSave,
 }: NapEditorSheetProps) {
+  const [expanded, setExpanded] = useState(editor.mode === 'edit');
   const [picker, setPicker] = useState<PickerState>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const translation = useRef(new Animated.Value(0)).current;
   const error = useMemo(() => editorIntervalError(editor), [editor]);
   const startedAt =
     editor.mode === 'start'
@@ -58,8 +69,44 @@ export function NapEditorSheet({
     editor.mode === 'stop' ? editor.endedAt : editor.mode === 'edit' ? editor.endedAt : null;
   const canEditStart = editor.mode !== 'stop';
   const canEditEnd = editor.mode !== 'start' && endedAt !== null;
-
   const selectedPickerValue = picker?.field === 'endedAt' && endedAt !== null ? endedAt : startedAt;
+  const actionTime = editor.mode === 'stop' ? editor.endedAt : startedAt;
+  const canSave = !isMutating && error === null && pickerError === null;
+
+  const settleSheet = useCallback(() => {
+    Animated.spring(translation, {
+      toValue: 0,
+      damping: 24,
+      stiffness: 260,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [translation]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderMove: (_event, gesture) => {
+          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.22 : gesture.dy);
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          if (gesture.dy > 72 || gesture.vy > 1.15) {
+            Animated.timing(translation, {
+              toValue: 700,
+              duration: 180,
+              useNativeDriver: true,
+            }).start(onCancel);
+            return;
+          }
+          if (gesture.dy < -38 || gesture.vy < -0.8) setExpanded(true);
+          settleSheet();
+        },
+        onPanResponderTerminate: settleSheet,
+      }),
+    [onCancel, settleSheet, translation],
+  );
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const activePicker = picker;
@@ -81,56 +128,147 @@ export function NapEditorSheet({
     }
   };
 
+  const adjustActionTime = (minutes: number) => {
+    const field = editor.mode === 'stop' ? 'endedAt' : 'startedAt';
+    const proposed = actionTime.getTime() + minutes * 60_000;
+    const next = new Date(Math.min(proposed, Date.now()));
+    setPickerError(null);
+    onChange(updateEditorDate(editor, field, next));
+  };
+
   return (
-    <Modal animationType="slide" onRequestClose={onCancel} transparent>
+    <Modal animationType="fade" onRequestClose={onCancel} transparent>
       <View style={styles.overlay}>
-        <View accessibilityViewIsModal style={styles.sheet}>
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={isMutating}
-              onPress={onCancel}
-              style={styles.headerButton}
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
+        <Pressable
+          accessibilityLabel="Close nap controls"
+          accessibilityRole="button"
+          onPress={onCancel}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View
+          accessibilityViewIsModal
+          style={[styles.sheet, { transform: [{ translateY: translation }] }]}
+        >
+          <Pressable
+            accessibilityHint={
+              expanded
+                ? 'Swipe down to close nap controls'
+                : 'Swipe up for date and time options, or down to close'
+            }
+            accessibilityLabel={expanded ? 'Nap controls expanded' : 'More nap options'}
+            accessibilityRole="adjustable"
+            onPress={() => setExpanded((current) => !current)}
+            style={styles.handleTarget}
+            {...panResponder.panHandlers}
+          >
+            <View style={styles.handle} />
+          </Pressable>
+
+          <View style={styles.hero}>
+            <View style={styles.napIconCircle}>
+              <Text style={styles.napIcon}>z</Text>
+            </View>
             <Text accessibilityRole="header" style={styles.title}>
-              {editorTitle(editor)}
+              {editor.mode === 'stop' ? 'Stop nap' : editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled: isMutating || error !== null || pickerError !== null,
-              }}
-              disabled={isMutating || error !== null || pickerError !== null}
-              onPress={onSave}
-              style={styles.headerButton}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  (isMutating || error !== null || pickerError !== null) && styles.disabledText,
-                ]}
-              >
-                Save
-              </Text>
-            </Pressable>
+            {editor.mode !== 'edit' ? (
+              <Text style={styles.actionTime}>{timeFormatter.format(actionTime)}</Text>
+            ) : null}
           </View>
 
-          <TimeField
-            label="Start"
-            value={startedAt}
-            editable={canEditStart}
-            onPick={(mode) => setPicker({ field: 'startedAt', mode })}
-          />
-          {endedAt !== null ? (
-            <TimeField
-              label="End"
-              value={endedAt}
-              editable={canEditEnd}
-              onPick={(mode) => setPicker({ field: 'endedAt', mode })}
-            />
+          {editor.mode === 'edit' ? null : (
+            <View style={styles.quickActions}>
+              <MinuteButton label="−1 min" onPress={() => adjustActionTime(-1)} />
+              <Pressable
+                accessibilityLabel={editor.mode === 'start' ? 'Start nap' : 'Stop nap'}
+                accessibilityRole="button"
+                accessibilityState={{ busy: isMutating, disabled: !canSave }}
+                disabled={!canSave}
+                onPress={() => onSave(editor)}
+                style={({ pressed }) => [
+                  styles.primaryAction,
+                  !canSave && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.primaryActionIcon}>{editor.mode === 'start' ? '▶' : '■'}</Text>
+                <Text style={styles.primaryActionLabel}>
+                  {editor.mode === 'start' ? 'Start' : 'Stop'}
+                </Text>
+              </Pressable>
+              <MinuteButton label="+1 min" onPress={() => adjustActionTime(1)} />
+            </View>
+          )}
+
+          {!expanded ? <Text style={styles.swipeHint}>Swipe up for date and time</Text> : null}
+
+          {expanded ? (
+            <View style={styles.expandedContent}>
+              <Text style={styles.optionsTitle}>Date and time</Text>
+              <TimeField
+                editable={canEditStart}
+                label="Start"
+                onPick={(mode) => setPicker({ field: 'startedAt', mode })}
+                value={startedAt}
+              />
+              {endedAt !== null ? (
+                <TimeField
+                  editable={canEditEnd}
+                  label="End"
+                  onPick={(mode) => setPicker({ field: 'endedAt', mode })}
+                  value={endedAt}
+                />
+              ) : null}
+
+              {picker !== null ? (
+                <View style={styles.pickerPanel}>
+                  <DateTimePicker
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    maximumDate={new Date()}
+                    mode={picker.mode}
+                    onChange={handlePickerChange}
+                    timeZoneName={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
+                    value={selectedPickerValue}
+                  />
+                  {Platform.OS === 'ios' ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setPicker(null)}
+                      style={styles.doneButton}
+                    >
+                      <Text style={styles.doneText}>Done</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {editor.mode === 'edit' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: isMutating, disabled: !canSave }}
+                  disabled={!canSave}
+                  onPress={() => onSave(editor)}
+                  style={({ pressed }) => [
+                    styles.saveEditButton,
+                    !canSave && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.saveEditText}>Save changes</Text>
+                </Pressable>
+              ) : null}
+
+              {onDelete !== null ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isMutating}
+                  onPress={onDelete}
+                  style={styles.deleteButton}
+                >
+                  <Text style={styles.deleteText}>Delete nap</Text>
+                </Pressable>
+              ) : null}
+            </View>
           ) : null}
 
           {error !== null ? (
@@ -148,42 +286,23 @@ export function NapEditorSheet({
               {pickerError}
             </Text>
           ) : null}
-
-          {picker !== null ? (
-            <View style={styles.pickerPanel}>
-              <DateTimePicker
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                maximumDate={new Date()}
-                mode={picker.mode}
-                onChange={handlePickerChange}
-                timeZoneName={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
-                value={selectedPickerValue}
-              />
-              {Platform.OS === 'ios' ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setPicker(null)}
-                  style={styles.doneButton}
-                >
-                  <Text style={styles.doneText}>Done</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null}
-
-          {onDelete !== null ? (
-            <Pressable
-              accessibilityRole="button"
-              disabled={isMutating}
-              onPress={onDelete}
-              style={styles.deleteButton}
-            >
-              <Text style={styles.deleteText}>Delete nap</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
+  );
+}
+
+function MinuteButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityLabel={`Adjust time ${label}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.minuteButton, pressed && styles.pressed]}
+    >
+      <Text style={styles.minuteIcon}>{label.startsWith('−') ? '↶' : '↷'}</Text>
+      <Text style={styles.minuteLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -225,12 +344,6 @@ function TimeField({
   );
 }
 
-function editorTitle(editor: NapEditorState): string {
-  if (editor.mode === 'start') return 'Start a nap';
-  if (editor.mode === 'stop') return 'Stop nap';
-  return 'Edit nap';
-}
-
 const palette = {
   surface: '#FFFFFF',
   ink: '#292724',
@@ -244,27 +357,79 @@ const palette = {
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(35, 31, 28, 0.38)' },
   sheet: {
-    gap: 16,
+    gap: 12,
     paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
+    paddingTop: 2,
+    paddingBottom: 30,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: palette.surface,
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: -5 },
+    elevation: 12,
   },
-  handle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: palette.border,
+  handleTarget: { minHeight: 34, alignItems: 'center', justifyContent: 'center' },
+  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#C9C2B9' },
+  hero: { alignItems: 'center', gap: 6 },
+  napIconCircle: {
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 23,
+    backgroundColor: palette.accentSoft,
   },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerButton: { minWidth: 64, minHeight: 44, justifyContent: 'center' },
+  napIcon: { color: palette.accent, fontSize: 22, fontWeight: '900' },
   title: { color: palette.ink, fontSize: 18, fontWeight: '700' },
-  cancelText: { color: palette.muted, fontSize: 16 },
-  saveText: { color: palette.accent, fontSize: 16, fontWeight: '700', textAlign: 'right' },
-  disabledText: { opacity: 0.45 },
+  actionTime: {
+    color: palette.ink,
+    fontSize: 32,
+    fontWeight: '500',
+    letterSpacing: -0.7,
+    fontVariant: ['tabular-nums'],
+  },
+  quickActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 28,
+    paddingVertical: 2,
+  },
+  minuteButton: {
+    width: 58,
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  minuteIcon: { color: palette.muted, fontSize: 22 },
+  minuteLabel: { color: palette.muted, fontSize: 11, fontWeight: '600' },
+  primaryAction: {
+    width: 76,
+    height: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 38,
+    backgroundColor: palette.accent,
+    shadowColor: '#40377C',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
+  },
+  primaryActionIcon: { color: '#FFFFFF', fontSize: 20 },
+  primaryActionLabel: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  swipeHint: { color: palette.muted, fontSize: 12, textAlign: 'center', marginTop: 2 },
+  expandedContent: {
+    gap: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.border,
+  },
+  optionsTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   field: { gap: 8 },
   fieldLabel: { color: palette.ink, fontSize: 14, fontWeight: '700' },
   fieldValues: { flexDirection: 'row', gap: 10 },
@@ -279,10 +444,20 @@ const styles = StyleSheet.create({
   timeButton: { flex: 0, minWidth: 104 },
   readOnly: { backgroundColor: '#F3F1EE' },
   valueText: { color: palette.ink, fontSize: 15, fontWeight: '600' },
-  errorText: { color: palette.danger, fontSize: 14 },
   pickerPanel: { alignItems: 'flex-end', padding: 8, borderRadius: 14, backgroundColor: '#F7F4EF' },
   doneButton: { minWidth: 64, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   doneText: { color: palette.accent, fontSize: 15, fontWeight: '700' },
-  deleteButton: { minHeight: 50, alignItems: 'center', justifyContent: 'center' },
+  saveEditButton: {
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 26,
+    backgroundColor: palette.accent,
+  },
+  saveEditText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  deleteButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   deleteText: { color: palette.danger, fontSize: 15, fontWeight: '700' },
+  errorText: { color: palette.danger, fontSize: 14, textAlign: 'center' },
+  disabled: { opacity: 0.45 },
+  pressed: { opacity: 0.78, transform: [{ scale: 0.97 }] },
 });
