@@ -1,0 +1,1747 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Baby Tracker Record Editing Design</title>
+<style>:root {
+  color-scheme: light dark;
+  background-color: transparent !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --main-surface-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --red: light-dark(rgb(186 38 35), rgb(250 66 62));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 10px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 17 17'%3E%3Cpath d='M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z'/%3E%3C/svg%3E");
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-visualize-standalone] {
+  background-color: var(--background) !important;
+}
+
+/* Generic mobile code-block hosts provide light/dark mode but no series palette.
+   AppBlock hosts set all six variables themselves. */
+:root:not([data-app-block-surface]) {
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(#f3883b, #f59a56);
+  --viz-series-3: light-dark(#5dc977, #74d58b);
+  --viz-series-4: light-dark(#eb77b1, #f08fc0);
+  --viz-series-5: light-dark(#9b79ec, #aa91ef);
+  --viz-series-6: light-dark(#3ab9b1, #5acbc2);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html > body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+:root:not([data-app-block-surface]) > body {
+  padding: 12px;
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive > .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align="right"]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align="center"]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget > :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The bundled tooltip runtime owns [data-tooltip]. AppBlock's CSS-only
+   pseudo-tooltip can widen dense grids even while hidden. */
+main [data-tooltip]::after {
+  content: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls > .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls > .form-label > :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--interactive-label-primary-default, var(--primary-foreground));
+  background: var(--interactive-bg-primary-default, var(--foreground));
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(
+    in srgb,
+    var(--interactive-label-primary-default, var(--primary-foreground)) 50%,
+    transparent
+  );
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type="file"] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type="file"]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type="file"]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type="checkbox"]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: "";
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type="radio"]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed="true"], [aria-selected="true"], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget > svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+</style>
+</head>
+<body>
+<div id="arthur-tracker-v3">
+  <style>
+    #arthur-tracker-v3 {
+      --sleep: var(--viz-series-1);
+      --nursing: var(--viz-series-2);
+      --diaper: var(--viz-series-3);
+      --medicine: var(--viz-series-4);
+      --night: var(--viz-series-5);
+      width: 100%;
+      color: var(--foreground);
+    }
+
+    #arthur-tracker-v3 * { box-sizing: border-box; }
+    #arthur-tracker-v3 button { font: inherit; }
+    #arthur-tracker-v3 .review-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 16px; }
+
+    #arthur-tracker-v3 .phone {
+      position: relative;
+      width: min(100%, 390px);
+      min-height: 790px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 34px;
+      background: linear-gradient(180deg, color-mix(in srgb, var(--night) 7%, var(--background)), var(--background) 48%);
+      box-shadow: 0 18px 52px color-mix(in srgb, var(--foreground) 14%, transparent);
+    }
+
+    #arthur-tracker-v3 .status-bar { display: flex; justify-content: space-between; padding: 13px 22px 2px; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .app-header { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; padding: 5px 14px 0; }
+    #arthur-tracker-v3 .date-heading { text-align: center; }
+    #arthur-tracker-v3 .date-heading strong { display: block; font-weight: 500; }
+    #arthur-tracker-v3 .date-heading span { color: var(--muted-foreground); }
+    #arthur-tracker-v3 .icon-button { display: inline-grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 50%; color: var(--foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .icon-button:hover { background: var(--accent); }
+
+    #arthur-tracker-v3 .period-switch { display: grid; grid-template-columns: 1fr 1fr; width: 214px; margin: 6px auto 0; padding: 4px; border-radius: 999px; background: var(--muted); }
+    #arthur-tracker-v3 .period-switch button { border: 0; border-radius: 999px; padding: 7px 12px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .period-switch button[aria-selected="true"] { color: var(--primary-foreground); background: var(--primary); }
+
+    #arthur-tracker-v3 .dial-wrap { display: grid; min-height: 360px; place-items: center; padding: 1px 20px 0; }
+    #arthur-tracker-v3 .dial-stage { position: relative; width: min(100%, 332px); aspect-ratio: 1; }
+    #arthur-tracker-v3 .dial-stage > svg { width: 100%; height: 100%; overflow: visible; }
+    #arthur-tracker-v3 .dial-track { fill: none; stroke: var(--border); stroke-width: 16; stroke-linecap: round; }
+    #arthur-tracker-v3 .dial-inner-track { fill: none; stroke: color-mix(in srgb, var(--border) 72%, transparent); stroke-width: 8; stroke-linecap: round; }
+    #arthur-tracker-v3 .dial-fill { fill: color-mix(in srgb, var(--muted) 28%, transparent); }
+    #arthur-tracker-v3 .hour-tick { stroke: var(--muted-foreground); stroke-width: 1; opacity: .38; }
+    #arthur-tracker-v3 .hour-tick.major { stroke-width: 2; opacity: .7; }
+    #arthur-tracker-v3 .clock-label { fill: var(--muted-foreground); text-anchor: middle; dominant-baseline: middle; }
+    #arthur-tracker-v3 .activity-arc { fill: none; stroke-width: 12; stroke-linecap: round; }
+    #arthur-tracker-v3 .activity-arc.sleep { stroke: var(--sleep); }
+    #arthur-tracker-v3 .activity-arc.night { stroke: var(--night); }
+    #arthur-tracker-v3 .activity-arc.nursing { stroke: var(--nursing); stroke-width: 8; }
+    #arthur-tracker-v3 .activity-arc.waking { stroke: color-mix(in srgb, var(--night) 64%, var(--foreground)); stroke-width: 8; }
+
+    #arthur-tracker-v3 .dial-icons { position: absolute; inset: 0; pointer-events: none; }
+    #arthur-tracker-v3 .dial-token { position: absolute; display: grid; width: 34px; height: 34px; transform: translate(-50%, -50%); place-items: center; border: 2px solid var(--background); border-radius: 50%; color: var(--foreground); background: color-mix(in srgb, var(--token-color) 32%, var(--background)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--token-color) 18%, transparent); cursor: pointer; pointer-events: auto; }
+    #arthur-tracker-v3 .dial-token:hover { box-shadow: 0 0 0 5px color-mix(in srgb, var(--token-color) 28%, transparent); }
+    #arthur-tracker-v3 .dial-token.instant { width: 29px; height: 29px; }
+    #arthur-tracker-v3 .dial-token.active { box-shadow: 0 0 0 4px color-mix(in srgb, var(--token-color) 28%, transparent); }
+    #arthur-tracker-v3 .dial-token.anchor { width: 42px; height: 42px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--token-color) 25%, transparent); }
+    #arthur-tracker-v3 .token-time { position: absolute; top: 45px; left: 50%; transform: translateX(-50%); color: var(--foreground); white-space: nowrap; }
+
+    #arthur-tracker-v3 .dial-center { position: absolute; inset: 28%; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; text-align: center; background: color-mix(in srgb, var(--night) 3%, var(--background)); }
+    #arthur-tracker-v3 .dial-center span { color: var(--muted-foreground); }
+    #arthur-tracker-v3 .dial-center strong { margin-top: 3px; font-size: calc(var(--font-size-base) * 1.58); font-weight: 500; }
+    #arthur-tracker-v3 .dial-center small { margin-top: 3px; color: var(--muted-foreground); }
+
+    #arthur-tracker-v3 .quick-actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 0 8px 14px; }
+    #arthur-tracker-v3 .quick-action { min-width: 0; border: 0; padding: 0 1px; color: var(--foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .action-orb { display: grid; width: 53px; height: 53px; margin: 0 auto 5px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--action-color) 25%, var(--background)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--action-color) 42%, transparent); }
+    #arthur-tracker-v3 .quick-action:hover .action-orb { background: color-mix(in srgb, var(--action-color) 34%, var(--background)); }
+    #arthur-tracker-v3 .quick-action strong,
+    #arthur-tracker-v3 .quick-action small { display: block; overflow: hidden; text-align: center; text-overflow: ellipsis; }
+    #arthur-tracker-v3 .quick-action strong { min-height: 42px; font-weight: 500; }
+    #arthur-tracker-v3 .quick-action small { white-space: nowrap; }
+    #arthur-tracker-v3 .quick-action small { margin-top: 1px; color: var(--muted-foreground); }
+
+    #arthur-tracker-v3 .live-bar { display: none; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; margin: 0 14px 10px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--live-color) 42%, var(--border)); border-radius: 17px; background: color-mix(in srgb, var(--live-color) 14%, var(--card)); box-shadow: 0 8px 22px color-mix(in srgb, var(--foreground) 10%, transparent); }
+    #arthur-tracker-v3 .live-bar.is-visible { display: grid; }
+    #arthur-tracker-v3 .live-kind { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--live-color) 28%, transparent); }
+    #arthur-tracker-v3 .live-main strong,
+    #arthur-tracker-v3 .live-main span { display: block; }
+    #arthur-tracker-v3 .live-main strong { font-weight: 500; }
+    #arthur-tracker-v3 .live-main span { color: var(--muted-foreground); }
+    #arthur-tracker-v3 .stop-button { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--foreground); background: transparent; cursor: pointer; }
+
+    #arthur-tracker-v3 .bottom-nav { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); }
+    #arthur-tracker-v3 .bottom-nav button { display: grid; min-height: 57px; gap: 2px; place-items: center; border: 0; color: var(--muted-foreground); background: transparent; }
+    #arthur-tracker-v3 .bottom-nav button[aria-selected="true"] { color: var(--foreground); }
+
+    #arthur-tracker-v3 .sheet-backdrop { position: absolute; inset: 0; z-index: 7; display: none; background: color-mix(in srgb, var(--foreground) 20%, transparent); }
+    #arthur-tracker-v3 .sheet-backdrop.is-visible { display: block; }
+    #arthur-tracker-v3 .sheet { position: absolute; right: 0; bottom: 0; left: 0; z-index: 8; min-height: 310px; max-height: 690px; transform: translateY(105%); border: 1px solid var(--border); border-bottom: 0; border-radius: 28px 28px 0 0; color: var(--popover-foreground); background: var(--popover); box-shadow: 0 -18px 44px color-mix(in srgb, var(--foreground) 17%, transparent); transition: transform 220ms ease; touch-action: none; }
+    #arthur-tracker-v3 .sheet.is-open { transform: translateY(0); }
+    #arthur-tracker-v3 .sheet.is-dragging { transition: none; }
+    #arthur-tracker-v3 .sheet-handle-area { display: grid; min-height: 35px; place-items: center; cursor: grab; }
+    #arthur-tracker-v3 .sheet-handle { width: 42px; height: 5px; border-radius: 999px; background: var(--muted-foreground); opacity: .54; }
+    #arthur-tracker-v3 .sheet-content { padding: 0 20px 22px; }
+    #arthur-tracker-v3 .sheet-heading { display: grid; justify-items: center; gap: 6px; margin-bottom: 13px; text-align: center; }
+    #arthur-tracker-v3 .sheet-icon { display: grid; width: 62px; height: 62px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--sheet-color) 28%, transparent); }
+    #arthur-tracker-v3 .sheet-heading h3 { margin: 0; font-weight: 500; }
+    #arthur-tracker-v3 .sheet-heading p { margin: 0; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .big-timer { margin: 5px 0 15px; text-align: center; font-size: calc(var(--font-size-base) * 2.3); font-weight: 500; letter-spacing: -.035em; }
+
+    #arthur-tracker-v3 .timer-controls { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 10px; align-items: center; }
+    #arthur-tracker-v3 .round-control { display: grid; justify-items: center; gap: 5px; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .round-control button { display: grid; width: 62px; height: 62px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .round-control.primary button { width: 76px; height: 76px; border: 0; color: var(--primary-foreground); background: var(--primary); }
+
+    #arthur-tracker-v3 .breast-note { margin: 1px 0 13px; text-align: center; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .breast-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; max-width: 260px; margin: 0 auto 15px; }
+    #arthur-tracker-v3 .breast-control { position: relative; display: grid; justify-items: center; gap: 6px; }
+    #arthur-tracker-v3 .breast-control button { display: grid; width: 78px; height: 78px; place-items: center; border: 2px solid color-mix(in srgb, var(--nursing) 70%, var(--border)); border-radius: 50%; color: var(--foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .breast-control.is-active button { color: var(--primary-foreground); background: var(--primary); }
+    #arthur-tracker-v3 .side-chip { position: absolute; top: -5px; right: calc(50% - 46px); display: grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: var(--background); background: var(--foreground); }
+    #arthur-tracker-v3 .breast-control strong { font-weight: 500; }
+    #arthur-tracker-v3 .breast-control small { color: var(--muted-foreground); }
+    #arthur-tracker-v3 .next-label { color: var(--foreground); }
+
+    #arthur-tracker-v3 .feeding-controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: start; max-width: 320px; margin: 0 auto; }
+    #arthur-tracker-v3 .feeding-controls .breast-control button { width: 68px; height: 68px; }
+    #arthur-tracker-v3 .feeding-controls .stop-button { width: 68px; height: 68px; margin-top: 0; }
+    #arthur-tracker-v3 .feeding-controls .side-chip { right: calc(50% - 42px); }
+
+    #arthur-tracker-v3 .diaper-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 18px; }
+    #arthur-tracker-v3 .diaper-choice { display: grid; min-height: 72px; place-items: center; border: 1px solid var(--border); border-radius: 18px; color: var(--foreground); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .diaper-choice[aria-pressed="true"] { color: var(--primary-foreground); background: var(--primary); }
+    #arthur-tracker-v3 .diaper-option { display: grid; gap: 6px; text-align: center; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .diaper-option .diaper-choice { min-height: 64px; }
+
+    #arthur-tracker-v3 .split-editor { margin: 15px 0 8px; }
+    #arthur-tracker-v3 .split-values { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 8px; }
+    #arthur-tracker-v3 .split-values span,
+    #arthur-tracker-v3 .split-values strong { display: block; }
+    #arthur-tracker-v3 .split-values strong { margin-top: 2px; font-weight: 500; }
+    #arthur-tracker-v3 .split-values .right { text-align: right; }
+    #arthur-tracker-v3 .split-editor .form-range { width: 100%; }
+    #arthur-tracker-v3 .split-total { margin-top: 7px; text-align: center; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .edit-note { margin: 10px 0 0; color: var(--muted-foreground); text-align: center; }
+
+    #arthur-tracker-v3 .primary-action { width: 100%; border: 0; border-radius: 16px; padding: 13px 16px; color: var(--primary-foreground); background: var(--primary); font-weight: 500; cursor: pointer; }
+    #arthur-tracker-v3 .expanded-fields { display: none; gap: 10px; margin: 13px 0; }
+    #arthur-tracker-v3 .sheet.is-expanded .expanded-fields { display: grid; }
+    #arthur-tracker-v3 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #arthur-tracker-v3 .field label { display: block; margin-bottom: 5px; color: var(--muted-foreground); }
+    #arthur-tracker-v3 .field input,
+    #arthur-tracker-v3 .field textarea { width: 100%; border: 1px solid var(--input); border-radius: 12px; padding: 9px 10px; color: var(--foreground); background: var(--background); }
+    #arthur-tracker-v3 .pause-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
+    #arthur-tracker-v3 .record-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+    #arthur-tracker-v3 .destructive-action { border: 1px solid var(--destructive); border-radius: 16px; padding: 13px 16px; color: var(--destructive); background: transparent; cursor: pointer; }
+    #arthur-tracker-v3 .swipe-hint { margin: 10px 0 0; text-align: center; color: var(--muted-foreground); }
+
+    @media (max-width: 365px) {
+      #arthur-tracker-v3 .phone { border-radius: 26px; }
+      #arthur-tracker-v3 .action-orb { width: 47px; height: 47px; }
+      #arthur-tracker-v3 .quick-actions { padding-inline: 4px; }
+      #arthur-tracker-v3 .dial-wrap { padding-inline: 25px; }
+      #arthur-tracker-v3 .breast-controls { gap: 12px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) { #arthur-tracker-v3 .sheet { transition: none; } }
+  </style>
+
+  <div class="review-controls" aria-label="Design scenarios">
+    <button class="btn is-selected" type="button" data-scenario="awake" aria-pressed="true">Awake</button>
+    <button class="btn" type="button" data-scenario="night" aria-pressed="false">Night sleep active</button>
+    <button class="btn" type="button" data-scenario="nursing" aria-pressed="false">Nursing</button>
+    <button class="btn" type="button" data-scenario="feeding" aria-pressed="false">Nursing active</button>
+    <button class="btn" type="button" data-scenario="diaper" aria-pressed="false">Diaper</button>
+    <button class="btn" type="button" data-scenario="waking" aria-pressed="false">Night waking active</button>
+    <button class="btn" type="button" data-scenario="concurrent" aria-pressed="false">Night sleep + Nursing</button>
+    <button class="btn" type="button" data-scenario="first-nursing" aria-pressed="false">First-ever Nursing</button>
+  </div>
+
+  <div class="phone" id="phone-shell">
+    <div class="status-bar"><span id="status-time">16:58</span><span>● ◒ 82%</span></div>
+    <header class="app-header">
+      <button class="icon-button" type="button" aria-label="Previous day"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+      <div class="date-heading"><strong>Today</strong><span>Friday, 14 August</span></div>
+      <button class="icon-button" type="button" aria-label="Arthur profile"><i data-lucide="circle-user-round" aria-hidden="true"></i></button>
+    </header>
+
+    <div class="period-switch" role="tablist" aria-label="Day or night cycle">
+      <button type="button" role="tab" aria-selected="true" data-period="day">Day cycle</button>
+      <button type="button" role="tab" aria-selected="false" data-period="night">Night cycle</button>
+    </div>
+
+    <main>
+      <div class="dial-wrap">
+        <div class="dial-stage">
+          <svg viewBox="0 0 332 332" role="img" aria-labelledby="v3-clock-title v3-clock-description">
+            <title id="v3-clock-title">Arthur's proportional activity clock</title>
+            <desc id="v3-clock-description">Separate day and night cycles. The wake-up or bedtime icon marks the cycle start. Every timed action icon marks its start and its arc extends forward by duration.</desc>
+            <circle class="dial-fill" cx="166" cy="166" r="119"></circle>
+            <g id="cycle-tracks"></g>
+            <g id="clock-ticks"></g>
+            <g id="activity-arcs"></g>
+            <g id="clock-labels"></g>
+          </svg>
+          <div class="dial-icons" id="dial-icons"></div>
+          <div class="dial-center"><span id="center-label">Awake for</span><strong id="center-value">42m</strong><small id="center-note">since 16:16</small></div>
+        </div>
+      </div>
+
+      <div class="quick-actions" id="quick-actions" aria-label="Quick actions"></div>
+      <div class="live-bar" id="night-sleep-live-bar" style="--live-color: var(--night)" role="status" aria-label="Night sleep running">
+        <span class="live-kind"><i data-lucide="bed-double" aria-hidden="true"></i></span>
+        <div class="live-main"><strong>Night sleep · 4h 14m</strong><span>Started at 20:20</span></div>
+        <button class="stop-button" id="night-sleep-live-stop" type="button" aria-label="Wake up"><i data-lucide="sunrise" aria-hidden="true"></i></button>
+      </div>
+      <div class="live-bar" id="live-bar" style="--live-color: var(--nursing)" role="status" aria-live="polite">
+        <span class="live-kind" id="live-kind-icon"><i data-lucide="heart" aria-hidden="true"></i></span>
+        <div class="live-main"><strong id="live-title">Nursing · 00:00</strong><span id="live-subtitle">L 00:00 · R 00:00</span></div>
+        <button class="stop-button" id="live-stop" type="button" aria-label="Stop current activity"><i data-lucide="square" aria-hidden="true"></i></button>
+      </div>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button type="button" aria-selected="true"><i data-lucide="clock-3" aria-hidden="true"></i><span>Clock</span></button>
+      <button type="button" aria-selected="false"><i data-lucide="list" aria-hidden="true"></i><span>Log</span></button>
+      <button type="button" aria-selected="false"><i data-lucide="chart-no-axes-column" aria-hidden="true"></i><span>Trends</span></button>
+    </nav>
+
+    <div class="sheet-backdrop" id="sheet-backdrop"></div>
+    <section class="sheet" id="action-sheet" aria-hidden="true" aria-label="Activity drawer">
+      <div class="sheet-handle-area" id="sheet-handle" aria-label="Drag up for details or down to cancel"><div class="sheet-handle"></div></div>
+      <div class="sheet-content" id="sheet-content"></div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      const root = document.getElementById("arthur-tracker-v3");
+      const phone = root.querySelector("#phone-shell");
+      const sheet = root.querySelector("#action-sheet");
+      const backdrop = root.querySelector("#sheet-backdrop");
+      const sheetContent = root.querySelector("#sheet-content");
+      const handle = root.querySelector("#sheet-handle");
+      const quickActions = root.querySelector("#quick-actions");
+      const liveBar = root.querySelector("#live-bar");
+      const nightSleepLiveBar = root.querySelector("#night-sleep-live-bar");
+      let period = "day";
+      let nightActive = false;
+      let currentAction = null;
+      let activeKind = null;
+      let activeSide = null;
+      let mostRecentBreast = "right";
+      let activityStartedAt = null;
+      let leftSeconds = 0;
+      let rightSeconds = 0;
+      let feedingPaused = false;
+      let visibleEvents = [];
+      const recordOverrides = {};
+      const deletedRecords = new Set();
+      let dragStartY = null;
+      let dragDeltaY = 0;
+
+      const baseActions = [
+        { id: "sleep", label: "Sleep", recency: "20:20", icon: "bed-double", color: "var(--night)" },
+        { id: "nap", label: "Nap", recency: "4h 06m", icon: "cloud-sun", color: "var(--sleep)" },
+        { id: "nursing", label: "Nurse", recency: "4h 28m", icon: "heart", color: "var(--nursing)" },
+        { id: "medicine", label: "Medicine", recency: "16h 20m", icon: "pill", color: "var(--medicine)" },
+        { id: "diaper", label: "Diaper", recency: "10h 04m", icon: "baby", color: "var(--diaper)" }
+      ];
+
+      const nightActions = [
+        { id: "wakeup", label: "Wake up", recency: "07:00", icon: "sunrise", color: "var(--night)" },
+        { id: "waking", label: "Night waking", recency: "1h 12m", icon: "cloud-lightning", color: "var(--sleep)" },
+        { id: "nursing", label: "Nurse", recency: "<1m", icon: "heart", color: "var(--nursing)" },
+        { id: "medicine", label: "Medicine", recency: "16h 20m", icon: "pill", color: "var(--medicine)" },
+        { id: "diaper", label: "Diaper", recency: "10h 04m", icon: "baby", color: "var(--diaper)" }
+      ];
+
+      const nightWakingActions = [
+        { id: "wakeup", label: "Wake up", recency: "07:00", icon: "sunrise", color: "var(--night)" },
+        { id: "fell-asleep", label: "Fell asleep again", recency: "Now", icon: "bed-double", color: "var(--sleep)" },
+        { id: "nursing", label: "Nurse", recency: "<1m", icon: "heart", color: "var(--nursing)" },
+        { id: "medicine", label: "Medicine", recency: "16h 20m", icon: "pill", color: "var(--medicine)" },
+        { id: "diaper", label: "Diaper", recency: "10h 04m", icon: "baby", color: "var(--diaper)" }
+      ];
+
+      const actionMeta = {
+        sleep: { title: "Night sleep", icon: "bed-double", color: "var(--night)", cta: "Start night sleep" },
+        nap: { title: "Nap", icon: "cloud-sun", color: "var(--sleep)", cta: "Start nap" },
+        waking: { title: "Night waking", icon: "cloud-lightning", color: "var(--sleep)", cta: "Start night waking" },
+        wakeup: { title: "Wake up", icon: "sunrise", color: "var(--night)", cta: "End night sleep" },
+        medicine: { title: "Medicine", icon: "pill", color: "var(--medicine)", cta: "Save medicine" }
+      };
+
+      function pad(value) { return String(value).padStart(2, "0"); }
+      function elapsedText(seconds) { const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = seconds % 60; return (h ? pad(h) + ":" : "") + pad(m) + ":" + pad(s); }
+      function clockNow() { const now = new Date(); return pad(now.getHours()) + ":" + pad(now.getMinutes()); }
+      function formatHour(value) { const totalMinutes = Math.round(((value + 24) % 24) * 60); const hours = Math.floor(totalMinutes / 60) % 24; const minutes = totalMinutes % 60; return pad(hours) + ":" + pad(minutes); }
+      function parseTime(value) { const parts = value.split(":").map(Number); return parts[0] + parts[1] / 60; }
+      function polar(radius, angle) { const radians = (angle - 90) * Math.PI / 180; return { x: 166 + radius * Math.cos(radians), y: 166 + radius * Math.sin(radians) }; }
+      function cycleConfig() { return period === "day" ? { start: 7, end: 20.33, startTitle: "Wake up", endTitle: "Bedtime" } : { start: 20.33, end: 31, startTitle: "Bedtime", endTitle: "Wake up" }; }
+      function normalizedCycleHour(hour) { const config = cycleConfig(); let normalized = hour; while (normalized < config.start) { normalized += 24; } return normalized; }
+      function cycleAngle(hour) { const config = cycleConfig(); const normalized = normalizedCycleHour(hour); return 225 + ((normalized - config.start) / (config.end - config.start)) * 270; }
+
+      function arcPath(radius, startHour, endHour) {
+        const startAngle = cycleAngle(startHour);
+        let endAngle = cycleAngle(endHour);
+        if (endAngle - startAngle < 2.5) { endAngle = startAngle + 2.5; }
+        const start = polar(radius, startAngle);
+        const end = polar(radius, endAngle);
+        const large = endAngle - startAngle > 180 ? 1 : 0;
+        return "M " + start.x.toFixed(2) + " " + start.y.toFixed(2) + " A " + radius + " " + radius + " 0 " + large + " 1 " + end.x.toFixed(2) + " " + end.y.toFixed(2);
+      }
+
+      function timedEvent(id, title, start, end, category, icon, active) { return { id: id, title: title, start: start, end: end, category: category, icon: icon, active: Boolean(active), instant: false, radius: category === "sleep" || category === "night" ? 130 : 108 }; }
+      function instantEvent(id, title, time, category, icon) { return { id: id, title: title, start: time, end: time, category: category, icon: icon, active: false, instant: true, radius: 108 }; }
+
+      function recordDurationSeconds(record) {
+        let end = record.end;
+        while (end < record.start) { end += 24; }
+        return Math.max(60, Math.round((end - record.start) * 3600));
+      }
+
+      function sideDuration(seconds) {
+        const safeSeconds = Math.max(0, Math.round(seconds));
+        const hours = Math.floor(safeSeconds / 3600);
+        const minutes = Math.floor((safeSeconds % 3600) / 60);
+        const remainder = safeSeconds % 60;
+        return (hours ? pad(hours) + "h " : "") + pad(minutes) + "m " + pad(remainder) + "s";
+      }
+
+      function renderClock() {
+        const config = cycleConfig();
+        let ticks = "";
+        for (let i = 0; i <= 18; i += 1) {
+          const angle = 225 + (i / 18) * 270;
+          const a = polar(i % 3 === 0 ? 139 : 142, angle);
+          const b = polar(146, angle);
+          ticks += '<line class="hour-tick' + (i % 3 === 0 ? ' major' : '') + '" x1="' + a.x.toFixed(2) + '" y1="' + a.y.toFixed(2) + '" x2="' + b.x.toFixed(2) + '" y2="' + b.y.toFixed(2) + '"></line>';
+        }
+        root.querySelector("#clock-ticks").innerHTML = ticks;
+        root.querySelector("#clock-labels").innerHTML = "";
+        root.querySelector("#cycle-tracks").innerHTML = '<path class="dial-track" d="' + arcPath(130, config.start, config.end) + '"></path><path class="dial-inner-track" d="' + arcPath(108, config.start, config.end) + '"></path>';
+
+        const events = period === "day" ? [
+          Object.assign(instantEvent("day-wakeup-1", "Wake up", 7, "sleep", "sunrise"), { anchor: "start", radius: 130 }),
+          timedEvent("day-nap-1", "Nap", 10.08, 11.13, "sleep", "cloud-sun"),
+          Object.assign(timedEvent("day-nursing-1", "Nursing", 12.7, 12.9333, "nursing", "heart"), { leftSeconds: 480, rightSeconds: 360 }),
+          Object.assign(instantEvent("day-diaper-1", "Wet diaper", 14.17, "diaper", "baby"), { diaperType: "wet" }),
+          timedEvent("day-nap-2", "Nap", 15.37, 16.07, "sleep", "cloud-sun"),
+          instantEvent("day-medicine-1", "Medicine", 16.33, "medicine", "pill"),
+          Object.assign(instantEvent("day-bedtime-1", "Bedtime", 20.33, "night", "bed-double"), { anchor: "end", radius: 130 })
+        ] : [
+          Object.assign(timedEvent("night-sleep-1", "Night sleep", 20.33, 24.57, "night", "bed-double", nightActive), { anchor: "start" }),
+          timedEvent("night-waking-1", "Night waking", activeKind === "waking" ? 24.0167 : 22.48, activeKind === "waking" ? 24.5667 : 22.62, "waking", "cloud-lightning", activeKind === "waking"),
+          Object.assign(timedEvent("night-nursing-1", "Nursing", 23.83, activeKind === "nursing" ? 23.83 + (leftSeconds + rightSeconds) / 3600 : 0.02, "nursing", "heart", activeKind === "nursing"), { leftSeconds: activeKind === "nursing" ? leftSeconds : 360, rightSeconds: activeKind === "nursing" ? rightSeconds : 300 }),
+          Object.assign(instantEvent("night-diaper-1", "Wet diaper", 26.08, "diaper", "baby"), { diaperType: "wet" }),
+          Object.assign(timedEvent("night-nursing-2", "Nursing", 27.18, 27.35, "nursing", "heart"), { leftSeconds: 0, rightSeconds: 612 }),
+          Object.assign(instantEvent("night-wakeup-1", "Wake up", 31, "sleep", "sunrise"), { anchor: "end", radius: 130 })
+        ];
+
+        visibleEvents = events.map(function (event) { return Object.assign({}, event, recordOverrides[event.id] || {}); }).filter(function (event) { return !deletedRecords.has(event.id); });
+
+        root.querySelector("#activity-arcs").innerHTML = visibleEvents.filter(function (event) { return !event.instant; }).map(function (event) { return '<path class="activity-arc ' + event.category + '" d="' + arcPath(event.radius, event.start, event.end) + '"></path>'; }).join("");
+        const colors = { sleep: "var(--sleep)", night: "var(--night)", nursing: "var(--nursing)", waking: "var(--sleep)", diaper: "var(--diaper)", medicine: "var(--medicine)" };
+        root.querySelector("#dial-icons").innerHTML = visibleEvents.map(function (event, index) {
+          const point = polar(event.radius, cycleAngle(event.start));
+          return '<button class="dial-token' + (event.instant ? ' instant' : '') + (event.active ? ' active' : '') + (event.anchor ? ' anchor' : '') + '" type="button" data-record-index="' + index + '" aria-label="Edit ' + event.title + ' record" style="left:' + (point.x / 332 * 100).toFixed(2) + '%;top:' + (point.y / 332 * 100).toFixed(2) + '%;--token-color:' + colors[event.category] + '"><i data-lucide="' + event.icon + '" aria-hidden="true"></i>' + (event.anchor ? '<span class="token-time text-small">' + formatHour(event.start) + '</span>' : '') + '</button>';
+        }).join("");
+        root.querySelectorAll("[data-record-index]").forEach(function (button) { button.addEventListener("click", function () { openRecordEditor(visibleEvents[Number(button.dataset.recordIndex)]); }); });
+        if (typeof lucide !== "undefined") { lucide.createIcons({ attrs: { width: 16, height: 16 } }); }
+      }
+
+      function renderActions() {
+        const actions = activeKind === "waking" ? nightWakingActions : nightActive ? nightActions : baseActions;
+        quickActions.innerHTML = actions.map(function (item) { return '<button class="quick-action" type="button" data-action="' + item.id + '" style="--action-color:' + item.color + '"><span class="action-orb"><i data-lucide="' + item.icon + '" aria-hidden="true"></i></span><strong>' + item.label + '</strong><small>' + item.recency + '</small></button>'; }).join("");
+        quickActions.querySelectorAll("[data-action]").forEach(function (button) { button.addEventListener("click", function () { if (button.dataset.action === "fell-asleep") { stopActivity(); } else { openAction(button.dataset.action); } }); });
+        if (typeof lucide !== "undefined") { lucide.createIcons({ attrs: { width: 16, height: 16 } }); }
+      }
+
+      function setPeriod(nextPeriod) {
+        period = nextPeriod;
+        root.querySelectorAll("[data-period]").forEach(function (button) { button.setAttribute("aria-selected", String(button.dataset.period === period)); });
+        renderClock();
+      }
+
+      function renderHomeState() {
+        root.querySelector("#status-time").textContent = nightActive ? "00:34" : "16:58";
+        root.querySelector("#center-label").textContent = activeKind === "waking" ? "Awake tonight" : nightActive ? "Asleep for" : "Awake for";
+        root.querySelector("#center-value").textContent = activeKind === "waking" ? "00:33" : nightActive ? "4h 14m" : "42m";
+        root.querySelector("#center-note").textContent = activeKind === "waking" ? "night waking active" : nightActive ? "night sleep active" : "since 16:16";
+        renderActions();
+        renderClock();
+        renderLiveControllers();
+      }
+
+      function renderLiveControllers() {
+        const showContainingSleep = nightActive && activeKind === "nursing";
+        nightSleepLiveBar.classList.toggle("is-visible", showContainingSleep);
+        liveBar.classList.toggle("is-visible", Boolean(activeKind));
+        if (!activeKind) { return; }
+        const meta = {
+          nursing: { icon: "heart", color: "var(--nursing)", title: "Nursing · " + elapsedText(leftSeconds + rightSeconds), subtitle: "L " + elapsedText(leftSeconds) + " · R " + elapsedText(rightSeconds), stop: "Stop nursing" },
+          sleep: { icon: "bed-double", color: "var(--night)", title: "Night sleep · 00:00", subtitle: "Running now", stop: "Wake up" },
+          nap: { icon: "cloud-sun", color: "var(--sleep)", title: "Nap · 00:00", subtitle: "Running now", stop: "Stop nap" },
+          waking: { icon: "cloud-lightning", color: "var(--sleep)", title: "Night waking · 00:33", subtitle: "Awake tonight", stop: "Fell asleep again" }
+        }[activeKind];
+        if (!meta) { return; }
+        liveBar.style.setProperty("--live-color", meta.color);
+        root.querySelector("#live-kind-icon").innerHTML = '<i data-lucide="' + meta.icon + '" aria-hidden="true"></i>';
+        root.querySelector("#live-title").textContent = meta.title;
+        root.querySelector("#live-subtitle").textContent = meta.subtitle;
+        root.querySelector("#live-stop").setAttribute("aria-label", meta.stop);
+        root.querySelector("#live-stop").innerHTML = '<i data-lucide="' + (activeKind === "waking" ? 'bed-double' : 'square') + '" aria-hidden="true"></i>';
+        if (typeof lucide !== "undefined") { lucide.createIcons({ attrs: { width: 16, height: 16 } }); }
+      }
+
+      function detailsMarkup(kind) {
+        if (kind === "nursing") {
+          return '<div class="expanded-fields"><div class="field-row"><div class="field"><label for="left-adjust">Left duration</label><input id="left-adjust" type="time" step="1" value="00:00:00"></div><div class="field"><label for="right-adjust">Right duration</label><input id="right-adjust" type="time" step="1" value="00:00:00"></div></div><div class="pause-row"><div class="field"><label for="pause-start">Pause start</label><input id="pause-start" type="time"></div><div class="field"><label for="pause-duration">Duration</label><input id="pause-duration" type="time" step="1"></div><button class="btn" type="button">Add pause</button></div></div>';
+        }
+        return '<div class="expanded-fields"><div class="field-row"><div class="field"><label for="action-date">Date</label><input id="action-date" type="date" value="2026-08-14"></div><div class="field"><label for="action-time">Start time</label><input id="action-time" type="time" value="' + clockNow() + '"></div></div></div>';
+      }
+
+      function nursingIdleMarkup() {
+        const nextBreast = mostRecentBreast ? (mostRecentBreast === "left" ? "right" : "left") : null;
+        function sideMarkup(side, shortLabel) {
+          if (!mostRecentBreast) { return '<div class="breast-control"><span class="side-chip">' + shortLabel + '</span><button type="button" data-start-side="' + side + '" aria-label="Start nursing on ' + side + ' breast"><i data-lucide="play" aria-hidden="true"></i></button><strong>' + (side === "left" ? "Left" : "Right") + '</strong><small>No previous feed</small></div>'; }
+          const isNext = side === nextBreast;
+          return '<div class="breast-control"><span class="side-chip">' + shortLabel + '</span><button type="button" data-start-side="' + side + '" aria-label="Start nursing on ' + side + ' breast"><i data-lucide="play" aria-hidden="true"></i></button><strong class="' + (isNext ? 'next-label' : '') + '">' + (isNext ? 'Next' : 'Last') + '</strong><small>' + (isNext ? 'Recommended' : 'Most recent') + '</small></div>';
+        }
+        return '<div class="sheet-heading" style="--sheet-color:var(--nursing)"><span class="sheet-icon"><i data-lucide="heart" aria-hidden="true"></i></span><h3>Nursing</h3><p>Tap the breast Arthur will start on</p></div><div class="breast-controls">' + sideMarkup("left", "L") + sideMarkup("right", "R") + '</div>' + detailsMarkup("nursing") + '<p class="swipe-hint text-small">Swipe up to adjust each side or add a pause</p>';
+      }
+
+      function nursingActiveMarkup() {
+        return '<div class="sheet-heading" style="--sheet-color:var(--nursing)"><span class="sheet-icon"><i data-lucide="heart" aria-hidden="true"></i></span><h3>Nursing</h3></div><div class="big-timer" id="total-feed-time">' + elapsedText(leftSeconds + rightSeconds) + '</div><div class="feeding-controls"><div class="breast-control' + (activeSide === 'left' && !feedingPaused ? ' is-active' : '') + '"><span class="side-chip">L</span><button type="button" data-feed-side="left" aria-label="' + (activeSide === 'left' && !feedingPaused ? 'Pause left breast timer' : 'Start left breast timer') + '"><i data-lucide="' + (activeSide === 'left' && !feedingPaused ? 'pause' : 'play') + '" aria-hidden="true"></i></button><strong id="left-time">' + elapsedText(leftSeconds) + '</strong></div><div class="breast-control' + (activeSide === 'right' && !feedingPaused ? ' is-active' : '') + '"><span class="side-chip">R</span><button type="button" data-feed-side="right" aria-label="' + (activeSide === 'right' && !feedingPaused ? 'Pause right breast timer' : 'Start right breast timer') + '"><i data-lucide="' + (activeSide === 'right' && !feedingPaused ? 'pause' : 'play') + '" aria-hidden="true"></i></button><strong id="right-time">' + elapsedText(rightSeconds) + '</strong></div><button class="stop-button" id="stop-feeding" type="button" aria-label="Stop nursing"><i data-lucide="square" aria-hidden="true"></i></button></div>' + detailsMarkup("nursing") + '<p class="swipe-hint text-small">Swipe up to adjust each side or add a pause</p>';
+      }
+
+      function diaperMarkup() {
+        return '<div class="sheet-heading" style="--sheet-color:var(--diaper)"><span class="sheet-icon"><i data-lucide="baby" aria-hidden="true"></i></span><h3>Diaper</h3><p>What did you find?</p></div><div class="diaper-grid" role="group" aria-label="Diaper type"><button class="diaper-choice" type="button" aria-label="Wet" data-tooltip="Wet" aria-pressed="true"><i data-lucide="droplet" aria-hidden="true"></i></button><button class="diaper-choice" type="button" aria-label="Dirty" data-tooltip="Dirty" aria-pressed="false"><i data-lucide="swirl" aria-hidden="true"></i></button><button class="diaper-choice" type="button" aria-label="Mixed" data-tooltip="Wet and dirty" aria-pressed="false"><i data-lucide="combine" aria-hidden="true"></i></button><button class="diaper-choice" type="button" aria-label="Dry" data-tooltip="Dry" aria-pressed="false"><i data-lucide="circle-dashed" aria-hidden="true"></i></button></div>' + detailsMarkup("diaper") + '<button class="primary-action" id="save-diaper" type="button">Save diaper</button><p class="swipe-hint text-small">Swipe up to change the timestamp</p>';
+      }
+
+      function medicineMarkup() {
+        return '<div class="sheet-heading" style="--sheet-color:var(--medicine)"><span class="sheet-icon"><i data-lucide="pill" aria-hidden="true"></i></span><h3>Medicine</h3><p>What did Arthur take?</p></div><div class="field"><label for="medicine-note">Medicine and note</label><textarea id="medicine-note" rows="3" placeholder="For example: paracetamol 2.5 ml"></textarea></div>' + detailsMarkup("medicine") + '<button class="primary-action" id="save-medicine" type="button">Save medicine</button><p class="swipe-hint text-small">Swipe up to change the timestamp</p>';
+      }
+
+      function timerMarkup(kind) {
+        const meta = actionMeta[kind];
+        const isWakeup = kind === "wakeup";
+        return '<div class="sheet-heading" style="--sheet-color:' + meta.color + '"><span class="sheet-icon"><i data-lucide="' + meta.icon + '" aria-hidden="true"></i></span><h3>' + meta.title + '</h3></div><div class="big-timer">00:00</div><div class="timer-controls"><div class="round-control"><button type="button" data-minute="-1" aria-label="Move start one minute earlier"><i data-lucide="rotate-ccw" aria-hidden="true"></i></button><span>−1 min</span></div><div class="round-control primary"><button type="button" id="confirm-timer" aria-label="' + meta.cta + '"><i data-lucide="' + (isWakeup ? 'square' : 'play') + '" aria-hidden="true"></i></button><span>' + (isWakeup ? 'Finish' : 'Start') + '</span></div><div class="round-control"><button type="button" data-minute="1" aria-label="Move start one minute later"><i data-lucide="rotate-cw" aria-hidden="true"></i></button><span>+1 min</span></div></div>' + detailsMarkup(kind) + '<p class="swipe-hint text-small">Swipe up for exact date and time</p>';
+      }
+
+      function nursingRecordEditorMarkup(record) {
+        const pauseSeconds = Number(record.pauseSeconds || 0);
+        const totalSeconds = Math.max(60, recordDurationSeconds(record) - pauseSeconds);
+        const recordedTotal = Math.max(1, Number(record.leftSeconds || 0) + Number(record.rightSeconds || 0));
+        const leftShare = Math.round(totalSeconds * Number(record.leftSeconds || 0) / recordedTotal);
+        const rightShare = totalSeconds - leftShare;
+        return '<div class="sheet-heading" style="--sheet-color:var(--nursing)"><span class="sheet-icon"><i data-lucide="heart" aria-hidden="true"></i></span><h3>Edit nursing</h3><p>' + formatHour(record.start) + '–' + formatHour(record.end) + '</p></div>' +
+          '<div class="field-row"><div class="field"><label for="record-start">Start</label><input id="record-start" type="time" value="' + formatHour(record.start) + '"></div><div class="field"><label for="record-end">End</label><input id="record-end" type="time" value="' + formatHour(record.end) + '"></div></div>' +
+          '<div class="split-editor"><div class="split-values"><span>Left<strong id="split-left-value">' + sideDuration(leftShare) + '</strong></span><span class="right">Right<strong id="split-right-value">' + sideDuration(rightShare) + '</strong></span></div><label class="sr-only" for="nursing-split">Split total nursing time between left and right breast</label><input class="form-range" id="nursing-split" type="range" min="0" max="' + totalSeconds + '" step="1" value="' + leftShare + '"><div class="split-total text-small">Total <strong id="split-total-value">' + sideDuration(totalSeconds) + '</strong></div></div>' +
+          '<button class="btn btn-block" id="add-record-pause" type="button"><i data-lucide="pause" aria-hidden="true"></i> ' + (pauseSeconds ? 'Remove 30 sec pause' : 'Add 30 sec pause') + '</button><p class="edit-note text-small" id="pause-status">' + (pauseSeconds ? '30 sec pause excluded from feeding time.' : 'Changing start or end recalculates the total; the slider redistributes it.') + '</p>' +
+          '<div class="record-actions"><button class="destructive-action" id="delete-record" type="button">Delete</button><button class="primary-action" id="save-record" type="button">Save changes</button></div>';
+      }
+
+      function diaperRecordEditorMarkup(record) {
+        const selectedType = record.diaperType || "wet";
+        const choices = [
+          { id: "dry", label: "Dry", icon: "circle-dashed" },
+          { id: "wet", label: "Wet", icon: "droplet" },
+          { id: "dirty", label: "Dirty", icon: "swirl" },
+          { id: "mixed", label: "Mixed", icon: "combine" }
+        ];
+        return '<div class="sheet-heading" style="--sheet-color:var(--diaper)"><span class="sheet-icon"><i data-lucide="baby" aria-hidden="true"></i></span><h3>Edit diaper</h3><p>' + formatHour(record.start) + '</p></div>' +
+          '<div class="field"><label for="record-time">Time</label><input id="record-time" type="time" value="' + formatHour(record.start) + '"></div>' +
+          '<div class="diaper-grid" role="group" aria-label="Diaper type">' + choices.map(function (choice) { return '<div class="diaper-option"><button class="diaper-choice" type="button" data-edit-diaper-type="' + choice.id + '" aria-label="' + choice.label + '" aria-pressed="' + String(choice.id === selectedType) + '"><i data-lucide="' + choice.icon + '" aria-hidden="true"></i></button><span>' + choice.label + '</span></div>'; }).join("") + '</div>' +
+          '<div class="field"><label for="diaper-weight">Diaper weight (grams)</label><input id="diaper-weight" type="number" min="0" inputmode="numeric" placeholder="Optional" value="' + (record.diaperWeight || "") + '"></div><div class="field"><label for="record-comment">Comment</label><textarea id="record-comment" rows="2" placeholder="Optional">' + (record.comment || "") + '</textarea></div>' +
+          '<div class="record-actions"><button class="destructive-action" id="delete-record" type="button">Delete</button><button class="primary-action" id="save-record" type="button">Save changes</button></div>';
+      }
+
+      function recordEditorMarkup(record) {
+        if (record.category === "nursing") { return nursingRecordEditorMarkup(record); }
+        if (record.category === "diaper") { return diaperRecordEditorMarkup(record); }
+        const colors = { sleep: "var(--sleep)", night: "var(--night)", nursing: "var(--nursing)", waking: "var(--sleep)", diaper: "var(--diaper)", medicine: "var(--medicine)" };
+        const details = { "day-medicine-1": "Paracetamol 2.5 ml" };
+        const fields = record.instant
+          ? '<div class="field"><label for="record-time">Time</label><input id="record-time" type="time" value="' + formatHour(record.start) + '"></div>'
+          : '<div class="field-row"><div class="field"><label for="record-start">Start</label><input id="record-start" type="time" value="' + formatHour(record.start) + '"></div><div class="field"><label for="record-end">End</label><input id="record-end" type="time" value="' + formatHour(record.end) + '"></div></div>';
+        return '<div class="sheet-heading" style="--sheet-color:' + colors[record.category] + '"><span class="sheet-icon"><i data-lucide="' + record.icon + '" aria-hidden="true"></i></span><h3>Edit ' + record.title + '</h3><p>' + (details[record.id] || (record.instant ? 'Instant record' : formatHour(record.start) + '–' + formatHour(record.end))) + '</p></div>' + fields + '<div class="record-actions"><button class="destructive-action" id="delete-record" type="button">Delete</button><button class="primary-action" id="save-record" type="button">Save changes</button></div>';
+      }
+
+      function openRecordEditor(record) {
+        currentAction = "record";
+        sheetContent.innerHTML = recordEditorMarkup(record);
+        sheet.classList.add("is-open");
+        sheet.classList.add("is-expanded");
+        backdrop.classList.add("is-visible");
+        sheet.setAttribute("aria-hidden", "false");
+        const save = sheetContent.querySelector("#save-record");
+        const remove = sheetContent.querySelector("#delete-record");
+        const split = sheetContent.querySelector("#nursing-split");
+        const splitLeft = sheetContent.querySelector("#split-left-value");
+        const splitRight = sheetContent.querySelector("#split-right-value");
+        const splitTotal = sheetContent.querySelector("#split-total-value");
+        let pauseSeconds = Number(record.pauseSeconds || 0);
+        function syncSplitLabels() {
+          if (!split) { return; }
+          const total = Number(split.max);
+          const left = Number(split.value);
+          splitLeft.textContent = sideDuration(left);
+          splitRight.textContent = sideDuration(total - left);
+          splitTotal.textContent = sideDuration(total);
+        }
+        function syncSplitTotal() {
+          if (!split) { return; }
+          const start = parseTime(sheetContent.querySelector("#record-start").value);
+          let end = parseTime(sheetContent.querySelector("#record-end").value);
+          while (end < start) { end += 24; }
+          const previousTotal = Math.max(1, Number(split.max));
+          const previousRatio = Number(split.value) / previousTotal;
+          const total = Math.max(60, Math.round((end - start) * 3600) - pauseSeconds);
+          split.max = String(total);
+          split.value = String(Math.round(total * previousRatio));
+          syncSplitLabels();
+        }
+        if (split) {
+          split.addEventListener("input", syncSplitLabels);
+          sheetContent.querySelector("#record-start").addEventListener("change", syncSplitTotal);
+          sheetContent.querySelector("#record-end").addEventListener("change", syncSplitTotal);
+          syncSplitLabels();
+        }
+        sheetContent.querySelectorAll("[data-edit-diaper-type]").forEach(function (button) { button.addEventListener("click", function () { sheetContent.querySelectorAll("[data-edit-diaper-type]").forEach(function (peer) { peer.setAttribute("aria-pressed", String(peer === button)); }); }); });
+        const addPause = sheetContent.querySelector("#add-record-pause");
+        if (addPause) { addPause.addEventListener("click", function () { pauseSeconds = pauseSeconds ? 0 : 30; addPause.textContent = pauseSeconds ? "Remove 30 sec pause" : "Add 30 sec pause"; sheetContent.querySelector("#pause-status").textContent = pauseSeconds ? "30 sec pause excluded from feeding time." : "Pause removed; the full interval is feeding time."; syncSplitTotal(); }); }
+        save.addEventListener("click", function () {
+          if (record.category === "nursing") {
+            const start = parseTime(sheetContent.querySelector("#record-start").value);
+            const end = parseTime(sheetContent.querySelector("#record-end").value);
+            const total = Number(split.max);
+            const left = Number(split.value);
+            recordOverrides[record.id] = { start: start, end: end, leftSeconds: left, rightSeconds: total - left, pauseSeconds: pauseSeconds };
+          } else if (record.category === "diaper") {
+            const time = parseTime(sheetContent.querySelector("#record-time").value);
+            const selected = sheetContent.querySelector("[data-edit-diaper-type][aria-pressed='true']");
+            const diaperType = selected ? selected.dataset.editDiaperType : "wet";
+            const titles = { dry: "Dry diaper", wet: "Wet diaper", dirty: "Dirty diaper", mixed: "Mixed diaper" };
+            recordOverrides[record.id] = { start: time, end: time, diaperType: diaperType, title: titles[diaperType], diaperWeight: sheetContent.querySelector("#diaper-weight").value, comment: sheetContent.querySelector("#record-comment").value };
+          } else if (record.instant) {
+            const time = parseTime(sheetContent.querySelector("#record-time").value);
+            recordOverrides[record.id] = { start: time, end: time };
+          } else {
+            recordOverrides[record.id] = { start: parseTime(sheetContent.querySelector("#record-start").value), end: parseTime(sheetContent.querySelector("#record-end").value) };
+          }
+          closeSheet();
+          renderClock();
+        });
+        remove.addEventListener("click", function () { deletedRecords.add(record.id); closeSheet(); renderClock(); });
+        if (typeof lucide !== "undefined") { lucide.createIcons({ attrs: { width: 16, height: 16 } }); }
+      }
+
+      function openAction(kind) {
+        currentAction = kind;
+        if (kind === "nursing") { sheetContent.innerHTML = activeKind === "nursing" ? nursingActiveMarkup() : nursingIdleMarkup(); }
+        else if (kind === "diaper") { sheetContent.innerHTML = diaperMarkup(); }
+        else if (kind === "medicine") { sheetContent.innerHTML = medicineMarkup(); }
+        else { sheetContent.innerHTML = timerMarkup(kind); }
+        bindSheetControls();
+        sheet.classList.add("is-open");
+        backdrop.classList.add("is-visible");
+        sheet.setAttribute("aria-hidden", "false");
+        if (typeof lucide !== "undefined") { lucide.createIcons({ attrs: { width: 16, height: 16 } }); }
+      }
+
+      function bindSheetControls() {
+        sheetContent.querySelectorAll("[data-start-side]").forEach(function (button) { button.addEventListener("click", function () { startNursing(button.dataset.startSide); }); });
+        sheetContent.querySelectorAll("[data-feed-side]").forEach(function (button) { button.addEventListener("click", function () { const side = button.dataset.feedSide; if (activeSide === side && !feedingPaused) { feedingPaused = true; } else { activeSide = side; feedingPaused = false; } openAction("nursing"); }); });
+        sheetContent.querySelectorAll(".diaper-choice").forEach(function (button) { button.addEventListener("click", function () { sheetContent.querySelectorAll(".diaper-choice").forEach(function (peer) { peer.setAttribute("aria-pressed", String(peer === button)); }); }); });
+        const stop = sheetContent.querySelector("#stop-feeding");
+        if (stop) { stop.addEventListener("click", stopActivity); }
+        const saveDiaper = sheetContent.querySelector("#save-diaper");
+        if (saveDiaper) { saveDiaper.addEventListener("click", closeSheet); }
+        const saveMedicine = sheetContent.querySelector("#save-medicine");
+        if (saveMedicine) { saveMedicine.addEventListener("click", closeSheet); }
+        const confirm = sheetContent.querySelector("#confirm-timer");
+        if (confirm) { confirm.addEventListener("click", function () { if (currentAction === "wakeup") { nightActive = false; setPeriod("day"); stopActivity(); renderHomeState(); } else { startTimedActivity(currentAction); } }); }
+      }
+
+      function startNursing(side) {
+        activeKind = "nursing";
+        activeSide = side;
+        activityStartedAt = Date.now();
+        feedingPaused = false;
+        liveBar.style.setProperty("--live-color", "var(--nursing)");
+        liveBar.classList.add("is-visible");
+        openAction("nursing");
+        renderHomeState();
+      }
+
+      function startTimedActivity(kind) {
+        activeKind = kind;
+        activityStartedAt = Date.now();
+        if (kind === "sleep") { nightActive = true; setPeriod("night"); }
+        liveBar.style.setProperty("--live-color", kind === "waking" ? "var(--sleep)" : kind === "sleep" ? "var(--night)" : "var(--sleep)");
+        liveBar.classList.add("is-visible");
+        closeSheet();
+        renderHomeState();
+      }
+
+      function stopActivity() {
+        if (activeKind === "nursing" && activeSide) { mostRecentBreast = activeSide; }
+        activeKind = null;
+        activeSide = null;
+        activityStartedAt = null;
+        feedingPaused = false;
+        liveBar.classList.remove("is-visible");
+        nightSleepLiveBar.classList.remove("is-visible");
+        closeSheet();
+        renderHomeState();
+      }
+
+      function updateTimers() {
+        if (activeKind === "nursing" && !feedingPaused) { if (activeSide === "left") { leftSeconds += 1; } else { rightSeconds += 1; } }
+        const total = sheetContent.querySelector("#total-feed-time");
+        const left = sheetContent.querySelector("#left-time");
+        const right = sheetContent.querySelector("#right-time");
+        if (total) { total.textContent = elapsedText(leftSeconds + rightSeconds); }
+        if (left) { left.textContent = elapsedText(leftSeconds); }
+        if (right) { right.textContent = elapsedText(rightSeconds); }
+        if (!activeKind || !activityStartedAt) { return; }
+        const elapsed = Math.floor((Date.now() - activityStartedAt) / 1000);
+        const names = { nursing: "Nursing", sleep: "Night sleep", nap: "Nap", waking: "Night waking" };
+        root.querySelector("#live-title").textContent = names[activeKind] + " · " + elapsedText(activeKind === "nursing" ? leftSeconds + rightSeconds : elapsed);
+        root.querySelector("#live-subtitle").textContent = activeKind === "nursing" ? "L " + elapsedText(leftSeconds) + " · R " + elapsedText(rightSeconds) : activeKind === "waking" ? "Awake tonight" : "Running now";
+        if (activeKind === "nursing") { renderClock(); }
+      }
+
+      function closeSheet() {
+        sheet.classList.remove("is-open", "is-expanded", "is-dragging");
+        sheet.style.transform = "";
+        backdrop.classList.remove("is-visible");
+        sheet.setAttribute("aria-hidden", "true");
+      }
+
+      function selectScenario(name) {
+        root.querySelectorAll("[data-scenario]").forEach(function (button) { const selected = button.dataset.scenario === name; button.classList.toggle("is-selected", selected); button.setAttribute("aria-pressed", String(selected)); });
+        stopActivity();
+        leftSeconds = 0;
+        rightSeconds = 0;
+        mostRecentBreast = name === "first-nursing" ? null : "right";
+        nightActive = name === "night" || name === "nursing" || name === "feeding" || name === "waking" || name === "concurrent";
+        setPeriod(nightActive ? "night" : "day");
+        renderHomeState();
+        if (name === "nursing" || name === "first-nursing") { openAction("nursing"); }
+        if (name === "feeding") { leftSeconds = 6; rightSeconds = 8; startNursing("right"); }
+        if (name === "waking") { activeKind = "waking"; activityStartedAt = Date.now() - 33000; renderHomeState(); }
+        if (name === "concurrent") { leftSeconds = 360; rightSeconds = 300; activeKind = "nursing"; activeSide = "right"; activityStartedAt = Date.now() - 660000; feedingPaused = false; closeSheet(); renderHomeState(); }
+        if (name === "diaper") { openAction("diaper"); }
+      }
+
+      root.querySelectorAll("[data-period]").forEach(function (button) { button.addEventListener("click", function () { setPeriod(button.dataset.period); }); });
+      root.querySelectorAll("[data-scenario]").forEach(function (button) { button.addEventListener("click", function () { selectScenario(button.dataset.scenario); }); });
+      root.querySelector("#live-stop").addEventListener("click", stopActivity);
+      root.querySelector("#night-sleep-live-stop").addEventListener("click", function () { nightActive = false; stopActivity(); setPeriod("day"); renderHomeState(); });
+      liveBar.addEventListener("click", function (event) { if (!event.target.closest("#live-stop") && activeKind && activeKind !== "waking") { openAction(activeKind); } });
+      backdrop.addEventListener("click", closeSheet);
+
+      handle.addEventListener("pointerdown", function (event) { dragStartY = event.clientY; dragDeltaY = 0; handle.setPointerCapture(event.pointerId); sheet.classList.add("is-dragging"); });
+      handle.addEventListener("pointermove", function (event) { if (dragStartY === null) { return; } dragDeltaY = event.clientY - dragStartY; if (dragDeltaY > 0) { sheet.style.transform = "translateY(" + Math.min(dragDeltaY, 220) + "px)"; } });
+      function endDrag(event) {
+        if (dragStartY === null) { return; }
+        if (handle.hasPointerCapture(event.pointerId)) { handle.releasePointerCapture(event.pointerId); }
+        sheet.classList.remove("is-dragging");
+        sheet.style.transform = "";
+        if (dragDeltaY > 72) { closeSheet(); }
+        else if (dragDeltaY < -32) { sheet.classList.add("is-expanded"); }
+        else if (sheet.classList.contains("is-expanded") && dragDeltaY > 24) { sheet.classList.remove("is-expanded"); }
+        dragStartY = null;
+        dragDeltaY = 0;
+      }
+      handle.addEventListener("pointerup", endDrag);
+      handle.addEventListener("pointercancel", endDrag);
+      handle.addEventListener("click", function () { sheet.classList.toggle("is-expanded"); });
+
+      setInterval(updateTimers, 1000);
+      renderHomeState();
+    })();
+  </script>
+</div>
+
+<script id="codex-visualization-floating-ui-core" src="https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js"></script>
+<script id="codex-visualization-floating-ui-dom" src="https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js"></script>
+<script id="codex-visualization-lucide" async src="https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js"></script>
+<script id="codex-visualization-tooltip">/* oxlint-disable typescript/no-unsafe-argument, typescript/no-unsafe-call, typescript/no-unsafe-return */
+// Runs inside the visualization sandbox, not the host webview.
+(() => {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set(["top", "right", "bottom", "left"]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =>
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest("[data-tooltip]")
+      : null;
+  const containsTarget = (trigger, target) =>
+    target?.nodeType != null && trigger.contains(target);
+  const getContent = (trigger) =>
+    trigger.getAttribute("data-tooltip")?.trim() ?? "";
+  const getPlacement = (trigger) => {
+    const placement = trigger.getAttribute("data-tooltip-placement");
+    return tooltipPlacements.has(placement) ? placement : "top";
+  };
+  const getTooltip = () => {
+    if (tooltip == null) {
+      tooltip = document.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tooltip";
+      tooltip.setAttribute("role", "tooltip");
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) => {
+    const ids = new Set(
+      (trigger.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute("aria-describedby");
+    } else {
+      trigger.setAttribute("aria-describedby", [...ids].join(" "));
+    }
+  };
+  const clearOpenTimeout = () => {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) => {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) => {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              "--tooltip-available-width",
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              "--tooltip-available-height",
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: "fixed",
+    })
+      .then(({ x, y }) => {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = "visible";
+      })
+      .catch(() => {
+        if (activeTrigger === trigger && request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) => {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = "hidden";
+    floating.style.transform = "translate(0, 0)";
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () => {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) => {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() < skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() => {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(":focus-visible")) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) => {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () => {
+    closeTooltip(false);
+    document.removeEventListener("pointerover", handlePointerOpen);
+    document.removeEventListener("pointerout", handleLeave);
+    document.removeEventListener("focusin", handleFocusIn);
+    document.removeEventListener("focusout", handleLeave);
+    document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("contextmenu", handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener("pointerover", handlePointerOpen);
+  document.addEventListener("pointerout", handleLeave);
+  document.addEventListener("focusin", handleFocusIn);
+  document.addEventListener("focusout", handleLeave);
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("contextmenu", handleContextMenu);
+  window.addEventListener("pagehide", destroy, { once: true });
+})();
+</script>
+<script id="codex-visualization-lucide-initialization">(() => {
+  const initialize = () => {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById("codex-visualization-lucide")
+    ?.addEventListener("load", initialize, { once: true });
+})();
+</script>
+</body>
+</html>
