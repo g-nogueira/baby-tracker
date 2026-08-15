@@ -13,6 +13,14 @@ interface ActivityLiveControllerProps {
   subtitle?: string;
 }
 
+/**
+ * Displays an active activity with elapsed time and controls for opening or stopping it.
+ *
+ * @param accessibilityLabel - Accessibility label for the activity control
+ * @param stopAccessibilityLabel - Accessibility label for the stop control
+ * @param subtitle - Optional supporting text displayed below the elapsed time
+ * @returns The rendered activity live controller
+ */
 export function ActivityLiveController({
   accentColor,
   accessibilityLabel,

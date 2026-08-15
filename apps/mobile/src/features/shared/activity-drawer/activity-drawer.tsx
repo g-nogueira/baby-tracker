@@ -30,6 +30,14 @@ interface ActivityDrawerProps {
   onDismiss: () => void;
 }
 
+/**
+ * Renders an accessible, expandable activity controls drawer.
+ *
+ * @param activityLabel - Label identifying the activity whose controls are displayed
+ * @param children - Render function receiving whether the drawer is expanded
+ * @param mode - Initial presentation mode for the drawer
+ * @param onDismiss - Called when the drawer is dismissed
+ */
 export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: ActivityDrawerProps) {
   const [drawerState, setDrawerState] = useState(() => initialActivityDrawerState(mode));
   const [reduceMotion, setReduceMotion] = useState(false);

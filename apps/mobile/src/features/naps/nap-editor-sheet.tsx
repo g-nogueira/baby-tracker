@@ -40,6 +40,17 @@ const timeFormatter = new Intl.DateTimeFormat(undefined, {
   timeZone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
 });
 
+/**
+ * Renders the interface for starting, stopping, or editing a nap.
+ *
+ * @param editor - The current nap editor state and mode.
+ * @param isMutating - Whether a nap mutation is in progress.
+ * @param mutationError - The current mutation error, if any.
+ * @param onCancel - Called when the editor is dismissed.
+ * @param onChange - Called when an editor date or time changes.
+ * @param onDelete - Called when the nap is deleted, if deletion is available.
+ * @param onSave - Called to start, stop, or save the nap.
+ */
 export function NapEditorSheet({
   editor,
   isMutating,
@@ -248,6 +259,12 @@ export function NapEditorSheet({
   );
 }
 
+/**
+ * Tracks the current time while enabled and refreshes when the app becomes active.
+ *
+ * @param enabled - Whether to update the current time continuously
+ * @returns The latest current time
+ */
 function useLiveNow(enabled: boolean): Date {
   const [now, setNow] = useState(() => new Date());
 
@@ -266,6 +283,12 @@ function useLiveNow(enabled: boolean): Date {
   return now;
 }
 
+/**
+ * Renders a button for adjusting a timestamp by one minute.
+ *
+ * @param label - The adjustment label displayed on the button
+ * @param onPress - The callback invoked when the button is pressed
+ */
 function MinuteButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable
@@ -280,6 +303,14 @@ function MinuteButton({ label, onPress }: { label: string; onPress: () => void }
   );
 }
 
+/**
+ * Displays a labeled date and time field with optional picker interaction.
+ *
+ * @param editable - Whether the date and time controls can be pressed
+ * @param label - The field label
+ * @param onPick - Handles selection of the date or time control
+ * @param value - The date and time to display
+ */
 function TimeField({
   editable,
   label,

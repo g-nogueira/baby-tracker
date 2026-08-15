@@ -31,6 +31,19 @@ interface NapRadialTimelineProps {
   onPressNapRecord: (napId: string) => void;
 }
 
+/**
+ * Renders naps on a responsive 24-hour radial timeline and provides controls for the current day's nap state.
+ *
+ * @param activeNap - The currently active nap, if one exists.
+ * @param calendarDay - The calendar day represented by the timeline.
+ * @param disabled - Whether nap controls and record targets are disabled.
+ * @param isToday - Whether the timeline represents the current day.
+ * @param latestCompletedEnd - The end time of the latest completed nap, if available.
+ * @param naps - Naps to display on the timeline.
+ * @param now - The current time used for elapsed-duration calculations.
+ * @param onPressNap - Handles presses on the current day's nap control.
+ * @param onPressNapRecord - Handles presses on an individual nap record.
+ */
 export function NapRadialTimeline({
   activeNap,
   calendarDay,
@@ -186,6 +199,17 @@ export function NapRadialTimeline({
   );
 }
 
+/**
+ * Renders a nap duration arc as radial dashes and adds an editable continuation target for naps spanning from the previous day.
+ *
+ * @param center - The center coordinate of the radial timeline.
+ * @param disabled - Whether the continuation target is disabled.
+ * @param isActive - Whether to apply active nap styling.
+ * @param markerRadius - The radius of the nap arc.
+ * @param nap - The nap session represented by the arc.
+ * @param onPress - Handles presses on the continuation target.
+ * @param projection - The nap's position and visible duration on the selected day.
+ */
 function NapDurationArc({
   center,
   disabled,
@@ -244,6 +268,15 @@ function NapDurationArc({
   );
 }
 
+/**
+ * Renders an accessible press target for editing a nap that continues from the previous day.
+ *
+ * @param center - The clock center used to position the target.
+ * @param disabled - Whether the target is disabled.
+ * @param markerRadius - The radial distance from the clock center.
+ * @param onPress - Called when the target is pressed.
+ * @param projection - The projected nap segment displayed on the current day.
+ */
 function ContinuationTarget({
   center,
   disabled,
@@ -281,10 +314,24 @@ function ContinuationTarget({
   );
 }
 
+/**
+ * Renders a positioned clock label on the radial timeline.
+ *
+ * @param label - The text displayed as the clock label
+ * @param left - The horizontal position of the label
+ * @param top - The vertical position of the label
+ */
 function ClockLabel({ label, left, top }: { label: string; left: number; top: number }) {
   return <Text style={[styles.clockLabel, { left, top }]}>{label}</Text>;
 }
 
+/**
+ * Summarizes the most recent nap relative to the current time.
+ *
+ * @param naps - Naps ordered with the most recent nap first
+ * @param now - Reference time used to calculate elapsed duration
+ * @returns `Add` when no naps are available; otherwise, the elapsed time since the latest nap ended or started
+ */
 function latestNapMeta(naps: NapSession[], now: Date): string {
   const latest = naps[0];
   if (latest === undefined) return 'Add';
@@ -298,6 +345,12 @@ const clockFormatter = new Intl.DateTimeFormat(undefined, {
   timeZone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
 });
 
+/**
+ * Formats an instant as a clock time in the configured day timezone.
+ *
+ * @param instant - The timestamp to format
+ * @returns The localized clock-time representation of the timestamp
+ */
 function formatClock(instant: string): string {
   return clockFormatter.format(new Date(instant));
 }
