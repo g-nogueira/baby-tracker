@@ -1,3 +1,10 @@
+/**
+ * Converts an instant to its calendar date in the specified timezone.
+ *
+ * @param instant - The instant to convert
+ * @param timezone - The IANA timezone used to determine the calendar date
+ * @returns The calendar date formatted as `YYYY-MM-DD`
+ */
 export function calendarDayForInstant(instant: Date, timezone: string): string {
   const parts = calendarFormatter(timezone).formatToParts(instant);
   const year = partNumber(parts, 'year');
@@ -6,6 +13,13 @@ export function calendarDayForInstant(instant: Date, timezone: string): string {
   return formatCalendarDay(year, month, day);
 }
 
+/**
+ * Shifts a calendar date by a specified number of days.
+ *
+ * @param calendarDay - The date to shift in `YYYY-MM-DD` format
+ * @param days - The number of days to add; negative values move the date earlier
+ * @returns The shifted date in `YYYY-MM-DD` format
+ */
 export function shiftCalendarDay(calendarDay: string, days: number): string {
   const { year, month, day } = parseCalendarDay(calendarDay);
   const shifted = new Date(Date.UTC(year, month - 1, day + days));
@@ -16,6 +30,13 @@ export function shiftCalendarDay(calendarDay: string, days: number): string {
   );
 }
 
+/**
+ * Determines the UTC bounds of a calendar day in a timezone.
+ *
+ * @param calendarDay - The calendar day in `YYYY-MM-DD` format
+ * @param timezone - The IANA timezone identifier
+ * @returns A tuple containing ISO timestamps for the start of the calendar day and the start of the following day
+ */
 export function zonedDayBounds(calendarDay: string, timezone: string): [string, string] {
   return [
     zonedMidnight(calendarDay, timezone).toISOString(),
@@ -23,6 +44,13 @@ export function zonedDayBounds(calendarDay: string, timezone: string): [string, 
   ];
 }
 
+/**
+ * Resolves the start of a calendar day in a timezone to an instant.
+ *
+ * @param calendarDay - The calendar day in `YYYY-MM-DD` format
+ * @param timezone - The IANA timezone identifier
+ * @returns The instant corresponding to local midnight on the calendar day
+ */
 function zonedMidnight(calendarDay: string, timezone: string): Date {
   const target = parseCalendarDay(calendarDay);
   return instantForZonedDateTime({ ...target, hour: 0, minute: 0, second: 0 }, timezone);
@@ -37,6 +65,14 @@ export interface ZonedDateTimeParts {
   second: number;
 }
 
+/**
+ * Converts local date-time components in a timezone into an instant.
+ *
+ * @param target - The local date-time components to resolve
+ * @param timezone - The IANA timezone identifier
+ * @returns The instant corresponding to the local date-time
+ * @throws If the local date-time does not exist because of a clock change
+ */
 export function instantForZonedDateTime(target: ZonedDateTimeParts, timezone: string): Date {
   const targetAsUtc = Date.UTC(
     target.year,
@@ -69,6 +105,12 @@ export function instantForZonedDateTime(target: ZonedDateTimeParts, timezone: st
   return resolved;
 }
 
+/**
+ * Extracts the date and time components of an instant in a specified timezone.
+ *
+ * @param timezone - The IANA timezone used to interpret the instant
+ * @returns The instant's year, month, day, hour, minute, and second in the specified timezone
+ */
 export function zonedDateTimeParts(instant: Date, timezone: string): ZonedDateTimeParts {
   const parts = dateTimeFormatter(timezone).formatToParts(instant);
   return {
@@ -81,6 +123,13 @@ export function zonedDateTimeParts(instant: Date, timezone: string): ZonedDateTi
   };
 }
 
+/**
+ * Determines whether two date-time parts represent the same local date and time.
+ *
+ * @param left - The first date-time parts to compare
+ * @param right - The second date-time parts to compare
+ * @returns `true` if all date and time components match, `false` otherwise
+ */
 function sameDateTimeParts(left: ZonedDateTimeParts, right: ZonedDateTimeParts): boolean {
   return (
     left.year === right.year &&
@@ -92,6 +141,12 @@ function sameDateTimeParts(left: ZonedDateTimeParts, right: ZonedDateTimeParts):
   );
 }
 
+/**
+ * Parses a calendar day in `YYYY-MM-DD` format.
+ *
+ * @param value - The calendar day string to parse
+ * @returns The numeric year, month, and day components
+ */
 function parseCalendarDay(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (match === null) {
@@ -101,18 +156,40 @@ function parseCalendarDay(value: string) {
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
 }
 
+/**
+ * Formats numeric calendar date components as a zero-padded `YYYY-MM-DD` string.
+ *
+ * @param year - The calendar year
+ * @param month - The calendar month
+ * @param day - The calendar day
+ * @returns The formatted calendar date
+ */
 function formatCalendarDay(year: number, month: number, day: number): string {
   return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day
     .toString()
     .padStart(2, '0')}`;
 }
 
+/**
+ * Extracts a numeric component from formatted date parts.
+ *
+ * @param parts - The formatted date components to search
+ * @param type - The component type to extract
+ * @returns The numeric value of the requested component
+ * @throws Error if the requested component is missing
+ */
 function partNumber(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): number {
   const value = parts.find((part) => part.type === type)?.value;
   if (value === undefined) throw new Error(`Missing ${type} from formatted date.`);
   return Number(value);
 }
 
+/**
+ * Creates a formatter for calendar dates in the specified timezone.
+ *
+ * @param timezone - The timezone used to interpret and format dates
+ * @returns A date-time formatter configured for numeric year, month, and day output
+ */
 function calendarFormatter(timezone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
@@ -122,6 +199,12 @@ function calendarFormatter(timezone: string): Intl.DateTimeFormat {
   });
 }
 
+/**
+ * Creates a formatter for date and time components in a specified timezone.
+ *
+ * @param timezone - The IANA timezone identifier used for formatting
+ * @returns A formatter configured with two-digit month, day, hour, minute, and second values
+ */
 function dateTimeFormatter(timezone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,

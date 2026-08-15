@@ -53,6 +53,9 @@ interface UndoState {
   deletedNap: NapSession;
 }
 
+/**
+ * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
+ */
 export function TodayScreen() {
   const {
     activeNap,
@@ -292,6 +295,16 @@ export function TodayScreen() {
   );
 }
 
+/**
+ * Displays the currently active nap with its elapsed duration and controls for editing or stopping it.
+ *
+ * @param isMutating - Whether nap controls should be disabled during a mutation.
+ * @param nap - The active nap session.
+ * @param now - The current time used to calculate elapsed duration.
+ * @param onOpen - Called when the nap editor is opened.
+ * @param onStop - Called when the active nap is stopped.
+ * @param raised - Whether to raise the timer above the undo banner.
+ */
 function ActiveNapTimer({
   isMutating,
   nap,
@@ -325,6 +338,13 @@ function ActiveNapTimer({
   );
 }
 
+/**
+ * Renders an editable timeline row for a nap session.
+ *
+ * @param nap - The nap session to display
+ * @param now - The current time used to calculate the duration of an active nap
+ * @param onEdit - Callback invoked when the row is pressed
+ */
 function NapRow({ nap, now, onEdit }: { nap: NapSession; now: Date; onEdit: () => void }) {
   const end = nap.endedAt ? new Date(nap.endedAt) : now;
   const duration = elapsedMilliseconds(nap.startedAt, end);
@@ -351,6 +371,12 @@ function NapRow({ nap, now, onEdit }: { nap: NapSession; now: Date; onEdit: () =
   );
 }
 
+/**
+ * Tracks the current time with an update interval suited to the display precision.
+ *
+ * @param showSeconds - Whether to update every second instead of every minute
+ * @returns The current date and time
+ */
 function useAdaptiveClock(showSeconds: boolean): Date {
   const [now, setNow] = useState(() => new Date());
 
@@ -370,6 +396,12 @@ function useAdaptiveClock(showSeconds: boolean): Date {
   return now;
 }
 
+/**
+ * Formats a nap's start and end times, including calendar dates when they occur on different local days.
+ *
+ * @param nap - The nap session to format
+ * @returns The formatted time range, using “now” for an active nap
+ */
 function formatTimeRange(nap: NapSession): string {
   const start = new Date(nap.startedAt);
   if (nap.endedAt === null) return `${clockFormatter.format(start)} – now`;

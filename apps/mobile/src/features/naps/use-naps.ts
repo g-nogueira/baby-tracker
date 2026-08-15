@@ -26,6 +26,11 @@ interface NapState {
   error: string | null;
 }
 
+/**
+ * Manages nap data, calendar-day selection, and nap mutations.
+ *
+ * @returns The current nap state and controls for navigation, mutations, and error management.
+ */
 export function useNaps() {
   const database = useSQLiteContext();
   const repository = useMemo(() => new SQLiteNapRepository(database), [database]);
@@ -176,6 +181,12 @@ function createContext(now: Date) {
   };
 }
 
+/**
+ * Converts an error value into a user-facing message.
+ *
+ * @param error - The value to convert into a message
+ * @returns The error's message, or a generic retry message for other values
+ */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }

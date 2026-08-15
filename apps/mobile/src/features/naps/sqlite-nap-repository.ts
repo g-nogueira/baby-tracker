@@ -155,6 +155,12 @@ export class NapOverlapError extends Error {
   }
 }
 
+/**
+ * Ensures that the session does not overlap another non-deleted nap for the same child.
+ *
+ * @param session - The nap session to check.
+ * @throws `NapOverlapError` if the session overlaps another non-deleted nap.
+ */
 async function assertNoOverlap(transaction: SQLiteDatabase, session: NapSession): Promise<void> {
   if (session.deletedAt !== null) return;
 
@@ -177,6 +183,13 @@ async function assertNoOverlap(transaction: SQLiteDatabase, session: NapSession)
   if (row !== null) throw new NapOverlapError();
 }
 
+/**
+ * Persists a nap session while applying an optimistic version check to existing records.
+ *
+ * @param session - The nap session to insert or update
+ * @param expectedVersion - The version required for an existing session update
+ * @returns The result of the database write
+ */
 async function upsertSession(
   transaction: SQLiteDatabase,
   session: NapSession,
@@ -210,6 +223,13 @@ async function upsertSession(
   );
 }
 
+/**
+ * Upserts the phase associated with a nap session using an optimistic version check.
+ *
+ * @param session - The nap session containing the phase to persist
+ * @param expectedVersion - The existing phase version required for an update
+ * @returns The result of the database write
+ */
 async function upsertPhase(
   transaction: SQLiteDatabase,
   session: NapSession,
