@@ -7,7 +7,8 @@
       "!**/.expo",
       "!**/dist",
       "!**/coverage",
-      "!apps/mobile/assets"
+      "!apps/mobile/assets",
+      "!docs/design/napper-inspired/interactive-reference.html"
     ]
   },
   "formatter": {

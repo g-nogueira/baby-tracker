@@ -29,7 +29,12 @@ export interface NapSession {
   phase: SleepPhase;
 }
 
-export type SyncAction = 'start_nap' | 'stop_nap' | 'delete_sleep_session';
+export type SyncAction =
+  | 'start_nap'
+  | 'stop_nap'
+  | 'edit_sleep_session'
+  | 'delete_sleep_session'
+  | 'restore_sleep_session';
 
 export interface SyncOperation {
   operationId: string;
