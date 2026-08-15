@@ -160,7 +160,10 @@ export function useNaps() {
     start: (startedAt?: Date) => mutate((now) => startNap(createContext(now), startedAt ?? now)),
     stop: (endedAt?: Date) => {
       const activeNap = state.activeNap;
-      if (activeNap === null) return Promise.resolve(null);
+      if (activeNap === null) {
+        setState((current) => ({ ...current, error: 'There is no active nap to stop.' }));
+        return Promise.resolve(null);
+      }
       return mutate((now) => stopNap(activeNap, createContext(now), endedAt ?? now));
     },
     edit: (nap: NapSession, startedAt: Date, endedAt: Date | null) =>

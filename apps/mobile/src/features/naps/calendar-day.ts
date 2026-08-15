@@ -206,7 +206,7 @@ function calendarFormatter(timezone: string): Intl.DateTimeFormat {
  * @returns A formatter configured with two-digit month, day, hour, minute, and second values
  */
 function dateTimeFormatter(timezone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat('en-GB', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
@@ -214,6 +214,6 @@ function dateTimeFormatter(timezone: string): Intl.DateTimeFormat {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hourCycle: 'h23',
+    hour12: false,
   });
 }

@@ -144,7 +144,11 @@ export function NapRadialTimeline({
                 },
               ]}
             >
-              <View style={[styles.eventMarker, isLatest && styles.latestEventMarker]}>
+              <View
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.eventMarker, isLatest && styles.latestEventMarker]}
+              >
                 <Text style={[styles.eventMarkerText, !isLatest && styles.smallMarkerText]}>z</Text>
               </View>
             </Pressable>
@@ -200,14 +204,14 @@ export function NapRadialTimeline({
 }
 
 /**
- * Renders a nap duration arc as radial dashes and adds an editable continuation target for naps spanning from the previous day.
+ * Renders a nap duration arc as radial dashes and adds an accessible edit target at its midpoint.
  *
  * @param center - The center coordinate of the radial timeline.
- * @param disabled - Whether the continuation target is disabled.
+ * @param disabled - Whether the arc target is disabled.
  * @param isActive - Whether to apply active nap styling.
  * @param markerRadius - The radius of the nap arc.
  * @param nap - The nap session represented by the arc.
- * @param onPress - Handles presses on the continuation target.
+ * @param onPress - Handles presses on the arc target.
  * @param projection - The nap's position and visible duration on the selected day.
  */
 function NapDurationArc({
@@ -255,38 +259,40 @@ function NapDurationArc({
         );
       })}
 
-      {projection.isContinuation ? (
-        <ContinuationTarget
-          center={center}
-          disabled={disabled}
-          markerRadius={markerRadius}
-          onPress={onPress}
-          projection={projection}
-        />
-      ) : null}
+      <NapArcTarget
+        center={center}
+        disabled={disabled}
+        markerRadius={markerRadius}
+        nap={nap}
+        onPress={onPress}
+        projection={projection}
+      />
     </>
   );
 }
 
 /**
- * Renders an accessible press target for editing a nap that continues from the previous day.
+ * Renders an accessible 44dp press target for editing a nap from its duration arc.
  *
  * @param center - The clock center used to position the target.
  * @param disabled - Whether the target is disabled.
  * @param markerRadius - The radial distance from the clock center.
+ * @param nap - The nap represented by the duration arc.
  * @param onPress - Called when the target is pressed.
  * @param projection - The projected nap segment displayed on the current day.
  */
-function ContinuationTarget({
+function NapArcTarget({
   center,
   disabled,
   markerRadius,
+  nap,
   onPress,
   projection,
 }: {
   center: number;
   disabled: boolean;
   markerRadius: number;
+  nap: NapSession;
   onPress: () => void;
   projection: NapDayProjection;
 }) {
@@ -298,18 +304,19 @@ function ContinuationTarget({
 
   return (
     <Pressable
-      accessibilityHint="Opens the original nap record for editing"
-      accessibilityLabel={`Edit nap continued from the previous day, ${visibleDuration} shown on this day`}
+      accessibilityHint="Opens this exact nap record for editing"
+      accessibilityLabel={
+        projection.isContinuation
+          ? `Edit nap continued from the previous day, ${visibleDuration} shown on this day`
+          : `Edit nap duration started at ${formatClock(nap.startedAt)}, ${visibleDuration}`
+      }
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[
-        styles.continuationTarget,
-        { left: center + point.x - 22, top: center + point.y - 22 },
-      ]}
+      style={[styles.arcTarget, { left: center + point.x - 22, top: center + point.y - 22 }]}
     >
-      <View style={styles.continuationHandle} />
+      {projection.isContinuation ? <View style={styles.continuationHandle} /> : null}
     </Pressable>
   );
 }
@@ -322,7 +329,15 @@ function ContinuationTarget({
  * @param top - The vertical position of the label
  */
 function ClockLabel({ label, left, top }: { label: string; left: number; top: number }) {
-  return <Text style={[styles.clockLabel, { left, top }]}>{label}</Text>;
+  return (
+    <Text
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.clockLabel, { left, top }]}
+    >
+      {label}
+    </Text>
+  );
 }
 
 /**
@@ -437,7 +452,7 @@ const styles = StyleSheet.create({
   },
   eventMarkerText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   smallMarkerText: { fontSize: 11 },
-  continuationTarget: {
+  arcTarget: {
     position: 'absolute',
     zIndex: 3,
     width: 44,

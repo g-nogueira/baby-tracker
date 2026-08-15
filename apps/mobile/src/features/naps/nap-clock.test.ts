@@ -41,11 +41,11 @@ describe('nap clock', () => {
       expect.objectContaining({
         napId: 'nap-1',
         startFraction: 0.25,
-        sweepFraction: 2 / 24,
         showsStartIcon: true,
         isContinuation: false,
       }),
     );
+    expect(projection?.sweepFraction).toBeCloseTo(2 / 24);
   });
 
   it('uses now for an active nap without mutating the persisted start', () => {
@@ -128,5 +128,39 @@ describe('nap clock', () => {
     );
 
     expect(longer?.sweepFraction).toBe((shorter?.sweepFraction ?? 0) * 2);
+  });
+
+  it('uses local wall-clock endpoints across a spring-forward transition', () => {
+    const projection = projectNapOnCalendarDay(
+      {
+        id: 'spring-forward',
+        startedAt: '2026-03-29T00:30:00.000Z',
+        endedAt: '2026-03-29T02:30:00.000Z',
+      },
+      '2026-03-29T00:00:00.000Z',
+      '2026-03-29T23:00:00.000Z',
+      new Date('2026-03-29T12:00:00.000Z'),
+      'Europe/Lisbon',
+    );
+
+    expect(projection?.startFraction).toBeCloseTo(0.5 / 24);
+    expect(projection?.sweepFraction).toBeCloseTo(3 / 24);
+  });
+
+  it('uses local wall-clock endpoints across a fall-back transition', () => {
+    const projection = projectNapOnCalendarDay(
+      {
+        id: 'fall-back',
+        startedAt: '2026-10-25T00:30:00.000Z',
+        endedAt: '2026-10-25T02:30:00.000Z',
+      },
+      '2026-10-24T23:00:00.000Z',
+      '2026-10-26T00:00:00.000Z',
+      new Date('2026-10-25T12:00:00.000Z'),
+      'Europe/Lisbon',
+    );
+
+    expect(projection?.startFraction).toBeCloseTo(1.5 / 24);
+    expect(projection?.sweepFraction).toBeCloseTo(1 / 24);
   });
 });

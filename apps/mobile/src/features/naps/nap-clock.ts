@@ -1,7 +1,5 @@
 import { zonedDateTimeParts } from './calendar-day';
 
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000;
-
 export interface ClockPoint {
   x: number;
   y: number;
@@ -58,7 +56,7 @@ export function pointAtClockFraction(fraction: number, radius: number): ClockPoi
  * @param dayStartedAt - The start of the calendar-day interval
  * @param nextDayStartedAt - The end of the calendar-day interval
  * @param now - The instant used as the end time for an ongoing nap
- * @param timezone - The timezone used to calculate the local-day position
+ * @param timezone - The timezone used to map segment boundaries onto the wall-clock dial
  * @returns The clipped nap projection, or `null` when the nap does not overlap the interval
  * @throws Error if the calendar-day interval does not have a positive duration
  */
@@ -81,20 +79,36 @@ export function projectNapOnCalendarDay(
   if (clippedEnd <= clippedStart) return null;
 
   const showsStartIcon = startedAt >= dayStart && startedAt < dayEnd;
-  const startFraction = showsStartIcon ? fractionOfLocalDay(new Date(startedAt), timezone) : 0;
-  const durationFraction = (clippedEnd - clippedStart) / MILLISECONDS_PER_DAY;
-  const sweepFraction =
-    clippedEnd === dayEnd ? 1 - startFraction : Math.min(durationFraction, 1 - startFraction);
+  const startFraction = clockFractionForDay(clippedStart, dayStart, dayEnd, timezone);
+  const endFraction = clockFractionForDay(clippedEnd, dayStart, dayEnd, timezone);
+  const sweepFraction = Math.max(0, endFraction - startFraction);
 
   return {
     napId: nap.id,
     segmentStartedAt: new Date(clippedStart).toISOString(),
     segmentEndedAt: new Date(clippedEnd).toISOString(),
     startFraction,
-    sweepFraction: Math.max(0, sweepFraction),
+    sweepFraction,
     showsStartIcon,
     isContinuation: startedAt < dayStart,
   };
+}
+
+/**
+ * Maps a clipped segment boundary to the selected day's wall-clock dial.
+ *
+ * The exact day bounds are pinned to `0` and `1`; interior instants use their local clock time.
+ * During a fall-back transition, the duplicated hour intentionally shares one clock position.
+ */
+function clockFractionForDay(
+  instant: number,
+  dayStart: number,
+  dayEnd: number,
+  timezone: string,
+): number {
+  if (instant <= dayStart) return 0;
+  if (instant >= dayEnd) return 1;
+  return fractionOfLocalDay(new Date(instant), timezone);
 }
 
 /**

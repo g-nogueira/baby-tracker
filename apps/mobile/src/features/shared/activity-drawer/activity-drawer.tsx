@@ -146,15 +146,14 @@ export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: Act
           style={[styles.sheet, { transform: [{ translateY: translation }] }]}
         >
           <Pressable
-            accessibilityActions={[
-              { name: 'increment', label: `Expand ${activityLabel} controls` },
-              {
-                name: 'decrement',
-                label: expanded
-                  ? `Collapse ${activityLabel} controls`
-                  : `Close ${activityLabel} controls`,
-              },
-            ]}
+            accessibilityActions={
+              expanded
+                ? [{ name: 'decrement', label: `Collapse ${activityLabel} controls` }]
+                : [
+                    { name: 'increment', label: `Expand ${activityLabel} controls` },
+                    { name: 'decrement', label: `Close ${activityLabel} controls` },
+                  ]
+            }
             accessibilityHint={handleHint}
             accessibilityLabel={handleLabel}
             accessibilityRole="adjustable"
