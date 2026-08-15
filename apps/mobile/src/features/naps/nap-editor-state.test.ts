@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { editorIntervalError, mergeDatePart, mergeTimePart } from './nap-editor-state';
+import {
+  editorForPrimaryAction,
+  editorIntervalError,
+  mergeDatePart,
+  mergeTimePart,
+} from './nap-editor-state';
 
 describe('nap editor state', () => {
   it('rejects equal and reversed intervals with an inline message', () => {
@@ -75,6 +80,21 @@ describe('nap editor state', () => {
     expect(mergeTimePart(current, selectedTime, 'Europe/Lisbon')).toEqual(
       new Date('2026-08-12T08:42:00.000Z'),
     );
+  });
+
+  it('uses the press time when stopping unless the caregiver corrected it', () => {
+    const editor = {
+      mode: 'stop' as const,
+      nap: { ...completedNap(), status: 'active' as const, endedAt: null },
+      endedAt: new Date('2026-08-12T10:05:00.000Z'),
+    };
+    const pressedAt = new Date('2026-08-12T10:08:00.000Z');
+
+    expect(editorForPrimaryAction(editor, false, pressedAt)).toEqual({
+      ...editor,
+      endedAt: pressedAt,
+    });
+    expect(editorForPrimaryAction(editor, true, pressedAt)).toBe(editor);
   });
 });
 

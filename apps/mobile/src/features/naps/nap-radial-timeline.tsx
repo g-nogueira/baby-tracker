@@ -2,7 +2,8 @@ import { elapsedMilliseconds, formatDuration, type NapSession } from '@baby-trac
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
-import { pointOn24HourClock } from './nap-clock';
+import { zonedDayBounds } from './calendar-day';
+import { pointAtClockFraction, projectNapOnCalendarDay, type NapDayProjection } from './nap-clock';
 
 const palette = {
   surface: '#FFFFFF',
@@ -20,27 +21,45 @@ const clockTicks = Array.from({ length: 24 }, (_, hour) => ({
 
 interface NapRadialTimelineProps {
   activeNap: NapSession | null;
+  calendarDay: string;
   disabled: boolean;
   isToday: boolean;
   latestCompletedEnd: string | null;
   naps: NapSession[];
   now: Date;
   onPressNap: () => void;
+  onPressNapRecord: (napId: string) => void;
 }
 
 export function NapRadialTimeline({
   activeNap,
+  calendarDay,
   disabled,
   isToday,
   latestCompletedEnd,
   naps,
   now,
   onPressNap,
+  onPressNapRecord,
 }: NapRadialTimelineProps) {
   const { width } = useWindowDimensions();
   const size = Math.min(324, width - 48);
   const center = size / 2;
   const markerRadius = center - 30;
+  const [dayStartedAt, nextDayStartedAt] = zonedDayBounds(
+    calendarDay,
+    LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+  );
+  const projectedNaps = naps.flatMap((nap, index) => {
+    const projection = projectNapOnCalendarDay(
+      nap,
+      dayStartedAt,
+      nextDayStartedAt,
+      now,
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    return projection === null ? [] : [{ index, nap, projection }];
+  });
   const status = !isToday
     ? `${naps.length}\n${naps.length === 1 ? 'nap' : 'naps'}`
     : activeNap
@@ -51,11 +70,7 @@ export function NapRadialTimeline({
 
   return (
     <View style={styles.card}>
-      <View
-        accessibilityLabel={`24-hour nap timeline. ${status.replace('\n', ' ')}.`}
-        accessibilityRole="summary"
-        style={[styles.clock, { height: size, width: size }]}
-      >
+      <View style={[styles.clock, { height: size, width: size }]}>
         <View style={styles.ring} />
         {clockTicks.map(({ hour, key }) => {
           const angle = (hour / 24) * Math.PI * 2 - Math.PI / 2;
@@ -80,32 +95,56 @@ export function NapRadialTimeline({
         <ClockLabel label="12" left={center - 11} top={size - 23} />
         <ClockLabel label="18" left={8} top={center - 9} />
 
-        {naps.map((nap, index) => {
-          const point = pointOn24HourClock(
-            new Date(nap.startedAt),
-            LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
-            markerRadius,
-          );
+        {projectedNaps.map(({ nap, projection }) => (
+          <NapDurationArc
+            center={center}
+            disabled={disabled}
+            isActive={nap.status === 'active'}
+            key={`arc-${nap.id}`}
+            markerRadius={markerRadius}
+            nap={nap}
+            onPress={() => onPressNapRecord(nap.id)}
+            projection={projection}
+          />
+        ))}
+
+        {projectedNaps.map(({ index, nap, projection }) => {
+          if (!projection.showsStartIcon) return null;
+          const point = pointAtClockFraction(projection.startFraction, markerRadius);
           const isLatest = index === 0;
+          const durationEnd = nap.endedAt === null ? now : new Date(nap.endedAt);
+          const duration = formatDuration(elapsedMilliseconds(nap.startedAt, durationEnd));
           return (
-            <View
-              accessibilityLabel={`Nap started at ${formatClock(nap.startedAt)}`}
+            <Pressable
+              accessibilityHint="Opens this exact nap record for editing"
+              accessibilityLabel={`${nap.status === 'active' ? 'Edit active nap' : 'Edit nap'} started at ${formatClock(nap.startedAt)}, ${duration}`}
+              accessibilityRole="button"
+              accessibilityState={{ disabled }}
+              disabled={disabled}
               key={nap.id}
+              onPress={() => onPressNapRecord(nap.id)}
               style={[
-                styles.eventMarker,
-                isLatest && styles.latestEventMarker,
+                styles.eventTarget,
                 {
-                  left: center + point.x - (isLatest ? 17 : 11),
-                  top: center + point.y - (isLatest ? 17 : 11),
+                  left: center + point.x - 22,
+                  top: center + point.y - 22,
                 },
               ]}
             >
-              <Text style={[styles.eventMarkerText, !isLatest && styles.smallMarkerText]}>z</Text>
-            </View>
+              <View style={[styles.eventMarker, isLatest && styles.latestEventMarker]}>
+                <Text style={[styles.eventMarkerText, !isLatest && styles.smallMarkerText]}>z</Text>
+              </View>
+            </Pressable>
           );
         })}
 
-        <View pointerEvents="none" style={styles.centerStatus}>
+        <View
+          accessible
+          accessibilityLabel={`24-hour nap timeline. ${status.replace('\n', ' ')}.`}
+          accessibilityRole="summary"
+          pointerEvents="none"
+          style={styles.centerStatus}
+        >
           <Text style={styles.status}>{status}</Text>
           <Text style={styles.statusHint}>
             {!isToday
@@ -144,6 +183,101 @@ export function NapRadialTimeline({
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+function NapDurationArc({
+  center,
+  disabled,
+  isActive,
+  markerRadius,
+  nap,
+  onPress,
+  projection,
+}: {
+  center: number;
+  disabled: boolean;
+  isActive: boolean;
+  markerRadius: number;
+  nap: NapSession;
+  onPress: () => void;
+  projection: NapDayProjection;
+}) {
+  const arcLength = Math.PI * 2 * markerRadius * projection.sweepFraction;
+  const dashCount = Math.max(1, Math.ceil(arcLength / 7));
+  const dashLength = Math.max(3, Math.min(9, arcLength / dashCount + 1));
+
+  return (
+    <>
+      {Array.from({ length: dashCount }, (_, index) => {
+        const progress = (index + 0.5) / dashCount;
+        const fraction = projection.startFraction + projection.sweepFraction * progress;
+        const point = pointAtClockFraction(fraction, markerRadius);
+        return (
+          <View
+            key={`${nap.id}-dash-${fraction.toFixed(8)}`}
+            pointerEvents="none"
+            style={[
+              styles.arcDash,
+              isActive && styles.activeArcDash,
+              {
+                left: center + point.x - dashLength / 2,
+                top: center + point.y - 3,
+                transform: [{ rotate: `${fraction * 360}deg` }],
+                width: dashLength,
+              },
+            ]}
+          />
+        );
+      })}
+
+      {projection.isContinuation ? (
+        <ContinuationTarget
+          center={center}
+          disabled={disabled}
+          markerRadius={markerRadius}
+          onPress={onPress}
+          projection={projection}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function ContinuationTarget({
+  center,
+  disabled,
+  markerRadius,
+  onPress,
+  projection,
+}: {
+  center: number;
+  disabled: boolean;
+  markerRadius: number;
+  onPress: () => void;
+  projection: NapDayProjection;
+}) {
+  const middleFraction = projection.startFraction + projection.sweepFraction / 2;
+  const point = pointAtClockFraction(middleFraction, markerRadius);
+  const visibleDuration = formatDuration(
+    elapsedMilliseconds(projection.segmentStartedAt, new Date(projection.segmentEndedAt)),
+  );
+
+  return (
+    <Pressable
+      accessibilityHint="Opens the original nap record for editing"
+      accessibilityLabel={`Edit nap continued from the previous day, ${visibleDuration} shown on this day`}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.continuationTarget,
+        { left: center + point.x - 22, top: center + point.y - 22 },
+      ]}
+    >
+      <View style={styles.continuationHandle} />
+    </Pressable>
   );
 }
 
@@ -212,13 +346,28 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   statusHint: { color: palette.muted, fontSize: 12, textAlign: 'center' },
-  eventMarker: {
+  arcDash: {
     position: 'absolute',
-    width: 22,
-    height: 22,
+    zIndex: 2,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#B8AFE1',
+  },
+  activeArcDash: { backgroundColor: palette.nap },
+  eventTarget: {
+    position: 'absolute',
+    zIndex: 4,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 11,
+  },
+  eventMarker: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
     borderWidth: 2,
     borderColor: palette.surface,
     backgroundColor: palette.nap,
@@ -235,6 +384,22 @@ const styles = StyleSheet.create({
   },
   eventMarkerText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   smallMarkerText: { fontSize: 11 },
+  continuationTarget: {
+    position: 'absolute',
+    zIndex: 3,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continuationHandle: {
+    width: 22,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: palette.surface,
+    backgroundColor: '#B8AFE1',
+  },
   action: { minWidth: 72, alignItems: 'center', gap: 3, padding: 5, borderRadius: 18 },
   activeAction: { backgroundColor: palette.napSoft },
   actionCircle: {

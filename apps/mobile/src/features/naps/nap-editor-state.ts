@@ -49,6 +49,15 @@ export function updateEditorDate(
   return editor;
 }
 
+export function editorForPrimaryAction(
+  editor: NapEditorState,
+  actionTimeWasAdjusted: boolean,
+  now: Date = new Date(),
+): NapEditorState {
+  if (editor.mode !== 'stop' || actionTimeWasAdjusted) return editor;
+  return { ...editor, endedAt: now };
+}
+
 export function mergeDatePart(current: Date, selected: Date, timezone: string): Date {
   const currentParts = zonedDateTimeParts(current, timezone);
   const selectedParts = zonedDateTimeParts(selected, timezone);

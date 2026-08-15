@@ -111,6 +111,20 @@ describe('SQLite nap repository', () => {
     expect(await afterRestart.pendingOperationCount()).toBe(5);
   });
 
+  it('recovers an active nap from canonical storage after a process restart', async () => {
+    const started = startNap(context('2026-08-12T12:10:00.000Z'));
+    await repository.save(started);
+
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    await migrateDatabase(adapter.asExpoDatabase());
+    const afterRestart = new SQLiteNapRepository(adapter.asExpoDatabase());
+
+    expect(await afterRestart.active('child-arthur')).toEqual(started.session);
+    expect(await afterRestart.pendingOperationCount()).toBe(1);
+  });
+
   it('uses half-open day boundaries at exact midnight', async () => {
     const started = startNap(context('2026-08-12T23:50:00.000Z'));
     await repository.save(started);

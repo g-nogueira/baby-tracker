@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { ActivityLiveController } from '@/features/shared/live-controller/activity-live-controller';
 import { calendarDayForInstant } from './calendar-day';
 import { formatLiveDuration } from './nap-clock';
 import { NapEditorSheet } from './nap-editor-sheet';
@@ -112,6 +113,18 @@ export function TodayScreen() {
     );
   };
 
+  const openNapRecord = (napId: string) => {
+    const nap = naps.find((candidate) => candidate.id === napId);
+    if (nap === undefined) return;
+    clearError();
+    setEditor({
+      mode: 'edit',
+      nap,
+      startedAt: new Date(nap.startedAt),
+      endedAt: nap.endedAt === null ? null : new Date(nap.endedAt),
+    });
+  };
+
   const saveEditor = async (candidate: NapEditorState) => {
     const saved =
       candidate.mode === 'start'
@@ -172,12 +185,14 @@ export function TodayScreen() {
 
         <NapRadialTimeline
           activeNap={isToday ? activeNap : null}
+          calendarDay={selectedDay}
           disabled={isMutating || activeUndoPending}
           isToday={isToday}
           latestCompletedEnd={latestCompletedEnd}
           naps={naps}
           now={now}
           onPressNap={openNapControls}
+          onPressNapRecord={openNapRecord}
         />
 
         {!isToday ? (
@@ -227,20 +242,7 @@ export function TodayScreen() {
             </View>
           ) : (
             naps.map((nap) => (
-              <NapRow
-                key={nap.id}
-                nap={nap}
-                now={now}
-                onEdit={() => {
-                  clearError();
-                  setEditor({
-                    mode: 'edit',
-                    nap,
-                    startedAt: new Date(nap.startedAt),
-                    endedAt: nap.endedAt === null ? null : new Date(nap.endedAt),
-                  });
-                }}
-              />
+              <NapRow key={nap.id} nap={nap} now={now} onEdit={() => openNapRecord(nap.id)} />
             ))
           )}
         </View>
@@ -307,36 +309,18 @@ function ActiveNapTimer({
 }) {
   const liveDuration = formatLiveDuration(elapsedMilliseconds(nap.startedAt, now));
   return (
-    <View style={[styles.activeTimer, raised && styles.activeTimerRaised]}>
-      <Pressable
-        accessibilityHint="Opens nap controls"
+    <View style={[styles.activeTimerPosition, raised && styles.activeTimerRaised]}>
+      <ActivityLiveController
+        accentColor={palette.nap}
         accessibilityLabel={`Nap running for ${liveDuration}`}
-        accessibilityRole="button"
-        onPress={onOpen}
-        style={({ pressed }) => [styles.activeTimerBody, pressed && styles.timerPressed]}
-      >
-        <View style={styles.timerIconCircle}>
-          <Text style={styles.timerIcon}>z</Text>
-        </View>
-        <View style={styles.timerCopy}>
-          <Text style={styles.timerTitle}>Nap</Text>
-          <Text style={styles.timerValue}>{liveDuration}</Text>
-        </View>
-      </Pressable>
-      <Pressable
-        accessibilityLabel="Stop nap now"
-        accessibilityRole="button"
-        accessibilityState={{ busy: isMutating, disabled: isMutating }}
+        activityLabel="Nap"
         disabled={isMutating}
-        onPress={onStop}
-        style={({ pressed }) => [
-          styles.timerStop,
-          isMutating && styles.disabled,
-          pressed && styles.timerPressed,
-        ]}
-      >
-        <View style={styles.stopSquare} />
-      </Pressable>
+        elapsedLabel={liveDuration}
+        icon="z"
+        onOpen={onOpen}
+        onStop={onStop}
+        stopAccessibilityLabel="Stop nap now"
+      />
     </View>
   );
 }
@@ -491,56 +475,13 @@ const styles = StyleSheet.create({
   rowTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },
   rowTime: { color: palette.muted, fontSize: 13, marginTop: 4 },
   editText: { color: palette.nap, fontSize: 13, fontWeight: '700' },
-  activeTimer: {
+  activeTimerPosition: {
     position: 'absolute',
     left: 16,
     right: 16,
     bottom: 16,
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    overflow: 'hidden',
-    borderRadius: 18,
-    backgroundColor: palette.ink,
-    shadowColor: '#000000',
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
   },
   activeTimerRaised: { bottom: 86 },
-  activeTimerBody: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-  },
-  timerIconCircle: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 21,
-    backgroundColor: palette.nap,
-  },
-  timerIcon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
-  timerCopy: { gap: 2 },
-  timerTitle: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },
-  timerValue: {
-    color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  timerStop: {
-    width: 66,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3A3733',
-  },
-  stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
-  timerPressed: { opacity: 0.78 },
   undoBanner: {
     position: 'absolute',
     left: 20,

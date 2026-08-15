@@ -1,18 +1,13 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { elapsedMilliseconds } from '@baby-tracker/domain';
+import { useEffect, useMemo, useState } from 'react';
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
+import { formatLiveDuration } from './nap-clock';
 import {
+  editorForPrimaryAction,
   editorIntervalError,
   mergeDatePart,
   mergeTimePart,
@@ -54,10 +49,10 @@ export function NapEditorSheet({
   onDelete,
   onSave,
 }: NapEditorSheetProps) {
-  const [expanded, setExpanded] = useState(editor.mode === 'edit');
   const [picker, setPicker] = useState<PickerState>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const translation = useRef(new Animated.Value(0)).current;
+  const [actionTimeWasAdjusted, setActionTimeWasAdjusted] = useState(false);
+  const now = useLiveNow(editor.mode === 'stop');
   const error = useMemo(() => editorIntervalError(editor), [editor]);
   const startedAt =
     editor.mode === 'start'
@@ -66,47 +61,18 @@ export function NapEditorSheet({
         ? editor.startedAt
         : new Date(editor.nap.startedAt);
   const endedAt =
-    editor.mode === 'stop' ? editor.endedAt : editor.mode === 'edit' ? editor.endedAt : null;
+    editor.mode === 'stop'
+      ? actionTimeWasAdjusted
+        ? editor.endedAt
+        : now
+      : editor.mode === 'edit'
+        ? editor.endedAt
+        : null;
   const canEditStart = editor.mode !== 'stop';
   const canEditEnd = editor.mode !== 'start' && endedAt !== null;
   const selectedPickerValue = picker?.field === 'endedAt' && endedAt !== null ? endedAt : startedAt;
-  const actionTime = editor.mode === 'stop' ? editor.endedAt : startedAt;
+  const actionTime = editor.mode === 'stop' ? (endedAt ?? editor.endedAt) : startedAt;
   const canSave = !isMutating && error === null && pickerError === null;
-
-  const settleSheet = useCallback(() => {
-    Animated.spring(translation, {
-      toValue: 0,
-      damping: 24,
-      stiffness: 260,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start();
-  }, [translation]);
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderMove: (_event, gesture) => {
-          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.22 : gesture.dy);
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          if (gesture.dy > 72 || gesture.vy > 1.15) {
-            Animated.timing(translation, {
-              toValue: 700,
-              duration: 180,
-              useNativeDriver: true,
-            }).start(onCancel);
-            return;
-          }
-          if (gesture.dy < -38 || gesture.vy < -0.8) setExpanded(true);
-          settleSheet();
-        },
-        onPanResponderTerminate: settleSheet,
-      }),
-    [onCancel, settleSheet, translation],
-  );
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const activePicker = picker;
@@ -120,6 +86,9 @@ export function NapEditorSheet({
           ? mergeDatePart(current, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone)
           : mergeTimePart(current, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone);
       setPickerError(null);
+      if (editor.mode === 'stop' && activePicker.field === 'endedAt') {
+        setActionTimeWasAdjusted(true);
+      }
       onChange(updateEditorDate(editor, activePicker.field, next));
     } catch (error: unknown) {
       setPickerError(
@@ -133,37 +102,18 @@ export function NapEditorSheet({
     const proposed = actionTime.getTime() + minutes * 60_000;
     const next = new Date(Math.min(proposed, Date.now()));
     setPickerError(null);
+    if (editor.mode === 'stop') setActionTimeWasAdjusted(true);
     onChange(updateEditorDate(editor, field, next));
   };
 
   return (
-    <Modal animationType="fade" onRequestClose={onCancel} transparent>
-      <View style={styles.overlay}>
-        <Pressable
-          accessibilityLabel="Close nap controls"
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={StyleSheet.absoluteFill}
-        />
-        <Animated.View
-          accessibilityViewIsModal
-          style={[styles.sheet, { transform: [{ translateY: translation }] }]}
-        >
-          <Pressable
-            accessibilityHint={
-              expanded
-                ? 'Swipe down to close nap controls'
-                : 'Swipe up for date and time options, or down to close'
-            }
-            accessibilityLabel={expanded ? 'Nap controls expanded' : 'More nap options'}
-            accessibilityRole="adjustable"
-            onPress={() => setExpanded((current) => !current)}
-            style={styles.handleTarget}
-            {...panResponder.panHandlers}
-          >
-            <View style={styles.handle} />
-          </Pressable>
-
+    <ActivityDrawer
+      activityLabel="Nap"
+      mode={editor.mode === 'start' ? 'create' : editor.mode === 'stop' ? 'active' : 'edit'}
+      onDismiss={onCancel}
+    >
+      {({ expanded }) => (
+        <>
           <View style={styles.hero}>
             <View style={styles.napIconCircle}>
               <Text style={styles.napIcon}>z</Text>
@@ -172,7 +122,11 @@ export function NapEditorSheet({
               {editor.mode === 'stop' ? 'Stop nap' : editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
             </Text>
             {editor.mode !== 'edit' ? (
-              <Text style={styles.actionTime}>{timeFormatter.format(actionTime)}</Text>
+              <Text style={styles.actionTime}>
+                {editor.mode === 'stop'
+                  ? formatLiveDuration(elapsedMilliseconds(editor.nap.startedAt, endedAt ?? now))
+                  : timeFormatter.format(actionTime)}
+              </Text>
             ) : null}
           </View>
 
@@ -184,7 +138,9 @@ export function NapEditorSheet({
                 accessibilityRole="button"
                 accessibilityState={{ busy: isMutating, disabled: !canSave }}
                 disabled={!canSave}
-                onPress={() => onSave(editor)}
+                onPress={() =>
+                  onSave(editorForPrimaryAction(editor, actionTimeWasAdjusted, new Date()))
+                }
                 style={({ pressed }) => [
                   styles.primaryAction,
                   !canSave && styles.disabled,
@@ -286,10 +242,28 @@ export function NapEditorSheet({
               {pickerError}
             </Text>
           ) : null}
-        </Animated.View>
-      </View>
-    </Modal>
+        </>
+      )}
+    </ActivityDrawer>
   );
+}
+
+function useLiveNow(enabled: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!enabled) return;
+    const interval = setInterval(() => setNow(new Date()), 1_000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setNow(new Date());
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [enabled]);
+
+  return now;
 }
 
 function MinuteButton({ label, onPress }: { label: string; onPress: () => void }) {
@@ -355,23 +329,6 @@ const palette = {
 };
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(35, 31, 28, 0.38)' },
-  sheet: {
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 2,
-    paddingBottom: 30,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    backgroundColor: palette.surface,
-    shadowColor: '#000000',
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: -5 },
-    elevation: 12,
-  },
-  handleTarget: { minHeight: 34, alignItems: 'center', justifyContent: 'center' },
-  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#C9C2B9' },
   hero: { alignItems: 'center', gap: 6 },
   napIconCircle: {
     width: 46,
