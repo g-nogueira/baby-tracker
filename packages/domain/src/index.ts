@@ -1,3 +1,4 @@
+export * from './care-event';
 export * from './nap';
 export * from './nursing';
 export * from './sleep';

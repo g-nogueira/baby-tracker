@@ -24,7 +24,7 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
       beforeSessions,
     );
@@ -69,7 +69,7 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
       beforeSessions,
     );
@@ -223,14 +223,151 @@ describe('mobile database migrations', () => {
     );
   });
 
+  it('upgrades a version 3 database after Nursing without changing existing data', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionThreeDatabase(database);
+    const beforeNursing = database.prepare('SELECT * FROM nursing_sessions').all();
+    const beforeSleep = database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all();
+    const adapter = new NodeSQLiteAdapter(database);
+
+    await migrateDatabase(adapter.asExpoDatabase());
+    await migrateDatabase(adapter.asExpoDatabase());
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('SELECT * FROM nursing_sessions').all()).toEqual(beforeNursing);
+    expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(beforeSleep);
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'care_events'")
+        .get(),
+    ).toEqual({ name: 'care_events' });
+  });
+
+  it('enforces canonical typed care-event rows directly in SQLite', async () => {
+    const careDatabase = new DatabaseSync(':memory:');
+    database = careDatabase;
+    await migrateDatabase(new NodeSQLiteAdapter(careDatabase).asExpoDatabase());
+
+    const validDiaper = directCareEventRow();
+    const invalidRows: DirectCareEventRow[] = [
+      { ...validDiaper, id: 'bath', kind: 'bath' },
+      { ...validDiaper, id: 'malformed-json', dataJson: '{' },
+      { ...validDiaper, id: 'mismatched-data', kind: 'medicine' },
+      { ...validDiaper, id: 'invalid-diaper', dataJson: '{"diaperType":"damp"}' },
+      {
+        ...validDiaper,
+        id: 'empty-medicine',
+        kind: 'medicine',
+        dataJson: '{"note":" \\n \\t"}',
+      },
+      { ...validDiaper, id: 'fractional-version', version: 1.5 },
+      { ...validDiaper, id: 'invalid-date', occurredAt: '2026-02-30T12:00:00.000Z' },
+      { ...validDiaper, id: 'noncanonical-instant', occurredAt: '2026-08-15 12:00:00Z' },
+      { ...validDiaper, id: 'early-deletion', deletedAt: '2026-08-15T11:59:59.999Z' },
+    ];
+
+    for (const row of invalidRows) {
+      expect(() => insertDirectCareEvent(careDatabase, row), row.id).toThrow();
+    }
+
+    insertDirectCareEvent(careDatabase, validDiaper);
+    insertDirectCareEvent(careDatabase, {
+      ...validDiaper,
+      id: 'valid-medicine',
+      kind: 'medicine',
+      dataJson: '{"note":"  unrestricted text  "}',
+    });
+    expect(careDatabase.prepare('SELECT COUNT(*) AS count FROM care_events').get()).toEqual({
+      count: 2,
+    });
+  });
+
+  it('rolls back a failed version 3 care-event migration', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionThreeDatabase(database);
+    database.exec('CREATE TABLE care_events (sentinel TEXT);');
+    const beforeNursing = database.prepare('SELECT * FROM nursing_sessions').all();
+
+    await expect(
+      migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase()),
+    ).rejects.toThrow();
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(database.prepare('SELECT * FROM nursing_sessions').all()).toEqual(beforeNursing);
+    expect(database.prepare('PRAGMA table_info(care_events)').all()).toMatchObject([
+      { name: 'sentinel' },
+    ]);
+  });
+
+  it('rolls back version 1 additions when care-event schema creation fails', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionOneDatabase(database);
+    database.exec('CREATE TABLE care_events (sentinel TEXT);');
+    const beforeSleep = database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all();
+    const beforeOutbox = database
+      .prepare('SELECT * FROM outbox_operations ORDER BY operation_id')
+      .all();
+
+    await expect(
+      migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase()),
+    ).rejects.toThrow();
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(beforeSleep);
+    expect(database.prepare('SELECT * FROM outbox_operations ORDER BY operation_id').all()).toEqual(
+      beforeOutbox,
+    );
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'nursing_sessions'",
+        )
+        .get(),
+    ).toBeUndefined();
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'one_open_phase_per_session'",
+        )
+        .get(),
+    ).toBeUndefined();
+    expect(database.prepare('PRAGMA table_info(care_events)').all()).toMatchObject([
+      { name: 'sentinel' },
+    ]);
+  });
+
+  it('rolls back version 2 Nursing creation when care-event schema creation fails', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionTwoDatabase(database);
+    database.exec('CREATE TABLE care_events (sentinel TEXT);');
+    const beforeSleep = database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all();
+
+    await expect(
+      migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase()),
+    ).rejects.toThrow();
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(beforeSleep);
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'nursing_sessions'",
+        )
+        .get(),
+    ).toBeUndefined();
+    expect(database.prepare('PRAGMA table_info(care_events)').all()).toMatchObject([
+      { name: 'sentinel' },
+    ]);
+  });
+
   it('rejects a future database version without mutating its schema', async () => {
     database = new DatabaseSync(':memory:');
-    database.exec('PRAGMA user_version = 4;');
+    database.exec('PRAGMA user_version = 5;');
 
     await expect(migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase())).rejects.toThrow(
       'This app is older than the local database. Please update the app.',
     );
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(
       database
         .prepare(
@@ -256,6 +393,56 @@ describe('mobile database migrations', () => {
     ]);
   });
 });
+
+interface DirectCareEventRow {
+  id: string;
+  childId: string;
+  kind: string;
+  occurredAt: string;
+  timezone: string;
+  dataJson: string;
+  createdBy: string;
+  updatedBy: string;
+  version: number;
+  deletedAt: string | null;
+}
+
+function directCareEventRow(): DirectCareEventRow {
+  return {
+    id: 'valid-diaper',
+    childId: 'child-arthur',
+    kind: 'diaper',
+    occurredAt: '2026-08-15T12:00:00.125Z',
+    timezone: 'Europe/Lisbon',
+    dataJson: '{"diaperType":"wet"}',
+    createdBy: 'caregiver-paloma',
+    updatedBy: 'caregiver-paloma',
+    version: 1,
+    deletedAt: null,
+  };
+}
+
+function insertDirectCareEvent(database: DatabaseSync, row: DirectCareEventRow): void {
+  database
+    .prepare(
+      `INSERT INTO care_events (
+        id, child_id, kind, occurred_at, timezone, data_json,
+        created_by, updated_by, version, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      row.id,
+      row.childId,
+      row.kind,
+      row.occurredAt,
+      row.timezone,
+      row.dataJson,
+      row.createdBy,
+      row.updatedBy,
+      row.version,
+      row.deletedAt,
+    );
+}
 
 interface DirectNursingRow {
   id: string;
@@ -337,6 +524,39 @@ function createVersionTwoDatabase(database: DatabaseSync): void {
       ON sleep_phases (sleep_session_id)
       WHERE ended_at IS NULL AND deleted_at IS NULL;
     PRAGMA user_version = 2;
+  `);
+}
+
+function createVersionThreeDatabase(database: DatabaseSync): void {
+  createVersionTwoDatabase(database);
+  database.exec(`
+    CREATE TABLE nursing_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      child_id TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      status TEXT NOT NULL,
+      left_duration_seconds INTEGER NOT NULL,
+      right_duration_seconds INTEGER NOT NULL,
+      total_pause_duration_seconds INTEGER NOT NULL,
+      active_side TEXT,
+      active_side_started_at TEXT,
+      pause_started_at TEXT,
+      last_breast_used TEXT NOT NULL,
+      timezone TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      deleted_at TEXT
+    );
+
+    INSERT INTO nursing_sessions VALUES (
+      'completed-nursing', 'child-arthur', '2026-08-12T10:00:00.000Z',
+      '2026-08-12T10:01:00.000Z', 'completed', 60, 0, 0, NULL, NULL, NULL,
+      'left', 'Europe/Lisbon', 'caregiver-paloma', 'caregiver-paloma', 2, NULL
+    );
+
+    PRAGMA user_version = 3;
   `);
 }
 
