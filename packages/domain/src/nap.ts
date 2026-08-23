@@ -12,6 +12,17 @@ export function startNap(context: MutationContext, startedAt: Date = context.now
   const selectedStartedAt = toUtcInstant(startedAt);
   assertNotFuture(selectedStartedAt, occurredAt);
   const sessionId = context.newId();
+  const phase = {
+    id: context.newId(),
+    sleepSessionId: sessionId,
+    kind: 'asleep' as const,
+    startedAt: selectedStartedAt,
+    endedAt: null,
+    createdBy: context.caregiverId,
+    updatedBy: context.caregiverId,
+    version: 1,
+    deletedAt: null,
+  };
 
   return {
     session: {
@@ -26,18 +37,9 @@ export function startNap(context: MutationContext, startedAt: Date = context.now
       updatedBy: context.caregiverId,
       version: 1,
       deletedAt: null,
-      phase: {
-        id: context.newId(),
-        sleepSessionId: sessionId,
-        kind: 'asleep',
-        startedAt: selectedStartedAt,
-        endedAt: null,
-        createdBy: context.caregiverId,
-        updatedBy: context.caregiverId,
-        version: 1,
-        deletedAt: null,
-      },
+      phases: [phase],
     },
+    changedPhases: [phase],
     operation: {
       operationId: context.newId(),
       entityId: sessionId,
@@ -69,6 +71,14 @@ export function stopNap(
   assertNotFuture(selectedEndedAt, occurredAt);
   assertValidInterval(session.startedAt, selectedEndedAt);
 
+  const phase = session.phases[0];
+  const changedPhase = {
+    ...phase,
+    endedAt: selectedEndedAt,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+  };
+
   return {
     session: {
       ...session,
@@ -76,13 +86,9 @@ export function stopNap(
       status: 'completed',
       updatedBy: context.caregiverId,
       version: session.version + 1,
-      phase: {
-        ...session.phase,
-        endedAt: selectedEndedAt,
-        updatedBy: context.caregiverId,
-        version: session.phase.version + 1,
-      },
+      phases: [changedPhase],
     },
+    changedPhases: [changedPhase],
     operation: {
       operationId: context.newId(),
       entityId: session.id,
@@ -137,6 +143,15 @@ export function editNap(
     payload.endedAt = correctedEndedAt;
   }
 
+  const phase = session.phases[0];
+  const changedPhase = {
+    ...phase,
+    startedAt: correctedStartedAt,
+    endedAt: correctedEndedAt,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+  };
+
   return {
     session: {
       ...session,
@@ -144,14 +159,9 @@ export function editNap(
       endedAt: correctedEndedAt,
       updatedBy: context.caregiverId,
       version: session.version + 1,
-      phase: {
-        ...session.phase,
-        startedAt: correctedStartedAt,
-        endedAt: correctedEndedAt,
-        updatedBy: context.caregiverId,
-        version: session.phase.version + 1,
-      },
+      phases: [changedPhase],
     },
+    changedPhases: [changedPhase],
     operation: {
       operationId: context.newId(),
       entityId: session.id,
@@ -179,19 +189,23 @@ export function deleteNap(session: NapSession, context: MutationContext): NapMut
 
   const occurredAt = toUtcInstant(context.now);
 
+  const phase = session.phases[0];
+  const changedPhase = {
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: occurredAt,
+  };
+
   return {
     session: {
       ...session,
       updatedBy: context.caregiverId,
       version: session.version + 1,
       deletedAt: occurredAt,
-      phase: {
-        ...session.phase,
-        updatedBy: context.caregiverId,
-        version: session.phase.version + 1,
-        deletedAt: occurredAt,
-      },
+      phases: [changedPhase],
     },
+    changedPhases: [changedPhase],
     operation: {
       operationId: context.newId(),
       entityId: session.id,
@@ -218,19 +232,23 @@ export function restoreNap(session: NapSession, context: MutationContext): NapMu
 
   const occurredAt = toUtcInstant(context.now);
 
+  const phase = session.phases[0];
+  const changedPhase = {
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: null,
+  };
+
   return {
     session: {
       ...session,
       updatedBy: context.caregiverId,
       version: session.version + 1,
       deletedAt: null,
-      phase: {
-        ...session.phase,
-        updatedBy: context.caregiverId,
-        version: session.phase.version + 1,
-        deletedAt: null,
-      },
+      phases: [changedPhase],
     },
+    changedPhases: [changedPhase],
     operation: {
       operationId: context.newId(),
       entityId: session.id,
@@ -252,7 +270,11 @@ export function restoreNap(session: NapSession, context: MutationContext): NapMu
 function assertEditableActiveNap(session: NapSession): void {
   assertNotDeleted(session);
 
-  if (session.status !== 'active' || session.endedAt !== null || session.phase.endedAt !== null) {
+  if (
+    session.status !== 'active' ||
+    session.endedAt !== null ||
+    session.phases[0].endedAt !== null
+  ) {
     throw new Error('Only an active nap can be stopped.');
   }
 }
