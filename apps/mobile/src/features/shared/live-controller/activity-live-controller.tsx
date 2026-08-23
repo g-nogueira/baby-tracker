@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface ActivityLiveControllerProps {
+  actionIcon?: string;
   accentColor: string;
   accessibilityLabel: string;
   activityLabel: string;
@@ -22,6 +23,7 @@ interface ActivityLiveControllerProps {
  * @returns The rendered activity live controller
  */
 export function ActivityLiveController({
+  actionIcon,
   accentColor,
   accessibilityLabel,
   activityLabel,
@@ -63,7 +65,11 @@ export function ActivityLiveController({
           pressed && styles.pressed,
         ]}
       >
-        <View style={styles.stopSquare} />
+        {actionIcon === undefined ? (
+          <View style={styles.stopSquare} />
+        ) : (
+          <Text style={styles.actionIcon}>{actionIcon}</Text>
+        )}
       </Pressable>
     </View>
   );
@@ -114,6 +120,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3A3733',
   },
   stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  actionIcon: { color: '#FFFFFF', fontSize: 22, fontWeight: '800' },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.78 },
 });

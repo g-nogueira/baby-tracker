@@ -1,8 +1,8 @@
 import { elapsedMilliseconds, formatDuration, type NapSession } from '@baby-tracker/domain';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   AccessibilityInfo,
+  ActivityIndicator,
   AppState,
   Pressable,
   ScrollView,
@@ -13,7 +13,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import {
+  type HomeQuickAction,
+  HomeQuickActions,
+} from '@/features/shared/home-actions/home-quick-actions';
 import { ActivityLiveController } from '@/features/shared/live-controller/activity-live-controller';
+import { ActivityLiveControllerStack } from '@/features/shared/live-controller/activity-live-controller-stack';
+import { NightTransitionDrawer } from '@/features/sleep/night-transition-drawer';
+import {
+  createNightTransitionDraft,
+  type NightTransitionDraft,
+} from '@/features/sleep/night-transition-drawer-state';
+import {
+  deriveSleepHomeModel,
+  type SleepHomeActionKind,
+  type SleepHomeControllerModel,
+} from '@/features/sleep/sleep-home-state';
 import { calendarDayForInstant } from './calendar-day';
 import { formatLiveDuration } from './nap-clock';
 import { NapEditorSheet } from './nap-editor-sheet';
@@ -59,8 +74,10 @@ interface UndoState {
 export function TodayScreen() {
   const {
     activeNap,
+    activeSleep,
     clearError,
     edit,
+    endNight,
     error,
     isLoading,
     isMutating,
@@ -73,13 +90,18 @@ export function TodayScreen() {
     goToToday,
     remove,
     restore,
+    resumeNight,
     selectedDay,
     start,
+    startNight,
+    startNightWaking,
     stop,
   } = useNaps();
-  const now = useAdaptiveClock(activeNap !== null);
+  const now = useAdaptiveClock(activeSleep !== null);
   const [editor, setEditor] = useState<NapEditorState | null>(null);
+  const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
+  const [controllerReservedSpace, setControllerReservedSpace] = useState(0);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -106,6 +128,13 @@ export function TodayScreen() {
   }
 
   const activeUndoPending = undo?.deletedNap.status === 'active';
+  const homeModel = deriveSleepHomeModel(activeSleep, latestCompletedEnd);
+  const activeController = homeModel.controller;
+  const contentBottomPadding = Math.max(
+    80,
+    activeSleep === null ? 0 : controllerReservedSpace || 126,
+    undo === null ? 0 : 194,
+  );
 
   const openNapControls = () => {
     clearError();
@@ -114,6 +143,28 @@ export function TodayScreen() {
         ? { mode: 'start', startedAt: new Date() }
         : { mode: 'stop', nap: activeNap, endedAt: new Date() },
     );
+  };
+
+  const openSleepAction = (kind: SleepHomeActionKind) => {
+    clearError();
+    if (kind === 'start-nap' || kind === 'open-current-nap') {
+      openNapControls();
+      return;
+    }
+    const session = activeSleep?.kind === 'night' ? activeSleep : null;
+    setNightDraft(createNightTransitionDraft(kind, session, new Date()));
+  };
+
+  const saveNightDraft = async (draft: NightTransitionDraft) => {
+    const saved =
+      draft.kind === 'start-night-sleep'
+        ? await startNight(draft.effectiveAt)
+        : draft.kind === 'start-night-waking'
+          ? await startNightWaking(draft.effectiveAt)
+          : draft.kind === 'resume-night-sleep'
+            ? await resumeNight(draft.effectiveAt)
+            : await endNight(draft.effectiveAt);
+    if (saved !== null) setNightDraft(null);
   };
 
   const openNapRecord = (napId: string) => {
@@ -152,15 +203,38 @@ export function TodayScreen() {
     if (restored !== null) setUndo(null);
   };
 
+  const centerStatus = isToday
+    ? {
+        label: homeModel.center.label,
+        value:
+          homeModel.center.durationStartedAt === null
+            ? null
+            : formatDuration(elapsedMilliseconds(homeModel.center.durationStartedAt, now)),
+        hint: homeModel.center.hint,
+      }
+    : {
+        label: `${naps.length} ${naps.length === 1 ? 'nap' : 'naps'}`,
+        value: null,
+        hint: 'Recorded on this day',
+      };
+  const quickActions: HomeQuickAction[] = homeModel.actions.map((action) => ({
+    id: action.kind,
+    label: action.label,
+    meta: actionMeta(action.kind),
+    icon: actionIcon(action.kind),
+    color: actionColor(action.kind),
+    disabled: isMutating || activeUndoPending || action.disabledReason !== null,
+    disabledReason:
+      action.disabledReason ??
+      (isMutating ? 'A sleep change is being saved.' : null) ??
+      (activeUndoPending ? 'Restore or finish the pending Undo first.' : null),
+    active: action.kind === 'open-current-nap',
+    onPress: () => openSleepAction(action.kind),
+  }));
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          activeNap !== null && styles.contentWithTimer,
-          undo !== null && styles.contentWithUndo,
-        ]}
-      >
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}>
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>{isToday ? 'TODAY' : 'HISTORY'}</Text>
@@ -187,16 +261,15 @@ export function TodayScreen() {
         ) : null}
 
         <NapRadialTimeline
-          activeNap={isToday ? activeNap : null}
           calendarDay={selectedDay}
+          centerStatus={centerStatus}
           disabled={isMutating || activeUndoPending}
-          isToday={isToday}
-          latestCompletedEnd={latestCompletedEnd}
           naps={naps}
           now={now}
-          onPressNap={openNapControls}
           onPressNapRecord={openNapRecord}
         />
+
+        {isToday ? <HomeQuickActions actions={quickActions} /> : null}
 
         {!isToday ? (
           <Pressable accessibilityRole="button" onPress={goToToday} style={styles.todayButton}>
@@ -251,15 +324,30 @@ export function TodayScreen() {
         </View>
       </ScrollView>
 
-      {activeNap !== null && isToday ? (
-        <ActiveNapTimer
-          isMutating={isMutating}
-          nap={activeNap}
-          now={now}
-          onOpen={openNapControls}
-          onStop={() => void stop()}
+      {activeSleep !== null && activeController !== null && isToday ? (
+        <ActivityLiveControllerStack
+          onReservedSpaceChange={setControllerReservedSpace}
           raised={undo !== null}
-        />
+        >
+          {activeSleep.kind === 'nap' && activeController.kind === 'nap' ? (
+            <ActiveNapTimer
+              isMutating={isMutating}
+              nap={activeSleep}
+              now={now}
+              onOpen={openNapControls}
+              onStop={() => void stop()}
+            />
+          ) : activeController.kind !== 'nap' ? (
+            <ActiveNightTimer
+              controller={activeController}
+              isMutating={isMutating}
+              now={now}
+              onEnd={() => void endNight()}
+              onOpen={() => openSleepAction(activeController.primaryAction)}
+              onResume={() => void resumeNight()}
+            />
+          ) : null}
+        </ActivityLiveControllerStack>
       ) : null}
 
       {undo !== null ? (
@@ -291,6 +379,20 @@ export function TodayScreen() {
           onSave={(candidate) => void saveEditor(candidate)}
         />
       ) : null}
+
+      {nightDraft !== null ? (
+        <NightTransitionDrawer
+          draft={nightDraft}
+          isMutating={isMutating}
+          mutationError={error}
+          onCancel={() => setNightDraft(null)}
+          onChange={(draft) => {
+            clearError();
+            setNightDraft(draft);
+          }}
+          onSave={(draft) => void saveNightDraft(draft)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -303,7 +405,6 @@ export function TodayScreen() {
  * @param now - The current time used to calculate elapsed duration.
  * @param onOpen - Called when the nap editor is opened.
  * @param onStop - Called when the active nap is stopped.
- * @param raised - Whether to raise the timer above the undo banner.
  */
 function ActiveNapTimer({
   isMutating,
@@ -311,31 +412,104 @@ function ActiveNapTimer({
   now,
   onOpen,
   onStop,
-  raised,
 }: {
   isMutating: boolean;
   nap: NapSession;
   now: Date;
   onOpen: () => void;
   onStop: () => void;
-  raised: boolean;
 }) {
   const liveDuration = formatLiveDuration(elapsedMilliseconds(nap.startedAt, now));
   return (
-    <View style={[styles.activeTimerPosition, raised && styles.activeTimerRaised]}>
-      <ActivityLiveController
-        accentColor={palette.nap}
-        accessibilityLabel={`Nap running for ${liveDuration}`}
-        activityLabel="Nap"
-        disabled={isMutating}
-        elapsedLabel={liveDuration}
-        icon="z"
-        onOpen={onOpen}
-        onStop={onStop}
-        stopAccessibilityLabel="Stop nap now"
-      />
-    </View>
+    <ActivityLiveController
+      accentColor={palette.nap}
+      accessibilityLabel={`Nap running for ${liveDuration}`}
+      activityLabel="Nap"
+      disabled={isMutating}
+      elapsedLabel={liveDuration}
+      icon="z"
+      onOpen={onOpen}
+      onStop={onStop}
+      stopAccessibilityLabel="Stop nap now"
+    />
   );
+}
+
+/** Displays the active Night phase while retaining session-level elapsed time where required. */
+function ActiveNightTimer({
+  controller,
+  isMutating,
+  now,
+  onEnd,
+  onOpen,
+  onResume,
+}: {
+  controller: Exclude<SleepHomeControllerModel, { kind: 'nap' }>;
+  isMutating: boolean;
+  now: Date;
+  onEnd: () => void;
+  onOpen: () => void;
+  onResume: () => void;
+}) {
+  const awake = controller.kind === 'night-awake';
+  const liveDuration = formatLiveDuration(elapsedMilliseconds(controller.durationStartedAt, now));
+  return (
+    <ActivityLiveController
+      accentColor={awake ? '#52728A' : '#5B4C94'}
+      accessibilityLabel={`${awake ? 'Night waking' : 'Night sleep'} running for ${liveDuration}`}
+      actionIcon={awake ? '↻' : undefined}
+      activityLabel={awake ? 'Night waking' : 'Night sleep'}
+      disabled={isMutating}
+      elapsedLabel={liveDuration}
+      icon={awake ? '↯' : '☾'}
+      onOpen={onOpen}
+      onStop={controller.primaryAction === 'resume-night-sleep' ? onResume : onEnd}
+      stopAccessibilityLabel={awake ? 'Fell asleep again now' : 'Wake up now'}
+      subtitle={awake ? 'Awake tonight' : undefined}
+    />
+  );
+}
+
+function actionMeta(kind: SleepHomeActionKind): string {
+  switch (kind) {
+    case 'open-current-nap':
+      return 'Running';
+    case 'end-night-sleep':
+      return 'End Night';
+    case 'start-night-waking':
+      return 'Awake phase';
+    case 'resume-night-sleep':
+      return 'Resume sleep';
+    default:
+      return 'Start';
+  }
+}
+
+function actionIcon(kind: SleepHomeActionKind): string {
+  switch (kind) {
+    case 'start-night-sleep':
+      return '☾';
+    case 'start-nap':
+    case 'open-current-nap':
+    case 'resume-night-sleep':
+      return 'z';
+    case 'end-night-sleep':
+      return '☀';
+    case 'start-night-waking':
+      return '↯';
+  }
+}
+
+function actionColor(kind: SleepHomeActionKind): string {
+  switch (kind) {
+    case 'start-night-sleep':
+    case 'end-night-sleep':
+      return '#5B4C94';
+    case 'start-night-waking':
+      return '#52728A';
+    default:
+      return palette.nap;
+  }
 }
 
 /**
@@ -423,8 +597,6 @@ const styles = StyleSheet.create({
     backgroundColor: palette.background,
   },
   content: { paddingHorizontal: 20, paddingBottom: 80, gap: 18 },
-  contentWithTimer: { paddingBottom: 126 },
-  contentWithUndo: { paddingBottom: 194 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -507,13 +679,6 @@ const styles = StyleSheet.create({
   rowTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },
   rowTime: { color: palette.muted, fontSize: 13, marginTop: 4 },
   editText: { color: palette.nap, fontSize: 13, fontWeight: '700' },
-  activeTimerPosition: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
-  },
-  activeTimerRaised: { bottom: 86 },
   undoBanner: {
     position: 'absolute',
     left: 20,
