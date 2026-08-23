@@ -10,15 +10,29 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { NursingDrawer } from '@/features/nursing/nursing-drawer';
+import {
+  combinedPendingOperationCount,
+  decideNursingDrawerCommand,
+  liveControllerIdentities,
+} from '@/features/nursing/nursing-home-integration-state';
+import {
+  appendNursingHomeAction,
+  deriveNursingHomeModel,
+  type NursingControllerModel,
+} from '@/features/nursing/nursing-home-state';
+import { useNursing } from '@/features/nursing/use-nursing';
 import {
   type HomeQuickAction,
   HomeQuickActions,
 } from '@/features/shared/home-actions/home-quick-actions';
 import { ActivityLiveController } from '@/features/shared/live-controller/activity-live-controller';
+import { minimumLiveControllerStackHeight } from '@/features/shared/live-controller/activity-live-controller-layout';
 import { ActivityLiveControllerStack } from '@/features/shared/live-controller/activity-live-controller-stack';
+import { liveControllerReservedSpace } from '@/features/shared/live-controller/activity-live-controller-stack-state';
 import { NightTransitionDrawer } from '@/features/sleep/night-transition-drawer';
 import {
   createNightTransitionDraft,
@@ -72,20 +86,21 @@ interface UndoState {
  * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
  */
 export function TodayScreen() {
+  const insets = useSafeAreaInsets();
   const {
     activeNap,
     activeSleep,
-    clearError,
+    clearError: clearSleepError,
     edit,
     endNight,
-    error,
-    isLoading,
-    isMutating,
+    error: sleepError,
+    isLoading: isSleepLoading,
+    isMutating: isSleepMutating,
     isToday,
     latestCompletedEnd,
     naps,
     nextDay,
-    pendingOperationCount,
+    pendingOperationCount: sleepPendingOperationCount,
     previousDay,
     goToToday,
     remove,
@@ -97,9 +112,24 @@ export function TodayScreen() {
     startNightWaking,
     stop,
   } = useNaps();
-  const now = useAdaptiveClock(activeSleep !== null);
+  const {
+    activeSession: activeNursing,
+    clearError: clearNursingError,
+    error: nursingError,
+    isLoading: isNursingLoading,
+    isMutating: isNursingMutating,
+    latestCompletedLast,
+    pause: pauseNursing,
+    pendingOperationCount: nursingPendingOperationCount,
+    resume: resumeNursing,
+    start: startNursing,
+    stop: stopNursing,
+    switchSide: switchNursing,
+  } = useNursing(selectedDay);
+  const now = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
+  const [nursingDrawerOpen, setNursingDrawerOpen] = useState(false);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [controllerReservedSpace, setControllerReservedSpace] = useState(0);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,7 +149,7 @@ export function TodayScreen() {
     };
   }, [undo]);
 
-  if (isLoading) {
+  if (isSleepLoading || isNursingLoading) {
     return (
       <SafeAreaView style={styles.loading}>
         <ActivityIndicator color={palette.nap} size="large" />
@@ -129,15 +159,31 @@ export function TodayScreen() {
 
   const activeUndoPending = undo?.deletedNap.status === 'active';
   const homeModel = deriveSleepHomeModel(activeSleep, latestCompletedEnd);
+  const nursingModel = deriveNursingHomeModel(activeNursing, latestCompletedLast, now);
+  const nursingController = nursingModel.controller;
   const activeController = homeModel.controller;
+  const liveControllers = liveControllerIdentities(
+    activeSleep?.id ?? null,
+    nursingController?.sessionId ?? null,
+  );
+  const hasLiveController = liveControllers.length > 0;
+  const pendingOperationCount = combinedPendingOperationCount(
+    sleepPendingOperationCount,
+    nursingPendingOperationCount,
+  );
+  const controllerFallbackSpace = liveControllerReservedSpace(
+    insets.bottom,
+    undo !== null,
+    minimumLiveControllerStackHeight(liveControllers.length),
+  );
   const contentBottomPadding = Math.max(
     80,
-    activeSleep === null ? 0 : controllerReservedSpace || 126,
+    hasLiveController ? Math.max(controllerReservedSpace, controllerFallbackSpace) : 0,
     undo === null ? 0 : 194,
   );
 
   const openNapControls = () => {
-    clearError();
+    clearSleepError();
     setEditor(
       activeNap === null
         ? { mode: 'start', startedAt: new Date() }
@@ -146,7 +192,7 @@ export function TodayScreen() {
   };
 
   const openSleepAction = (kind: SleepHomeActionKind) => {
-    clearError();
+    clearSleepError();
     if (kind === 'start-nap' || kind === 'open-current-nap') {
       openNapControls();
       return;
@@ -170,7 +216,7 @@ export function TodayScreen() {
   const openNapRecord = (napId: string) => {
     const nap = naps.find((candidate) => candidate.id === napId);
     if (nap === undefined) return;
-    clearError();
+    clearSleepError();
     setEditor({
       mode: 'edit',
       nap,
@@ -203,6 +249,16 @@ export function TodayScreen() {
     if (restored !== null) setUndo(null);
   };
 
+  const openNursingControls = (sessionId?: string) => {
+    const decision = decideNursingDrawerCommand(
+      activeNursing?.id ?? null,
+      sessionId === undefined ? { kind: 'open' } : { kind: 'open', sessionId },
+    );
+    if (!decision.drawerOpen) return;
+    if (decision.clearError) clearNursingError();
+    setNursingDrawerOpen(decision.drawerOpen);
+  };
+
   const centerStatus = isToday
     ? {
         label: homeModel.center.label,
@@ -217,20 +273,37 @@ export function TodayScreen() {
         value: null,
         hint: 'Recorded on this day',
       };
-  const quickActions: HomeQuickAction[] = homeModel.actions.map((action) => ({
-    id: action.kind,
-    label: action.label,
-    meta: actionMeta(action.kind),
-    icon: actionIcon(action.kind),
-    color: actionColor(action.kind),
-    disabled: isMutating || activeUndoPending || action.disabledReason !== null,
-    disabledReason:
-      action.disabledReason ??
-      (isMutating ? 'A sleep change is being saved.' : null) ??
-      (activeUndoPending ? 'Restore or finish the pending Undo first.' : null),
-    active: action.kind === 'open-current-nap',
-    onPress: () => openSleepAction(action.kind),
-  }));
+  const quickActions: HomeQuickAction[] = appendNursingHomeAction(
+    homeModel.actions,
+    nursingModel.action,
+  ).map((action) =>
+    action.kind === 'nursing'
+      ? {
+          id: action.kind,
+          label: action.label,
+          meta: action.meta,
+          icon: 'N',
+          color: '#B35D7D',
+          disabled: isNursingMutating,
+          disabledReason: isNursingMutating ? 'A Nursing change is being saved.' : null,
+          active: action.active,
+          onPress: () => openNursingControls(),
+        }
+      : {
+          id: action.kind,
+          label: action.label,
+          meta: actionMeta(action.kind),
+          icon: actionIcon(action.kind),
+          color: actionColor(action.kind),
+          disabled: isSleepMutating || activeUndoPending || action.disabledReason !== null,
+          disabledReason:
+            action.disabledReason ??
+            (isSleepMutating ? 'A sleep change is being saved.' : null) ??
+            (activeUndoPending ? 'Restore or finish the pending Undo first.' : null),
+          active: action.kind === 'open-current-nap',
+          onPress: () => openSleepAction(action.kind),
+        },
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -251,11 +324,28 @@ export function TodayScreen() {
           ) : null}
         </View>
 
-        {error ? (
+        {sleepError ? (
           <View accessibilityRole="alert" style={styles.errorBanner}>
-            <Text style={styles.errorText}>{error}</Text>
-            <Pressable accessibilityRole="button" onPress={clearError} style={styles.dismissError}>
+            <Text style={styles.errorText}>{sleepError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={clearSleepError}
+              style={styles.dismissError}
+            >
               <Text style={styles.dismissErrorText}>Dismiss</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {nursingError ? (
+          <View accessibilityRole="alert" style={styles.nursingErrorBanner}>
+            <Text style={styles.nursingErrorText}>Nursing · {nursingError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={clearNursingError}
+              style={styles.dismissError}
+            >
+              <Text style={styles.nursingDismissErrorText}>Dismiss</Text>
             </Pressable>
           </View>
         ) : null}
@@ -263,7 +353,7 @@ export function TodayScreen() {
         <NapRadialTimeline
           calendarDay={selectedDay}
           centerStatus={centerStatus}
-          disabled={isMutating || activeUndoPending}
+          disabled={isSleepMutating || activeUndoPending}
           naps={naps}
           now={now}
           onPressNapRecord={openNapRecord}
@@ -324,27 +414,37 @@ export function TodayScreen() {
         </View>
       </ScrollView>
 
-      {activeSleep !== null && activeController !== null && isToday ? (
+      {hasLiveController && isToday ? (
         <ActivityLiveControllerStack
           onReservedSpaceChange={setControllerReservedSpace}
           raised={undo !== null}
         >
-          {activeSleep.kind === 'nap' && activeController.kind === 'nap' ? (
+          {activeSleep?.kind === 'nap' && activeController?.kind === 'nap' ? (
             <ActiveNapTimer
-              isMutating={isMutating}
+              isMutating={isSleepMutating}
               nap={activeSleep}
               now={now}
               onOpen={openNapControls}
               onStop={() => void stop()}
             />
-          ) : activeController.kind !== 'nap' ? (
+          ) : activeSleep?.kind === 'night' &&
+            activeController !== null &&
+            activeController.kind !== 'nap' ? (
             <ActiveNightTimer
               controller={activeController}
-              isMutating={isMutating}
+              isMutating={isSleepMutating}
               now={now}
               onEnd={() => void endNight()}
               onOpen={() => openSleepAction(activeController.primaryAction)}
               onResume={() => void resumeNight()}
+            />
+          ) : null}
+          {activeNursing !== null && nursingController !== null ? (
+            <ActiveNursingTimer
+              isMutating={isNursingMutating}
+              model={nursingController}
+              onOpen={() => openNursingControls(nursingController.sessionId)}
+              onStop={() => void stopNursing()}
             />
           ) : null}
         </ActivityLiveControllerStack>
@@ -356,7 +456,7 @@ export function TodayScreen() {
           <Pressable
             accessibilityHint="Restores the deleted nap with the same identifier"
             accessibilityRole="button"
-            disabled={isMutating}
+            disabled={isSleepMutating}
             onPress={() => void undoDelete()}
             style={styles.undoButton}
           >
@@ -368,11 +468,11 @@ export function TodayScreen() {
       {editor !== null ? (
         <NapEditorSheet
           editor={editor}
-          isMutating={isMutating}
-          mutationError={error}
+          isMutating={isSleepMutating}
+          mutationError={sleepError}
           onCancel={() => setEditor(null)}
           onChange={(nextEditor) => {
-            clearError();
+            clearSleepError();
             setEditor(nextEditor);
           }}
           onDelete={editor.mode === 'start' ? null : () => void deleteFromEditor()}
@@ -383,14 +483,37 @@ export function TodayScreen() {
       {nightDraft !== null ? (
         <NightTransitionDrawer
           draft={nightDraft}
-          isMutating={isMutating}
-          mutationError={error}
+          isMutating={isSleepMutating}
+          mutationError={sleepError}
           onCancel={() => setNightDraft(null)}
           onChange={(draft) => {
-            clearError();
+            clearSleepError();
             setNightDraft(draft);
           }}
           onSave={(draft) => void saveNightDraft(draft)}
+        />
+      ) : null}
+
+      {nursingDrawerOpen ? (
+        <NursingDrawer
+          activeSession={activeNursing}
+          isMutating={isNursingMutating}
+          latestCompletedLast={latestCompletedLast}
+          mutationError={nursingError}
+          onDismiss={() =>
+            setNursingDrawerOpen(
+              decideNursingDrawerCommand(activeNursing?.id ?? null, { kind: 'dismiss' }).drawerOpen,
+            )
+          }
+          onPause={() => void pauseNursing()}
+          onResume={(side) => void resumeNursing(side)}
+          onStart={(side) => void startNursing(side)}
+          onStop={() => {
+            void stopNursing().then((saved) => {
+              if (saved !== null) setNursingDrawerOpen(false);
+            });
+          }}
+          onSwitch={(side) => void switchNursing(side)}
         />
       ) : null}
     </SafeAreaView>
@@ -466,6 +589,41 @@ function ActiveNightTimer({
       onStop={controller.primaryAction === 'resume-night-sleep' ? onResume : onEnd}
       stopAccessibilityLabel={awake ? 'Fell asleep again now' : 'Wake up now'}
       subtitle={awake ? 'Awake tonight' : undefined}
+    />
+  );
+}
+
+/** Displays persisted Nursing side totals and reopens the exact active or paused session. */
+function ActiveNursingTimer({
+  isMutating,
+  model,
+  onOpen,
+  onStop,
+}: {
+  isMutating: boolean;
+  model: NursingControllerModel;
+  onOpen: () => void;
+  onStop: () => void;
+}) {
+  const total = formatLiveDuration(model.totalDurationSeconds * 1_000);
+  const left = formatLiveDuration(model.leftDurationSeconds * 1_000);
+  const right = formatLiveDuration(model.rightDurationSeconds * 1_000);
+  const status =
+    model.status === 'paused'
+      ? 'Paused'
+      : `${model.activeSide === 'left' ? 'Left' : 'Right'} active`;
+  return (
+    <ActivityLiveController
+      accentColor="#B35D7D"
+      accessibilityLabel={`Nursing ${status.toLocaleLowerCase()}, total ${total}, Left ${left}, Right ${right}`}
+      activityLabel="Nursing"
+      disabled={isMutating}
+      elapsedLabel={total}
+      icon="N"
+      onOpen={onOpen}
+      onStop={onStop}
+      stopAccessibilityLabel="Stop Nursing now"
+      subtitle={`L ${left} · R ${right} · ${status}`}
     />
   );
 }
@@ -625,8 +783,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   errorText: { flex: 1, color: palette.danger, fontSize: 14 },
+  nursingErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    backgroundColor: '#F6E4EB',
+    borderRadius: 14,
+  },
+  nursingErrorText: { flex: 1, color: '#8D3E5C', fontSize: 14 },
   dismissError: { minHeight: 44, justifyContent: 'center' },
   dismissErrorText: { color: palette.danger, fontSize: 13, fontWeight: '700' },
+  nursingDismissErrorText: { color: '#8D3E5C', fontSize: 13, fontWeight: '700' },
   todayButton: {
     alignSelf: 'center',
     minHeight: 44,
