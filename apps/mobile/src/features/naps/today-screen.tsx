@@ -1,4 +1,9 @@
-import { elapsedMilliseconds, formatDuration, type NapSession } from '@baby-tracker/domain';
+import {
+  type CareEvent,
+  elapsedMilliseconds,
+  formatDuration,
+  type NapSession,
+} from '@baby-tracker/domain';
 import { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -13,6 +18,17 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { CareEventDrawer } from '@/features/care-events/care-event-drawer';
+import {
+  type CareEventDrawerState,
+  createCareEventDraft,
+  editCareEventDraft,
+} from '@/features/care-events/care-event-drawer-state';
+import {
+  appendCareEventHomeActions,
+  homeChronology,
+} from '@/features/care-events/care-event-home-state';
+import { useCareEvents } from '@/features/care-events/use-care-events';
 import { NursingDrawer } from '@/features/nursing/nursing-drawer';
 import {
   combinedPendingOperationCount,
@@ -78,9 +94,9 @@ const palette = {
   border: '#E7E0D7',
 };
 
-interface UndoState {
-  deletedNap: NapSession;
-}
+type UndoState =
+  | { kind: 'nap'; deletedNap: NapSession }
+  | { kind: 'care-event'; deletedEvent: CareEvent };
 
 /**
  * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
@@ -126,10 +142,25 @@ export function TodayScreen() {
     stop: stopNursing,
     switchSide: switchNursing,
   } = useNursing(selectedDay);
+  const {
+    clearError: clearCareEventError,
+    createDiaper,
+    createMedicine,
+    editDiaper,
+    editMedicine,
+    error: careEventError,
+    events: careEvents,
+    isLoading: isCareEventLoading,
+    isMutating: isCareEventMutating,
+    pendingOperationCount: careEventPendingOperationCount,
+    remove: removeCareEvent,
+    restore: restoreCareEvent,
+  } = useCareEvents(selectedDay);
   const now = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
   const [nursingDrawerOpen, setNursingDrawerOpen] = useState(false);
+  const [careEventDrawer, setCareEventDrawer] = useState<CareEventDrawerState | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [controllerReservedSpace, setControllerReservedSpace] = useState(0);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,7 +168,9 @@ export function TodayScreen() {
   useEffect(() => {
     if (undo === null) return;
     let cancelled = false;
-    AccessibilityInfo.announceForAccessibility('Nap deleted. Undo available.');
+    AccessibilityInfo.announceForAccessibility(
+      `${undo.kind === 'nap' ? 'Nap' : undo.deletedEvent.kind === 'diaper' ? 'Diaper event' : 'Medicine event'} deleted. Undo available.`,
+    );
     AccessibilityInfo.getRecommendedTimeoutMillis(5_000)
       .catch(() => 5_000)
       .then((timeout) => {
@@ -149,7 +182,7 @@ export function TodayScreen() {
     };
   }, [undo]);
 
-  if (isSleepLoading || isNursingLoading) {
+  if (isSleepLoading || isNursingLoading || isCareEventLoading) {
     return (
       <SafeAreaView style={styles.loading}>
         <ActivityIndicator color={palette.nap} size="large" />
@@ -157,7 +190,7 @@ export function TodayScreen() {
     );
   }
 
-  const activeUndoPending = undo?.deletedNap.status === 'active';
+  const activeUndoPending = undo?.kind === 'nap' && undo.deletedNap.status === 'active';
   const homeModel = deriveSleepHomeModel(activeSleep, latestCompletedEnd);
   const nursingModel = deriveNursingHomeModel(activeNursing, latestCompletedLast, now);
   const nursingController = nursingModel.controller;
@@ -168,9 +201,10 @@ export function TodayScreen() {
   );
   const hasLiveController = liveControllers.length > 0;
   const pendingOperationCount = combinedPendingOperationCount(
-    sleepPendingOperationCount,
-    nursingPendingOperationCount,
+    combinedPendingOperationCount(sleepPendingOperationCount, nursingPendingOperationCount),
+    careEventPendingOperationCount,
   );
+  const chronology = homeChronology(naps, careEvents);
   const controllerFallbackSpace = liveControllerReservedSpace(
     insets.bottom,
     undo !== null,
@@ -240,13 +274,50 @@ export function TodayScreen() {
     const deletedNap = await remove(editor.nap);
     if (deletedNap === null) return;
     setEditor(null);
-    setUndo({ deletedNap });
+    setUndo({ kind: 'nap', deletedNap });
   };
 
   const undoDelete = async () => {
     if (undo === null) return;
-    const restored = await restore(undo.deletedNap);
+    const restored =
+      undo.kind === 'nap'
+        ? await restore(undo.deletedNap)
+        : await restoreCareEvent(undo.deletedEvent);
     if (restored !== null) setUndo(null);
+  };
+
+  const openCareEventCreate = (kind: 'diaper' | 'medicine') => {
+    clearCareEventError();
+    setCareEventDrawer(createCareEventDraft(kind));
+  };
+
+  const openCareEventRecord = (eventId: string) => {
+    const event = careEvents.find((candidate) => candidate.id === eventId);
+    if (event === undefined) return;
+    clearCareEventError();
+    setCareEventDrawer(editCareEventDraft(event));
+  };
+
+  const saveCareEvent = async (draft: CareEventDrawerState) => {
+    const saved =
+      draft.mode === 'create'
+        ? draft.kind === 'diaper'
+          ? draft.diaperType === null
+            ? null
+            : await createDiaper(draft.diaperType, draft.occurredAt)
+          : await createMedicine(draft.note, draft.occurredAt)
+        : draft.kind === 'diaper'
+          ? await editDiaper(draft.event, draft.diaperType, draft.occurredAt)
+          : await editMedicine(draft.event, draft.note, draft.occurredAt);
+    if (saved !== null) setCareEventDrawer(null);
+  };
+
+  const deleteCareEventFromDrawer = async () => {
+    if (careEventDrawer === null || careEventDrawer.mode !== 'edit') return;
+    const deletedEvent = await removeCareEvent(careEventDrawer.event);
+    if (deletedEvent === null) return;
+    setCareEventDrawer(null);
+    setUndo({ kind: 'care-event', deletedEvent });
   };
 
   const openNursingControls = (sessionId?: string) => {
@@ -269,41 +340,54 @@ export function TodayScreen() {
         hint: homeModel.center.hint,
       }
     : {
-        label: `${naps.length} ${naps.length === 1 ? 'nap' : 'naps'}`,
+        label: `${chronology.length} ${chronology.length === 1 ? 'record' : 'records'}`,
         value: null,
         hint: 'Recorded on this day',
       };
-  const quickActions: HomeQuickAction[] = appendNursingHomeAction(
-    homeModel.actions,
-    nursingModel.action,
-  ).map((action) =>
-    action.kind === 'nursing'
-      ? {
-          id: action.kind,
-          label: action.label,
-          meta: action.meta,
-          icon: 'N',
-          color: '#B35D7D',
-          disabled: isNursingMutating,
-          disabledReason: isNursingMutating ? 'A Nursing change is being saved.' : null,
-          active: action.active,
-          onPress: () => openNursingControls(),
-        }
-      : {
-          id: action.kind,
-          label: action.label,
-          meta: actionMeta(action.kind),
-          icon: actionIcon(action.kind),
-          color: actionColor(action.kind),
-          disabled: isSleepMutating || activeUndoPending || action.disabledReason !== null,
-          disabledReason:
-            action.disabledReason ??
-            (isSleepMutating ? 'A sleep change is being saved.' : null) ??
-            (activeUndoPending ? 'Restore or finish the pending Undo first.' : null),
-          active: action.kind === 'open-current-nap',
-          onPress: () => openSleepAction(action.kind),
-        },
-  );
+  const quickActions: HomeQuickAction[] = appendCareEventHomeActions(
+    appendNursingHomeAction(homeModel.actions, nursingModel.action),
+  ).map((action) => {
+    if (action.kind === 'nursing') {
+      return {
+        id: action.kind,
+        label: action.label,
+        meta: action.meta,
+        icon: 'N',
+        color: '#B35D7D',
+        disabled: isNursingMutating,
+        disabledReason: isNursingMutating ? 'A Nursing change is being saved.' : null,
+        active: action.active,
+        onPress: () => openNursingControls(),
+      };
+    }
+    if (action.kind === 'medicine' || action.kind === 'diaper') {
+      return {
+        id: action.kind,
+        label: action.label,
+        meta: action.meta,
+        icon: action.kind === 'medicine' ? '+' : 'D',
+        color: action.kind === 'medicine' ? '#A65F35' : '#47735A',
+        disabled: isCareEventMutating,
+        disabledReason: isCareEventMutating ? 'A care event is being saved.' : null,
+        active: false,
+        onPress: () => openCareEventCreate(action.kind),
+      };
+    }
+    return {
+      id: action.kind,
+      label: action.label,
+      meta: actionMeta(action.kind),
+      icon: actionIcon(action.kind),
+      color: actionColor(action.kind),
+      disabled: isSleepMutating || activeUndoPending || action.disabledReason !== null,
+      disabledReason:
+        action.disabledReason ??
+        (isSleepMutating ? 'A sleep change is being saved.' : null) ??
+        (activeUndoPending ? 'Restore or finish the pending Undo first.' : null),
+      active: action.kind === 'open-current-nap',
+      onPress: () => openSleepAction(action.kind),
+    };
+  });
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -350,6 +434,19 @@ export function TodayScreen() {
           </View>
         ) : null}
 
+        {careEventError ? (
+          <View accessibilityRole="alert" style={styles.careEventErrorBanner}>
+            <Text style={styles.careEventErrorText}>Care event · {careEventError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={clearCareEventError}
+              style={styles.dismissError}
+            >
+              <Text style={styles.careEventDismissErrorText}>Dismiss</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <NapRadialTimeline
           calendarDay={selectedDay}
           centerStatus={centerStatus}
@@ -377,11 +474,11 @@ export function TodayScreen() {
             <Text style={styles.dateButtonText}>‹</Text>
           </Pressable>
           <View style={styles.dateLabel}>
-            <Text style={styles.sectionTitle}>{isToday ? 'Today’s naps' : 'Naps'}</Text>
+            <Text style={styles.sectionTitle}>{isToday ? 'Today’s activity' : 'Activity'}</Text>
             <Text style={styles.sectionMeta}>
               {isToday ? 'Today' : dayFormatter.format(new Date(`${selectedDay}T12:00:00.000Z`))}
               {' · '}
-              {naps.length} {naps.length === 1 ? 'nap' : 'naps'}
+              {chronology.length} {chronology.length === 1 ? 'record' : 'records'}
             </Text>
           </View>
           <Pressable
@@ -397,19 +494,32 @@ export function TodayScreen() {
         </View>
 
         <View style={styles.timeline}>
-          {naps.length === 0 ? (
+          {chronology.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No naps on this day</Text>
+              <Text style={styles.emptyTitle}>No activity on this day</Text>
               <Text style={styles.emptyText}>
                 {isToday
-                  ? `Tap the Nap circle when ${LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} falls asleep.`
+                  ? `Use an action above when ${LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} sleeps or needs care.`
                   : 'Use the arrows to review another day.'}
               </Text>
             </View>
           ) : (
-            naps.map((nap) => (
-              <NapRow key={nap.id} nap={nap} now={now} onEdit={() => openNapRecord(nap.id)} />
-            ))
+            chronology.map((item) =>
+              item.kind === 'nap' ? (
+                <NapRow
+                  key={`nap:${item.id}`}
+                  nap={item.nap}
+                  now={now}
+                  onEdit={() => openNapRecord(item.id)}
+                />
+              ) : (
+                <CareEventRow
+                  event={item.event}
+                  key={`care:${item.id}`}
+                  onEdit={() => openCareEventRecord(item.id)}
+                />
+              ),
+            )
           )}
         </View>
       </ScrollView>
@@ -452,11 +562,15 @@ export function TodayScreen() {
 
       {undo !== null ? (
         <View accessibilityLiveRegion="polite" style={styles.undoBanner}>
-          <Text style={styles.undoText}>Nap deleted</Text>
+          <Text style={styles.undoText}>
+            {undo.kind === 'nap'
+              ? 'Nap deleted'
+              : `${undo.deletedEvent.kind === 'diaper' ? 'Diaper' : 'Medicine'} deleted`}
+          </Text>
           <Pressable
-            accessibilityHint="Restores the deleted nap with the same identifier"
+            accessibilityHint="Restores the deleted record with the same identifier"
             accessibilityRole="button"
-            disabled={isSleepMutating}
+            disabled={undo.kind === 'nap' ? isSleepMutating : isCareEventMutating}
             onPress={() => void undoDelete()}
             style={styles.undoButton}
           >
@@ -514,6 +628,21 @@ export function TodayScreen() {
             });
           }}
           onSwitch={(side) => void switchNursing(side)}
+        />
+      ) : null}
+
+      {careEventDrawer !== null ? (
+        <CareEventDrawer
+          draft={careEventDrawer}
+          isMutating={isCareEventMutating}
+          mutationError={careEventError}
+          onCancel={() => setCareEventDrawer(null)}
+          onChange={(draft) => {
+            clearCareEventError();
+            setCareEventDrawer(draft);
+          }}
+          onDelete={careEventDrawer.mode === 'edit' ? () => void deleteCareEventFromDrawer() : null}
+          onSave={(draft) => void saveCareEvent(draft)}
         />
       ) : null}
     </SafeAreaView>
@@ -703,6 +832,42 @@ function NapRow({ nap, now, onEdit }: { nap: NapSession; now: Date; onEdit: () =
   );
 }
 
+/** Displays one exact Diaper or Medicine point event without exposing Medicine text in diagnostics. */
+function CareEventRow({ event, onEdit }: { event: CareEvent; onEdit: () => void }) {
+  const localTime = clockFormatter.format(new Date(event.occurredAt));
+  const title =
+    event.kind === 'diaper' ? `Diaper · ${capitalize(event.data.diaperType)}` : 'Medicine';
+  const detail = event.kind === 'medicine' ? event.data.note : 'Logged';
+  return (
+    <Pressable
+      accessibilityLabel={`Edit ${event.kind === 'diaper' ? `${event.data.diaperType} diaper` : 'Medicine event'} at ${localTime}`}
+      accessibilityRole="button"
+      onPress={onEdit}
+      style={({ pressed }) => [styles.timelineRow, pressed && styles.rowPressed]}
+    >
+      <View
+        style={[
+          styles.timelineMarker,
+          event.kind === 'medicine' ? styles.medicineMarker : styles.diaperMarker,
+        ]}
+      />
+      <View style={styles.timelineBody}>
+        <View style={styles.rowCopy}>
+          <Text style={styles.rowTitle}>{title}</Text>
+          <Text numberOfLines={2} style={styles.rowTime}>
+            {localTime} · {detail}
+          </Text>
+        </View>
+        <Text style={styles.editText}>Edit</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function capitalize(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+}
+
 /**
  * Tracks the current time with an update interval suited to the display precision.
  *
@@ -792,9 +957,19 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   nursingErrorText: { flex: 1, color: '#8D3E5C', fontSize: 14 },
+  careEventErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    backgroundColor: '#F8E9DE',
+    borderRadius: 14,
+  },
+  careEventErrorText: { flex: 1, color: '#8B4B2C', fontSize: 14 },
   dismissError: { minHeight: 44, justifyContent: 'center' },
   dismissErrorText: { color: palette.danger, fontSize: 13, fontWeight: '700' },
   nursingDismissErrorText: { color: '#8D3E5C', fontSize: 13, fontWeight: '700' },
+  careEventDismissErrorText: { color: '#8B4B2C', fontSize: 13, fontWeight: '700' },
   todayButton: {
     alignSelf: 'center',
     minHeight: 44,
@@ -832,6 +1007,8 @@ const styles = StyleSheet.create({
   timelineRow: { minHeight: 76, flexDirection: 'row', alignItems: 'stretch', paddingLeft: 18 },
   rowPressed: { backgroundColor: '#FAF8F5' },
   timelineMarker: { width: 4, borderRadius: 2, backgroundColor: palette.nap, marginVertical: 16 },
+  diaperMarker: { backgroundColor: '#47735A' },
+  medicineMarker: { backgroundColor: '#A65F35' },
   timelineBody: {
     flex: 1,
     minHeight: 76,
