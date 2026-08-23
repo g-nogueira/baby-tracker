@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
-import type { SQLiteDatabase } from 'expo-sqlite';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrateDatabase } from './migrations';
@@ -24,7 +24,7 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
       beforeSessions,
     );
@@ -56,7 +56,289 @@ describe('mobile database migrations', () => {
         ),
     ).toThrow();
   });
+
+  it('upgrades version 2 in place and enforces canonical Nursing open-state combinations', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionTwoDatabase(database);
+    const beforeSessions = database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all();
+    const beforeOutbox = database
+      .prepare('SELECT * FROM outbox_operations ORDER BY operation_id')
+      .all();
+    const adapter = new NodeSQLiteAdapter(database);
+
+    await migrateDatabase(adapter.asExpoDatabase());
+    await migrateDatabase(adapter.asExpoDatabase());
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
+      beforeSessions,
+    );
+    expect(database.prepare('SELECT * FROM outbox_operations ORDER BY operation_id').all()).toEqual(
+      beforeOutbox,
+    );
+
+    database
+      .prepare(
+        `INSERT INTO nursing_sessions (
+          id, child_id, started_at, ended_at, status,
+          left_duration_seconds, right_duration_seconds, total_pause_duration_seconds,
+          active_side, active_side_started_at, pause_started_at, last_breast_used,
+          timezone, created_by, updated_by, version, deleted_at
+        ) VALUES (?, ?, ?, NULL, 'active', 0, 0, 0, 'left', ?, NULL, 'left', ?, ?, ?, 1, NULL)`,
+      )
+      .run(
+        'active-nursing',
+        'child-arthur',
+        '2026-08-12T12:00:00.000Z',
+        '2026-08-12T12:00:00.000Z',
+        'Europe/Lisbon',
+        'caregiver-paloma',
+        'caregiver-paloma',
+      );
+
+    expect(() =>
+      database
+        ?.prepare(
+          `INSERT INTO nursing_sessions (
+            id, child_id, started_at, ended_at, status,
+            left_duration_seconds, right_duration_seconds, total_pause_duration_seconds,
+            active_side, active_side_started_at, pause_started_at, last_breast_used,
+            timezone, created_by, updated_by, version, deleted_at
+          ) VALUES (?, ?, ?, NULL, 'paused', 0, 0, 0, 'right', NULL, ?, 'right', ?, ?, ?, 1, NULL)`,
+        )
+        .run(
+          'invalid-paused-nursing',
+          'another-child',
+          '2026-08-12T12:00:00.000Z',
+          '2026-08-12T12:10:00.000Z',
+          'Europe/Lisbon',
+          'caregiver-paloma',
+          'caregiver-paloma',
+        ),
+    ).toThrow();
+
+    expect(() =>
+      database
+        ?.prepare(
+          `INSERT INTO nursing_sessions (
+            id, child_id, started_at, ended_at, status,
+            left_duration_seconds, right_duration_seconds, total_pause_duration_seconds,
+            active_side, active_side_started_at, pause_started_at, last_breast_used,
+            timezone, created_by, updated_by, version, deleted_at
+          ) VALUES (?, ?, ?, NULL, 'active', 0, 0, 0, 'right', ?, NULL, 'right', ?, ?, ?, 1, NULL)`,
+        )
+        .run(
+          'second-active-nursing',
+          'child-arthur',
+          '2026-08-12T12:10:00.000Z',
+          '2026-08-12T12:10:00.000Z',
+          'Europe/Lisbon',
+          'caregiver-paloma',
+          'caregiver-paloma',
+        ),
+    ).toThrow();
+
+    expect(() =>
+      database
+        ?.prepare(
+          `INSERT INTO nursing_sessions (
+            id, child_id, started_at, ended_at, status,
+            left_duration_seconds, right_duration_seconds, total_pause_duration_seconds,
+            active_side, active_side_started_at, pause_started_at, last_breast_used,
+            timezone, created_by, updated_by, version, deleted_at
+          ) VALUES (?, ?, ?, NULL, 'active', 0, 0, 0, 'left', ?, NULL, 'right', ?, ?, ?, 1, NULL)`,
+        )
+        .run(
+          'invalid-last-side',
+          'another-child',
+          '2026-08-12T12:10:00.000Z',
+          '2026-08-12T12:10:00.000Z',
+          'Europe/Lisbon',
+          'caregiver-paloma',
+          'caregiver-paloma',
+        ),
+    ).toThrow();
+  });
+
+  it('rejects noncanonical Nursing instants, versions, boundaries, and completed totals in SQLite', async () => {
+    const nursingDatabase = new DatabaseSync(':memory:');
+    database = nursingDatabase;
+    createVersionTwoDatabase(nursingDatabase);
+    await migrateDatabase(new NodeSQLiteAdapter(nursingDatabase).asExpoDatabase());
+
+    const active = directNursingRow();
+    const invalidRows: DirectNursingRow[] = [
+      {
+        ...active,
+        id: 'fractional-boundary',
+        startedAt: '2026-08-12T12:00:00.500Z',
+        activeSideStartedAt: '2026-08-12T12:00:00.500Z',
+      },
+      { ...active, id: 'fractional-version', version: 1.5 },
+      {
+        ...active,
+        id: 'reversed-active-boundary',
+        activeSideStartedAt: '2026-08-12T11:59:59.000Z',
+      },
+      {
+        ...active,
+        id: 'reversed-pause-boundary',
+        status: 'paused',
+        activeSide: null,
+        activeSideStartedAt: null,
+        pauseStartedAt: '2026-08-12T11:59:59.000Z',
+      },
+      {
+        ...active,
+        id: 'invalid-completed-total',
+        status: 'completed',
+        endedAt: '2026-08-12T12:01:00.000Z',
+        activeSide: null,
+        activeSideStartedAt: null,
+        leftDurationSeconds: 59,
+      },
+      {
+        ...active,
+        id: 'invalid-calendar-date',
+        startedAt: '2026-02-30T12:00:00.000Z',
+        activeSideStartedAt: '2026-02-30T12:00:00.000Z',
+      },
+    ];
+
+    for (const row of invalidRows) {
+      expect(() => insertDirectNursing(nursingDatabase, row)).toThrow();
+    }
+
+    insertDirectNursing(nursingDatabase, {
+      ...active,
+      id: 'valid-completed',
+      status: 'completed',
+      endedAt: '2026-08-12T12:01:00.000Z',
+      activeSide: null,
+      activeSideStartedAt: null,
+      leftDurationSeconds: 60,
+    });
+    expect(nursingDatabase.prepare('SELECT COUNT(*) AS count FROM nursing_sessions').get()).toEqual(
+      { count: 1 },
+    );
+  });
+
+  it('rejects a future database version without mutating its schema', async () => {
+    database = new DatabaseSync(':memory:');
+    database.exec('PRAGMA user_version = 4;');
+
+    await expect(migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase())).rejects.toThrow(
+      'This app is older than the local database. Please update the app.',
+    );
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'nursing_sessions'",
+        )
+        .get(),
+    ).toBeUndefined();
+  });
+
+  it('rolls back a failed version 2 migration without advancing user_version', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionTwoDatabase(database);
+    database.exec('CREATE TABLE nursing_sessions (sentinel TEXT);');
+    const beforeSleep = database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all();
+
+    await expect(
+      migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase()),
+    ).rejects.toThrow();
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(beforeSleep);
+    expect(database.prepare('PRAGMA table_info(nursing_sessions)').all()).toMatchObject([
+      { name: 'sentinel' },
+    ]);
+  });
 });
+
+interface DirectNursingRow {
+  id: string;
+  childId: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: 'active' | 'paused' | 'completed';
+  leftDurationSeconds: number;
+  rightDurationSeconds: number;
+  totalPauseDurationSeconds: number;
+  activeSide: 'left' | 'right' | null;
+  activeSideStartedAt: string | null;
+  pauseStartedAt: string | null;
+  lastBreastUsed: 'left' | 'right';
+  timezone: string;
+  createdBy: string;
+  updatedBy: string;
+  version: number;
+  deletedAt: string | null;
+}
+
+function directNursingRow(): DirectNursingRow {
+  return {
+    id: 'active-nursing',
+    childId: 'child-arthur',
+    startedAt: '2026-08-12T12:00:00.000Z',
+    endedAt: null,
+    status: 'active',
+    leftDurationSeconds: 0,
+    rightDurationSeconds: 0,
+    totalPauseDurationSeconds: 0,
+    activeSide: 'left',
+    activeSideStartedAt: '2026-08-12T12:00:00.000Z',
+    pauseStartedAt: null,
+    lastBreastUsed: 'left',
+    timezone: 'Europe/Lisbon',
+    createdBy: 'caregiver-paloma',
+    updatedBy: 'caregiver-paloma',
+    version: 1,
+    deletedAt: null,
+  };
+}
+
+function insertDirectNursing(database: DatabaseSync, row: DirectNursingRow): void {
+  database
+    .prepare(
+      `INSERT INTO nursing_sessions (
+        id, child_id, started_at, ended_at, status,
+        left_duration_seconds, right_duration_seconds, total_pause_duration_seconds,
+        active_side, active_side_started_at, pause_started_at, last_breast_used,
+        timezone, created_by, updated_by, version, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      row.id,
+      row.childId,
+      row.startedAt,
+      row.endedAt,
+      row.status,
+      row.leftDurationSeconds,
+      row.rightDurationSeconds,
+      row.totalPauseDurationSeconds,
+      row.activeSide,
+      row.activeSideStartedAt,
+      row.pauseStartedAt,
+      row.lastBreastUsed,
+      row.timezone,
+      row.createdBy,
+      row.updatedBy,
+      row.version,
+      row.deletedAt,
+    );
+}
+
+function createVersionTwoDatabase(database: DatabaseSync): void {
+  createVersionOneDatabase(database);
+  database.exec(`
+    CREATE UNIQUE INDEX one_open_phase_per_session
+      ON sleep_phases (sleep_session_id)
+      WHERE ended_at IS NULL AND deleted_at IS NULL;
+    PRAGMA user_version = 2;
+  `);
+}
 
 function createVersionOneDatabase(database: DatabaseSync): void {
   database.exec(`
