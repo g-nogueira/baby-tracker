@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { NapSession } from '@baby-tracker/domain';
 
 import {
   editorForPrimaryAction,
@@ -98,7 +99,7 @@ describe('nap editor state', () => {
   });
 });
 
-function completedNap() {
+function completedNap(): NapSession {
   return {
     id: 'session-id',
     childId: 'child-id',
@@ -111,16 +112,18 @@ function completedNap() {
     updatedBy: 'caregiver-id',
     version: 2,
     deletedAt: null,
-    phase: {
-      id: 'phase-id',
-      sleepSessionId: 'session-id',
-      kind: 'asleep' as const,
-      startedAt: '2026-08-12T10:00:00.000Z',
-      endedAt: '2026-08-12T10:30:00.000Z',
-      createdBy: 'caregiver-id',
-      updatedBy: 'caregiver-id',
-      version: 2,
-      deletedAt: null,
-    },
+    phases: [
+      {
+        id: 'phase-id',
+        sleepSessionId: 'session-id',
+        kind: 'asleep' as const,
+        startedAt: '2026-08-12T10:00:00.000Z',
+        endedAt: '2026-08-12T10:30:00.000Z',
+        createdBy: 'caregiver-id',
+        updatedBy: 'caregiver-id',
+        version: 2,
+        deletedAt: null,
+      },
+    ],
   };
 }

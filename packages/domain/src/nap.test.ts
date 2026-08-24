@@ -27,13 +27,15 @@ describe('nap lifecycle', () => {
       startedAt: '2026-08-08T12:10:00.000Z',
       endedAt: null,
       version: 1,
-      phase: {
-        id: 'id-1',
-        kind: 'asleep',
-        endedAt: null,
-        createdBy: 'caregiver-paloma',
-        updatedBy: 'caregiver-paloma',
-      },
+      phases: [
+        {
+          id: 'id-1',
+          kind: 'asleep',
+          endedAt: null,
+          createdBy: 'caregiver-paloma',
+          updatedBy: 'caregiver-paloma',
+        },
+      ],
     });
     expect(result.operation).toMatchObject({
       operationId: 'id-2',
@@ -76,7 +78,7 @@ describe('nap lifecycle', () => {
       status: 'completed',
       endedAt: '2026-08-08T12:42:00.000Z',
       version: 2,
-      phase: { endedAt: '2026-08-08T12:42:00.000Z', version: 2 },
+      phases: [{ endedAt: '2026-08-08T12:42:00.000Z', version: 2 }],
     });
     expect(stopped.operation.baseVersion).toBe(1);
   });
@@ -144,7 +146,7 @@ describe('nap lifecycle', () => {
     const deleted = deleteNap(active, context('2026-08-08T12:11:00.000Z'));
 
     expect(deleted.session.deletedAt).toBe('2026-08-08T12:11:00.000Z');
-    expect(deleted.session.phase.deletedAt).toBe('2026-08-08T12:11:00.000Z');
+    expect(deleted.session.phases[0].deletedAt).toBe('2026-08-08T12:11:00.000Z');
     expect(deleted.operation).toMatchObject({
       action: 'delete_sleep_session',
       baseVersion: 1,
@@ -166,11 +168,13 @@ describe('nap lifecycle', () => {
       startedAt: '2026-08-08T12:05:00.000Z',
       endedAt: '2026-08-08T12:47:00.000Z',
       version: 3,
-      phase: {
-        startedAt: '2026-08-08T12:05:00.000Z',
-        endedAt: '2026-08-08T12:47:00.000Z',
-        version: 3,
-      },
+      phases: [
+        {
+          startedAt: '2026-08-08T12:05:00.000Z',
+          endedAt: '2026-08-08T12:47:00.000Z',
+          version: 3,
+        },
+      ],
     });
     expect(edited.operation).toMatchObject({
       entityId: completed.id,
@@ -196,7 +200,7 @@ describe('nap lifecycle', () => {
       status: 'active',
       startedAt: '2026-08-08T12:05:00.000Z',
       endedAt: null,
-      phase: { startedAt: '2026-08-08T12:05:00.000Z', endedAt: null },
+      phases: [{ startedAt: '2026-08-08T12:05:00.000Z', endedAt: null }],
     });
   });
 
@@ -232,7 +236,7 @@ describe('nap lifecycle', () => {
       id: completed.id,
       version: 4,
       deletedAt: null,
-      phase: { id: completed.phase.id, version: 4, deletedAt: null },
+      phases: [{ id: completed.phases[0].id, version: 4, deletedAt: null }],
     });
     expect(restored.operation).toMatchObject({
       entityId: completed.id,

@@ -2,9 +2,11 @@
 
 import {
   deleteNap,
+  endNightSleep,
   editNap,
   restoreNap,
   startNap,
+  startNightSleep,
   stopNap,
   type MutationContext,
 } from '@baby-tracker/domain';
@@ -16,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
 import { migrateDatabase } from '../../storage/migrations';
+import { SQLiteSleepRepository } from '../sleep/sqlite-sleep-repository';
 import {
   NapOverlapError,
   NapWriteConflictError,
@@ -76,7 +79,7 @@ describe('SQLite nap repository', () => {
       id: started.session.id,
       startedAt: '2026-08-12T23:50:00.000Z',
       endedAt: '2026-08-13T00:20:00.000Z',
-      phase: { startedAt: '2026-08-12T23:50:00.000Z' },
+      phases: [{ startedAt: '2026-08-12T23:50:00.000Z' }],
     });
     expect(secondDay[0]?.id).toBe(started.session.id);
 
@@ -106,7 +109,7 @@ describe('SQLite nap repository', () => {
       id: started.session.id,
       version: 5,
       deletedAt: null,
-      phase: { id: started.session.phase.id, version: 5, deletedAt: null },
+      phases: [{ id: started.session.phases[0].id, version: 5, deletedAt: null }],
     });
     expect(await afterRestart.pendingOperationCount()).toBe(5);
   });
@@ -145,6 +148,22 @@ describe('SQLite nap repository', () => {
         '2026-08-14T00:00:00.000Z',
       ),
     ).toHaveLength(0);
+  });
+
+  it('keeps the Nap latest-end read isolated when a newer Night session completes', async () => {
+    const nap = startNap(context('2026-08-12T12:00:00.000Z'));
+    await repository.save(nap);
+    await repository.save(stopNap(nap.session, context('2026-08-12T12:30:00.000Z')));
+
+    const sleepRepository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    const night = startNightSleep(context('2026-08-12T20:30:00.000Z'));
+    await sleepRepository.save(night);
+    await sleepRepository.save(endNightSleep(night.session, context('2026-08-13T06:00:00.000Z')));
+
+    expect(await repository.latestCompletedEnd('child-arthur')).toBe('2026-08-12T12:30:00.000Z');
+    expect(await sleepRepository.latestCompletedEnd('child-arthur')).toBe(
+      '2026-08-13T06:00:00.000Z',
+    );
   });
 
   it('rejects a corrected nap that overlaps existing history', async () => {
@@ -200,7 +219,7 @@ describe('SQLite nap repository', () => {
       version: 3,
       startedAt: '2026-08-12T11:58:00.000Z',
       endedAt: '2026-08-12T12:32:00.000Z',
-      phase: { version: 3, startedAt: '2026-08-12T11:58:00.000Z' },
+      phases: [{ version: 3, startedAt: '2026-08-12T11:58:00.000Z' }],
     });
     expect(await repository.pendingOperationCount()).toBe(3);
   });

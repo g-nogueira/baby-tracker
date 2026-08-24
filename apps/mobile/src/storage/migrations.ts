@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
   await database.execAsync('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
@@ -48,6 +48,10 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
         CREATE INDEX sleep_phases_session_started_at
           ON sleep_phases (sleep_session_id, started_at);
 
+        CREATE UNIQUE INDEX one_open_phase_per_session
+          ON sleep_phases (sleep_session_id)
+          WHERE ended_at IS NULL AND deleted_at IS NULL;
+
         CREATE TABLE outbox_operations (
         local_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         operation_id TEXT UNIQUE NOT NULL,
@@ -67,6 +71,19 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
         CREATE INDEX pending_outbox_in_creation_order
           ON outbox_operations (local_sequence)
           WHERE state = 'pending';
+
+        PRAGMA user_version = ${DATABASE_VERSION};
+      `);
+    });
+    return;
+  }
+
+  if (currentVersion === 1) {
+    await database.withExclusiveTransactionAsync(async (transaction) => {
+      await transaction.execAsync(`
+        CREATE UNIQUE INDEX one_open_phase_per_session
+          ON sleep_phases (sleep_session_id)
+          WHERE ended_at IS NULL AND deleted_at IS NULL;
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
