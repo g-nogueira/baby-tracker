@@ -2,11 +2,16 @@ import {
   createUuidV7,
   deleteNap,
   editNap,
-  restoreNap,
-  startNap,
-  stopNap,
-  type NapMutation,
+  endNightSleep,
   type NapSession,
+  restoreNap,
+  resumeNightSleep,
+  type SleepMutation,
+  type SleepSession,
+  startNap,
+  startNightSleep,
+  startNightWaking,
+  stopNap,
 } from '@baby-tracker/domain';
 import { getRandomValues } from 'expo-crypto';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -14,12 +19,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { SQLiteSleepRepository } from '@/features/sleep/sqlite-sleep-repository';
 import { calendarDayForInstant, shiftCalendarDay, zonedDayBounds } from './calendar-day';
-import { SQLiteNapRepository } from './sqlite-nap-repository';
+import { recoverFromMutationFailure } from './mutation-recovery';
 
 interface NapState {
   naps: NapSession[];
-  activeNap: NapSession | null;
+  activeSleep: SleepSession | null;
   pendingOperationCount: number;
   latestCompletedEnd: string | null;
   isLoading: boolean;
@@ -33,7 +39,7 @@ interface NapState {
  */
 export function useNaps() {
   const database = useSQLiteContext();
-  const repository = useMemo(() => new SQLiteNapRepository(database), [database]);
+  const repository = useMemo(() => new SQLiteSleepRepository(database), [database]);
   const mutationInFlight = useRef(false);
   const refreshGeneration = useRef(0);
   const selectedDayRef = useRef('');
@@ -50,7 +56,7 @@ export function useNaps() {
   selectedDayRef.current = selectedDay;
   const [state, setState] = useState<NapState>({
     naps: [],
-    activeNap: null,
+    activeSleep: null,
     pendingOperationCount: 0,
     latestCompletedEnd: null,
     isLoading: true,
@@ -85,16 +91,22 @@ export function useNaps() {
       selectedDay,
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [naps, activeNap, pendingOperationCount, latestCompletedEnd] = await Promise.all([
-      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
-      repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
-      repository.pendingOperationCount(),
-      repository.latestCompletedEnd(LOCAL_DEVELOPMENT_IDENTITY.childId),
-    ]);
+    const [sleepSessions, activeSleep, pendingOperationCount, latestCompletedEnd] =
+      await Promise.all([
+        repository.listVisible(
+          LOCAL_DEVELOPMENT_IDENTITY.childId,
+          dayStartedAt,
+          nextDayStartedAt,
+          'nap',
+        ),
+        repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
+        repository.pendingOperationCount(),
+        repository.latestCompletedEnd(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
-      naps,
-      activeNap,
+      naps: sleepSessions.filter((session): session is NapSession => session.kind === 'nap'),
+      activeSleep,
       pendingOperationCount,
       latestCompletedEnd,
       isLoading: false,
@@ -108,8 +120,20 @@ export function useNaps() {
     });
   }, [refresh]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (appState) => {
+      if (appState !== 'active') return;
+      refresh().catch((error: unknown) => {
+        setState((current) => ({ ...current, error: errorMessage(error) }));
+      });
+    });
+    return () => subscription.remove();
+  }, [refresh]);
+
   const mutate = useCallback(
-    async (mutationFactory: (now: Date) => NapMutation): Promise<NapSession | null> => {
+    async <TSession extends SleepSession>(
+      mutationFactory: (now: Date) => SleepMutation<TSession>,
+    ): Promise<TSession | null> => {
       if (mutationInFlight.current) return null;
 
       mutationInFlight.current = true;
@@ -124,7 +148,9 @@ export function useNaps() {
         }
         return mutation.session;
       } catch (error: unknown) {
-        setState((current) => ({ ...current, error: errorMessage(error) }));
+        await recoverFromMutationFailure(error, refresh, (message) => {
+          setState((current) => ({ ...current, error: message }));
+        });
         return null;
       } finally {
         mutationInFlight.current = false;
@@ -136,6 +162,7 @@ export function useNaps() {
 
   return {
     ...state,
+    activeNap: state.activeSleep?.kind === 'nap' ? state.activeSleep : null,
     isMutating,
     selectedDay,
     isToday: selectedDay === currentDay,
@@ -159,7 +186,7 @@ export function useNaps() {
     },
     start: (startedAt?: Date) => mutate((now) => startNap(createContext(now), startedAt ?? now)),
     stop: (endedAt?: Date) => {
-      const activeNap = state.activeNap;
+      const activeNap = state.activeSleep?.kind === 'nap' ? state.activeSleep : null;
       if (activeNap === null) {
         setState((current) => ({ ...current, error: 'There is no active nap to stop.' }));
         return Promise.resolve(null);
@@ -171,6 +198,32 @@ export function useNaps() {
     remove: (nap: NapSession) => mutate((now) => deleteNap(nap, createContext(now))),
     restore: (deletedNap: NapSession) =>
       mutate((now) => restoreNap(deletedNap, createContext(now))),
+    startNight: (startedAt?: Date) =>
+      mutate((now) => startNightSleep(createContext(now), startedAt ?? now)),
+    startNightWaking: (startedAt?: Date) => {
+      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+      if (activeNight === null) {
+        setState((current) => ({ ...current, error: 'There is no active Night sleep.' }));
+        return Promise.resolve(null);
+      }
+      return mutate((now) => startNightWaking(activeNight, createContext(now), startedAt ?? now));
+    },
+    resumeNight: (startedAt?: Date) => {
+      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+      if (activeNight === null) {
+        setState((current) => ({ ...current, error: 'There is no active Night waking.' }));
+        return Promise.resolve(null);
+      }
+      return mutate((now) => resumeNightSleep(activeNight, createContext(now), startedAt ?? now));
+    },
+    endNight: (endedAt?: Date) => {
+      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+      if (activeNight === null) {
+        setState((current) => ({ ...current, error: 'There is no active Night sleep.' }));
+        return Promise.resolve(null);
+      }
+      return mutate((now) => endNightSleep(activeNight, createContext(now), endedAt ?? now));
+    },
     clearError: () => setState((current) => ({ ...current, error: null })),
   };
 }

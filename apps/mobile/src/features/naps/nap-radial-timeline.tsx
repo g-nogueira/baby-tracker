@@ -1,16 +1,15 @@
 import { elapsedMilliseconds, formatDuration, type NapSession } from '@baby-tracker/domain';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { zonedDayBounds } from './calendar-day';
-import { pointAtClockFraction, projectNapOnCalendarDay, type NapDayProjection } from './nap-clock';
+import { type NapDayProjection, pointAtClockFraction, projectNapOnCalendarDay } from './nap-clock';
 
 const palette = {
   surface: '#FFFFFF',
   ink: '#292724',
   muted: '#746F68',
   nap: '#7367B9',
-  napSoft: '#E8E4F7',
   border: '#E7E0D7',
 };
 
@@ -20,39 +19,34 @@ const clockTicks = Array.from({ length: 24 }, (_, hour) => ({
 }));
 
 interface NapRadialTimelineProps {
-  activeNap: NapSession | null;
   calendarDay: string;
+  centerStatus: {
+    label: string;
+    value: string | null;
+    hint: string;
+  };
   disabled: boolean;
-  isToday: boolean;
-  latestCompletedEnd: string | null;
   naps: NapSession[];
   now: Date;
-  onPressNap: () => void;
   onPressNapRecord: (napId: string) => void;
 }
 
 /**
- * Renders naps on a responsive 24-hour radial timeline and provides controls for the current day's nap state.
+ * Renders naps on a responsive 24-hour radial timeline around caller-owned Home status.
  *
- * @param activeNap - The currently active nap, if one exists.
  * @param calendarDay - The calendar day represented by the timeline.
+ * @param centerStatus - Canonical status copy rendered in the clock centre.
  * @param disabled - Whether nap controls and record targets are disabled.
- * @param isToday - Whether the timeline represents the current day.
- * @param latestCompletedEnd - The end time of the latest completed nap, if available.
  * @param naps - Naps to display on the timeline.
  * @param now - The current time used for elapsed-duration calculations.
- * @param onPressNap - Handles presses on the current day's nap control.
  * @param onPressNapRecord - Handles presses on an individual nap record.
  */
 export function NapRadialTimeline({
-  activeNap,
   calendarDay,
+  centerStatus,
   disabled,
-  isToday,
-  latestCompletedEnd,
   naps,
   now,
-  onPressNap,
   onPressNapRecord,
 }: NapRadialTimelineProps) {
   const { width } = useWindowDimensions();
@@ -73,13 +67,10 @@ export function NapRadialTimeline({
     );
     return projection === null ? [] : [{ index, nap, projection }];
   });
-  const status = !isToday
-    ? `${naps.length}\n${naps.length === 1 ? 'nap' : 'naps'}`
-    : activeNap
-      ? `Asleep for\n${formatDuration(elapsedMilliseconds(activeNap.startedAt, now))}`
-      : latestCompletedEnd === null
-        ? 'Awake'
-        : `Awake for\n${formatDuration(elapsedMilliseconds(latestCompletedEnd, now))}`;
+  const status =
+    centerStatus.value === null
+      ? centerStatus.label
+      : `${centerStatus.label}\n${centerStatus.value}`;
 
   return (
     <View style={styles.card}>
@@ -163,42 +154,9 @@ export function NapRadialTimeline({
           style={styles.centerStatus}
         >
           <Text style={styles.status}>{status}</Text>
-          <Text style={styles.statusHint}>
-            {!isToday
-              ? 'Recorded on this day'
-              : activeNap
-                ? `Since ${formatClock(activeNap.startedAt)}`
-                : latestCompletedEnd === null
-                  ? 'No naps yet today'
-                  : `Last nap ended ${formatClock(latestCompletedEnd)}`}
-          </Text>
+          <Text style={styles.statusHint}>{centerStatus.hint}</Text>
         </View>
       </View>
-
-      {isToday ? (
-        <Pressable
-          accessibilityHint={
-            activeNap ? 'Opens controls for the current nap' : 'Opens nap controls'
-          }
-          accessibilityLabel={activeNap ? 'Current nap' : 'Nap'}
-          accessibilityRole="button"
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          onPress={onPressNap}
-          style={({ pressed }) => [
-            styles.action,
-            activeNap && styles.activeAction,
-            disabled && styles.disabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          <View style={styles.actionCircle}>
-            <Text style={styles.actionIcon}>z</Text>
-          </View>
-          <Text style={styles.actionLabel}>Nap</Text>
-          <Text style={styles.actionMeta}>{activeNap ? 'Running' : latestNapMeta(naps, now)}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -340,20 +298,6 @@ function ClockLabel({ label, left, top }: { label: string; left: number; top: nu
   );
 }
 
-/**
- * Summarizes the most recent nap relative to the current time.
- *
- * @param naps - Naps ordered with the most recent nap first
- * @param now - Reference time used to calculate elapsed duration
- * @returns `Add` when no naps are available; otherwise, the elapsed time since the latest nap ended or started
- */
-function latestNapMeta(naps: NapSession[], now: Date): string {
-  const latest = naps[0];
-  if (latest === undefined) return 'Add';
-  const boundary = latest.endedAt ?? latest.startedAt;
-  return `${formatDuration(elapsedMilliseconds(boundary, now))} ago`;
-}
-
 const clockFormatter = new Intl.DateTimeFormat(undefined, {
   hour: '2-digit',
   minute: '2-digit',
@@ -468,24 +412,4 @@ const styles = StyleSheet.create({
     borderColor: palette.surface,
     backgroundColor: '#B8AFE1',
   },
-  action: { minWidth: 72, alignItems: 'center', gap: 3, padding: 5, borderRadius: 18 },
-  activeAction: { backgroundColor: palette.napSoft },
-  actionCircle: {
-    width: 54,
-    height: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 27,
-    backgroundColor: palette.nap,
-    shadowColor: '#40377C',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  actionIcon: { color: '#FFFFFF', fontSize: 25, fontWeight: '900' },
-  actionLabel: { color: palette.ink, fontSize: 13, fontWeight: '800' },
-  actionMeta: { color: palette.muted, fontSize: 11 },
-  disabled: { opacity: 0.45 },
-  pressed: { opacity: 0.78, transform: [{ scale: 0.97 }] },
 });
