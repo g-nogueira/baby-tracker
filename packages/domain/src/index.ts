@@ -1,3 +1,4 @@
+export * from './cycle-projection';
 export * from './nap';
 export * from './sleep';
 export * from './time';
