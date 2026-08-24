@@ -48,6 +48,20 @@ describe('Night transition drawer state', () => {
     expect(activeNightDurationStartedAt(awake)).toBe('2026-08-15T00:25:00.000Z');
   });
 
+  it('omits live duration for a stale session without an open phase', () => {
+    const completed = night();
+    completed.status = 'completed';
+    completed.endedAt = '2026-08-15T00:30:00.000Z';
+    const phase = completed.phases[0];
+    if (phase === undefined) throw new Error('Expected an asleep phase.');
+    completed.phases = [{ ...phase, endedAt: completed.endedAt }];
+
+    expect(activeNightDurationStartedAt(completed)).toBeNull();
+    expect(
+      nightTransitionError(createNightTransitionDraft('end-night-sleep', completed, openedAt)),
+    ).toBe('The active Night phase could not be found.');
+  });
+
   it('adjusts by a minute without moving into the future', () => {
     const draft = createNightTransitionDraft('start-night-sleep', null, openedAt);
     expect(

@@ -3,6 +3,7 @@ import {
   elapsedMilliseconds,
   formatDuration,
   type NapSession,
+  type NursingSession,
 } from '@baby-tracker/domain';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -330,6 +331,17 @@ export function TodayScreen() {
     setNursingDrawerOpen(decision.drawerOpen);
   };
 
+  const runNursingTransition = async (
+    transition: Promise<NursingSession | null>,
+    announcement: string,
+    onSuccess?: () => void,
+  ) => {
+    const saved = await transition;
+    if (saved === null) return;
+    AccessibilityInfo.announceForAccessibility(announcement);
+    onSuccess?.();
+  };
+
   const centerStatus = isToday
     ? {
         label: homeModel.center.label,
@@ -619,15 +631,30 @@ export function TodayScreen() {
               decideNursingDrawerCommand(activeNursing?.id ?? null, { kind: 'dismiss' }).drawerOpen,
             )
           }
-          onPause={() => void pauseNursing()}
-          onResume={(side) => void resumeNursing(side)}
-          onStart={(side) => void startNursing(side)}
+          onPause={() => void runNursingTransition(pauseNursing(), 'Nursing paused')}
+          onResume={(side) =>
+            void runNursingTransition(
+              resumeNursing(side),
+              `Nursing resumed on ${side === 'left' ? 'Left' : 'Right'} breast`,
+            )
+          }
+          onStart={(side) =>
+            void runNursingTransition(
+              startNursing(side),
+              `Nursing started on ${side === 'left' ? 'Left' : 'Right'} breast`,
+            )
+          }
           onStop={() => {
-            void stopNursing().then((saved) => {
-              if (saved !== null) setNursingDrawerOpen(false);
-            });
+            void runNursingTransition(stopNursing(), 'Nursing stopped', () =>
+              setNursingDrawerOpen(false),
+            );
           }}
-          onSwitch={(side) => void switchNursing(side)}
+          onSwitch={(side) =>
+            void runNursingTransition(
+              switchNursing(side),
+              `Nursing switched to ${side === 'left' ? 'Left' : 'Right'} breast`,
+            )
+          }
         />
       ) : null}
 

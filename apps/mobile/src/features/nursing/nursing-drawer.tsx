@@ -73,7 +73,7 @@ export function NursingDrawer({
               </Text>
             ) : (
               <>
-                <Text accessibilityLiveRegion="polite" style={styles.totalValue}>
+                <Text style={styles.totalValue}>
                   {formatSeconds(controller.totalDurationSeconds)}
                 </Text>
                 <Text style={styles.statusText}>

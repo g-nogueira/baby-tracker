@@ -297,11 +297,11 @@ export function projectNursingDurations(
   let pauseDurationSeconds = session.totalPauseDurationSeconds;
 
   if (session.status === 'active') {
-    const accrued = elapsedSeconds(session.activeSideStartedAt, projectedAt);
+    const accrued = projectedElapsedSeconds(session.activeSideStartedAt, projectedAt);
     if (session.activeSide === 'left') leftDurationSeconds += accrued;
     else rightDurationSeconds += accrued;
   } else if (session.status === 'paused') {
-    pauseDurationSeconds += elapsedSeconds(session.pauseStartedAt, projectedAt);
+    pauseDurationSeconds += projectedElapsedSeconds(session.pauseStartedAt, projectedAt);
   }
 
   return {
@@ -490,6 +490,12 @@ function elapsedSeconds(startedAt: UtcInstant | null, endedAt: UtcInstant): numb
     throw invalidAggregate('Nursing interval boundaries must be ordered whole seconds.');
   }
   return elapsed;
+}
+
+function projectedElapsedSeconds(startedAt: UtcInstant | null, at: UtcInstant): number {
+  if (startedAt === null) throw invalidAggregate('An open Nursing interval requires a start.');
+  const elapsed = (new Date(at).getTime() - new Date(startedAt).getTime()) / 1_000;
+  return Number.isSafeInteger(elapsed) ? Math.max(0, elapsed) : 0;
 }
 
 function mutation(

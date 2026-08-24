@@ -114,6 +114,24 @@ describe('Nursing lifecycle', () => {
     });
   });
 
+  it('does not subtract live totals when the projection clock precedes an open interval', () => {
+    const active = startNursing('left', context('2026-08-15T10:00:10.000Z')).session;
+    const paused = pauseNursing(active, context('2026-08-15T10:00:20.000Z')).session;
+
+    expect(projectNursingDurations(active, new Date('2026-08-15T10:00:00.000Z'))).toEqual({
+      leftDurationSeconds: 0,
+      rightDurationSeconds: 0,
+      pauseDurationSeconds: 0,
+      totalDurationSeconds: 0,
+    });
+    expect(projectNursingDurations(paused, new Date('2026-08-15T10:00:15.000Z'))).toEqual({
+      leftDurationSeconds: 10,
+      rightDurationSeconds: 0,
+      pauseDurationSeconds: 0,
+      totalDurationSeconds: 10,
+    });
+  });
+
   it('stops from an open pause while preserving the last used side', () => {
     const started = startNursing('right', context('2026-08-15T10:00:00.000Z')).session;
     const paused = pauseNursing(started, context('2026-08-15T10:00:10.000Z')).session;

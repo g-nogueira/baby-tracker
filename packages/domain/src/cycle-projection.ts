@@ -243,34 +243,26 @@ export function resolveCanonicalCycles(
   const localEndedAt = localMidnightUtc(shiftLocalDate(options.localDate, 1), options.timezone);
   const localStartMs = instantMs(localStartedAt, 'local day start');
   const localEndMs = instantMs(localEndedAt, 'local day end');
-  const nights = sessions
-    .filter(
-      (session): session is NightSleepSession =>
-        session.kind === 'night' &&
-        session.childId === options.childId &&
-        session.deletedAt === null,
-    )
-    .map((session) => {
-      assertProjectableNight(session);
-      return session;
-    });
+  const nights = sessions.filter(
+    (session): session is NightSleepSession =>
+      session.kind === 'night' && session.childId === options.childId && session.deletedAt === null,
+  );
 
   const precedingNight = nights
     .filter((session): session is CompletedNightSleepSession => {
       if (session.status !== 'completed' || session.endedAt === null) return false;
-      const wakeUpMs = instantMs(session.endedAt, 'Night Wake up');
-      return wakeUpMs >= localStartMs && wakeUpMs < localEndMs;
+      const wakeUpMs = safeInstantMs(session.endedAt);
+      return wakeUpMs !== null && wakeUpMs >= localStartMs && wakeUpMs < localEndMs;
     })
     .sort(compareNightsByWakeUpDescending)[0];
 
   if (precedingNight !== undefined) {
     const wakeUpMs = instantMs(precedingNight.endedAt, 'Night Wake up');
     const nextNight = nights
-      .filter(
-        (session) =>
-          session.id !== precedingNight.id &&
-          instantMs(session.startedAt, 'Night Bedtime') >= wakeUpMs,
-      )
+      .filter((session) => {
+        const bedtimeMs = safeInstantMs(session.startedAt);
+        return session.id !== precedingNight.id && bedtimeMs !== null && bedtimeMs >= wakeUpMs;
+      })
       .sort(compareNightsByBedtime)[0];
     return {
       day: createDayCycle(precedingNight, nextNight ?? null),
@@ -283,8 +275,8 @@ export function resolveCanonicalCycles(
 
   const firstNight = nights
     .filter((session) => {
-      const bedtimeMs = instantMs(session.startedAt, 'Night Bedtime');
-      return bedtimeMs >= localStartMs && bedtimeMs < localEndMs;
+      const bedtimeMs = safeInstantMs(session.startedAt);
+      return bedtimeMs !== null && bedtimeMs >= localStartMs && bedtimeMs < localEndMs;
     })
     .sort(compareNightsByBedtime)[0];
   return {
@@ -702,20 +694,18 @@ function compareCollisionCandidates(left: CollisionCandidate, right: CollisionCa
 }
 
 function compareNightsByBedtime(left: NightSleepSession, right: NightSleepSession): number {
-  return (
-    instantMs(left.startedAt, 'Night Bedtime') - instantMs(right.startedAt, 'Night Bedtime') ||
-    compareCodeUnits(left.id, right.id)
-  );
+  const leftMs = safeInstantMs(left.startedAt) ?? Number.POSITIVE_INFINITY;
+  const rightMs = safeInstantMs(right.startedAt) ?? Number.POSITIVE_INFINITY;
+  return leftMs - rightMs || compareCodeUnits(left.id, right.id);
 }
 
 function compareNightsByWakeUpDescending(
   left: CompletedNightSleepSession,
   right: CompletedNightSleepSession,
 ): number {
-  return (
-    instantMs(right.endedAt, 'Night Wake up') - instantMs(left.endedAt, 'Night Wake up') ||
-    compareNightsByBedtime(right, left)
-  );
+  const leftMs = safeInstantMs(left.endedAt) ?? Number.NEGATIVE_INFINITY;
+  const rightMs = safeInstantMs(right.endedAt) ?? Number.NEGATIVE_INFINITY;
+  return rightMs - leftMs || compareNightsByBedtime(right, left);
 }
 
 function compareCodeUnits(left: string, right: string): number {
@@ -733,11 +723,18 @@ function collisionKey(candidate: CollisionCandidate): string {
 }
 
 function instantMs(value: UtcInstant, label = 'instant'): number {
-  const milliseconds = new Date(value).getTime();
-  if (Number.isNaN(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+  const milliseconds = safeInstantMs(value);
+  if (milliseconds === null) {
     throw new Error(`A valid canonical UTC ${label} is required.`);
   }
   return milliseconds;
+}
+
+function safeInstantMs(value: UtcInstant): number | null {
+  const milliseconds = new Date(value).getTime();
+  return Number.isNaN(milliseconds) || new Date(milliseconds).toISOString() !== value
+    ? null
+    : milliseconds;
 }
 
 function assertLocalDate(localDate: string): void {
@@ -779,34 +776,27 @@ function shiftLocalDate(localDate: string, days: number): string {
 
 function localMidnightUtc(localDate: string, timezone: string): UtcInstant {
   const [yearText, monthText, dayText] = localDate.split('-');
+  const targetDateKey = Number(yearText) * 10_000 + Number(monthText) * 100 + Number(dayText);
   const targetMs = Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText));
-  let candidateMs = targetMs;
+  let lowSecond = Math.floor((targetMs - 36 * 60 * 60 * 1_000) / 1_000);
+  let highSecond = Math.ceil((targetMs + 36 * 60 * 60 * 1_000) / 1_000);
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const parts = localDateTimeParts(candidateMs, timezone);
-    const representedAsUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
-    );
-    const difference = targetMs - representedAsUtc;
-    candidateMs += difference;
-    if (difference === 0) break;
+  while (lowSecond < highSecond) {
+    const middleSecond = Math.floor((lowSecond + highSecond) / 2);
+    const parts = localDateTimeParts(middleSecond * 1_000, timezone);
+    const dateKey = parts.year * 10_000 + parts.month * 100 + parts.day;
+    if (dateKey < targetDateKey) lowSecond = middleSecond + 1;
+    else highSecond = middleSecond;
   }
 
+  const candidateMs = lowSecond * 1_000;
   const resolved = localDateTimeParts(candidateMs, timezone);
   if (
     resolved.year !== Number(yearText) ||
     resolved.month !== Number(monthText) ||
-    resolved.day !== Number(dayText) ||
-    resolved.hour !== 0 ||
-    resolved.minute !== 0 ||
-    resolved.second !== 0
+    resolved.day !== Number(dayText)
   ) {
-    throw new Error('Local midnight does not exist in the requested timezone and date.');
+    throw new Error('The requested local calendar date does not exist in this timezone.');
   }
   return new Date(candidateMs).toISOString();
 }

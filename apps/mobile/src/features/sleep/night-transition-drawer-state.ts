@@ -47,12 +47,11 @@ export function nightTransitionDraftForSave(draft: NightTransitionDraft): NightT
   return draft;
 }
 
-/** Returns the persisted instant that drives the active Night controller display. */
-export function activeNightDurationStartedAt(session: NightSleepSession): string {
+/** Returns the persisted instant that drives an active Night controller, if one exists. */
+export function activeNightDurationStartedAt(session: NightSleepSession): string | null {
   const openPhase = session.phases.at(-1);
-  if (openPhase === undefined || openPhase.endedAt !== null) {
-    throw new Error('An active Night session requires a final open phase.');
-  }
+  if (session.status !== 'active' || openPhase === undefined || openPhase.endedAt !== null)
+    return null;
   return openPhase.kind === 'awake' ? openPhase.startedAt : session.startedAt;
 }
 

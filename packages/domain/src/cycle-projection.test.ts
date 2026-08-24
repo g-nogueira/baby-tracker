@@ -207,6 +207,33 @@ describe('canonical Night-history resolution', () => {
       sourceNightSessionId: 'first-night',
     });
   });
+
+  it('ignores malformed Night instants outside the requested cycle boundaries', () => {
+    const preceding = completedNight(
+      'night-preceding',
+      '2026-08-12T20:00:00.000Z',
+      '2026-08-13T06:00:00.000Z',
+    );
+    const next = activeNight('night-next', '2026-08-13T20:00:00.000Z');
+    const malformedBedtime = activeNight('malformed-bedtime', 'not-an-instant');
+    const malformedWake = completedNight(
+      'malformed-wake',
+      '2026-08-01T20:00:00.000Z',
+      'not-an-instant',
+    );
+
+    const resolved = resolveCanonicalCycles([malformedBedtime, malformedWake, next, preceding], {
+      childId: 'child-arthur',
+      localDate: '2026-08-13',
+      timezone: 'Europe/Lisbon',
+    });
+
+    expect(resolved.day).toMatchObject({
+      precedingNightSessionId: 'night-preceding',
+      nextNightSessionId: 'night-next',
+    });
+    expect(resolved.night).toMatchObject({ sourceNightSessionId: 'night-next' });
+  });
 });
 
 describe('unanchored legacy days', () => {
@@ -246,6 +273,15 @@ describe('unanchored legacy days', () => {
     expect([fall.startedAt, fall.endedAt]).toEqual([
       '2026-10-24T23:00:00.000Z',
       '2026-10-26T00:00:00.000Z',
+    ]);
+  });
+
+  it('uses the first representable instant when a timezone skips local midnight', () => {
+    const cycle = createUnanchoredDayCycle('2026-09-06', 'America/Santiago');
+
+    expect([cycle.startedAt, cycle.endedAt]).toEqual([
+      '2026-09-06T04:00:00.000Z',
+      '2026-09-07T03:00:00.000Z',
     ]);
   });
 

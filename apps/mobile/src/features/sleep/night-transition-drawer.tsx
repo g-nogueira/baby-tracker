@@ -54,13 +54,13 @@ export function NightTransitionDrawer({
   const metadata = transitionMetadata(draft.kind);
   const error = useMemo(() => nightTransitionError(draft), [draft]);
   const canSave = !isMutating && error === null && pickerError === null;
-  const liveNow = useLiveNow(draft.session !== null);
+  const liveDurationStartedAt =
+    draft.session === null ? null : activeNightDurationStartedAt(draft.session);
+  const liveNow = useLiveNow(liveDurationStartedAt !== null);
   const liveDuration =
-    draft.session === null
+    liveDurationStartedAt === null
       ? null
-      : formatLiveDuration(
-          elapsedMilliseconds(activeNightDurationStartedAt(draft.session), liveNow),
-        );
+      : formatLiveDuration(elapsedMilliseconds(liveDurationStartedAt, liveNow));
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const activePicker = picker;
