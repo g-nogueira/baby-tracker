@@ -6,13 +6,18 @@ import {
   Modal,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   type ActivityDrawerDecision,
   type ActivityDrawerMode,
+  activityDrawerBottomPadding,
+  activityDrawerScrollableContentMaxHeight,
   decideActivityDrawerAccessibilityAction,
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
@@ -28,6 +33,7 @@ interface ActivityDrawerProps {
   children: (state: ActivityDrawerRenderState) => ReactNode;
   mode: ActivityDrawerMode;
   onDismiss: () => void;
+  scrollContent?: boolean;
 }
 
 /**
@@ -38,7 +44,15 @@ interface ActivityDrawerProps {
  * @param mode - Initial presentation mode for the drawer
  * @param onDismiss - Called when the drawer is dismissed
  */
-export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: ActivityDrawerProps) {
+export function ActivityDrawer({
+  activityLabel,
+  children,
+  mode,
+  onDismiss,
+  scrollContent = false,
+}: ActivityDrawerProps) {
+  const insets = useSafeAreaInsets();
+  const viewport = useWindowDimensions();
   const [drawerState, setDrawerState] = useState(() => initialActivityDrawerState(mode));
   const [reduceMotion, setReduceMotion] = useState(false);
   const translation = useRef(new Animated.Value(0)).current;
@@ -131,6 +145,7 @@ export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: Act
   const handleHint = expanded
     ? 'Tap, swipe down, or decrease to collapse controls'
     : 'Tap, swipe up, or increase to expand; swipe down or decrease to close controls';
+  const content = children({ expanded });
 
   return (
     <Modal animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onDismiss} transparent>
@@ -143,7 +158,13 @@ export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: Act
         />
         <Animated.View
           accessibilityViewIsModal
-          style={[styles.sheet, { transform: [{ translateY: translation }] }]}
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: activityDrawerBottomPadding(insets.bottom),
+              transform: [{ translateY: translation }],
+            },
+          ]}
         >
           <Pressable
             accessibilityActions={
@@ -164,7 +185,27 @@ export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: Act
           >
             <View style={styles.handle} />
           </Pressable>
-          {children({ expanded })}
+          {scrollContent ? (
+            <ScrollView
+              alwaysBounceVertical={false}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              key={mode}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+              style={{
+                maxHeight: activityDrawerScrollableContentMaxHeight(
+                  viewport.height,
+                  insets.top,
+                  insets.bottom,
+                ),
+              }}
+            >
+              {content}
+            </ScrollView>
+          ) : (
+            content
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -177,7 +218,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 2,
-    paddingBottom: 30,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: '#FFFFFF',
@@ -189,4 +229,5 @@ const styles = StyleSheet.create({
   },
   handleTarget: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#C9C2B9' },
+  scrollContent: { gap: 12 },
 });

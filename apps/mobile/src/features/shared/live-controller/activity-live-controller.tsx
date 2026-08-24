@@ -1,6 +1,9 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { LIVE_CONTROLLER_MIN_HEIGHT } from './activity-live-controller-layout';
+
 interface ActivityLiveControllerProps {
+  actionIcon?: string;
   accentColor: string;
   accessibilityLabel: string;
   activityLabel: string;
@@ -22,6 +25,7 @@ interface ActivityLiveControllerProps {
  * @returns The rendered activity live controller
  */
 export function ActivityLiveController({
+  actionIcon,
   accentColor,
   accessibilityLabel,
   activityLabel,
@@ -63,7 +67,11 @@ export function ActivityLiveController({
           pressed && styles.pressed,
         ]}
       >
-        <View style={styles.stopSquare} />
+        {actionIcon === undefined ? (
+          <View style={styles.stopSquare} />
+        ) : (
+          <Text style={styles.actionIcon}>{actionIcon}</Text>
+        )}
       </Pressable>
     </View>
   );
@@ -71,7 +79,7 @@ export function ActivityLiveController({
 
 const styles = StyleSheet.create({
   controller: {
-    minHeight: 68,
+    minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
     flexDirection: 'row',
     alignItems: 'stretch',
     overflow: 'hidden',
@@ -85,10 +93,12 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   iconCircle: {
     width: 42,
@@ -96,9 +106,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 21,
+    flexShrink: 0,
   },
   icon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
-  copy: { gap: 2 },
+  copy: { flex: 1, minWidth: 0, gap: 2 },
   title: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },
   value: {
     color: '#FFFFFF',
@@ -109,11 +120,13 @@ const styles = StyleSheet.create({
   subtitle: { color: '#D8D2CC', fontSize: 11 },
   stop: {
     width: 66,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#3A3733',
   },
   stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  actionIcon: { color: '#FFFFFF', fontSize: 22, fontWeight: '800' },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.78 },
 });
