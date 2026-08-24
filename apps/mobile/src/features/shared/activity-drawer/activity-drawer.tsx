@@ -9,10 +9,12 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   type ActivityDrawerDecision,
   type ActivityDrawerMode,
+  activityDrawerBottomPadding,
   decideActivityDrawerAccessibilityAction,
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
@@ -39,6 +41,7 @@ interface ActivityDrawerProps {
  * @param onDismiss - Called when the drawer is dismissed
  */
 export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: ActivityDrawerProps) {
+  const insets = useSafeAreaInsets();
   const [drawerState, setDrawerState] = useState(() => initialActivityDrawerState(mode));
   const [reduceMotion, setReduceMotion] = useState(false);
   const translation = useRef(new Animated.Value(0)).current;
@@ -143,7 +146,13 @@ export function ActivityDrawer({ activityLabel, children, mode, onDismiss }: Act
         />
         <Animated.View
           accessibilityViewIsModal
-          style={[styles.sheet, { transform: [{ translateY: translation }] }]}
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: activityDrawerBottomPadding(insets.bottom),
+              transform: [{ translateY: translation }],
+            },
+          ]}
         >
           <Pressable
             accessibilityActions={
@@ -177,7 +186,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 2,
-    paddingBottom: 30,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: '#FFFFFF',
