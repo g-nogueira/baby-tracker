@@ -19,6 +19,19 @@ export function activityDrawerBottomPadding(bottomInset: number): number {
   return Math.max(30, bottomInset + 12);
 }
 
+/** Bounds opt-in scroll content below the top safe area, handle, and bottom inset. */
+export function activityDrawerScrollableContentMaxHeight(
+  viewportHeight: number,
+  topInset: number,
+  bottomInset: number,
+): number {
+  const topClearance = Math.max(12, topInset + 8);
+  const handleAndSpacing = 58;
+  const available =
+    viewportHeight - topClearance - handleAndSpacing - activityDrawerBottomPadding(bottomInset);
+  return Math.max(120, Math.floor(available));
+}
+
 /**
  * Determines the initial state of the activity drawer for a given mode.
  *

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ActivityDrawerState,
   activityDrawerBottomPadding,
+  activityDrawerScrollableContentMaxHeight,
   decideActivityDrawerAccessibilityAction,
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
@@ -13,6 +14,12 @@ describe('activity drawer state', () => {
   it('keeps controls above the bottom safe area', () => {
     expect(activityDrawerBottomPadding(0)).toBe(30);
     expect(activityDrawerBottomPadding(34)).toBe(46);
+  });
+
+  it('bounds tall opt-in content below both safe areas while preserving a usable viewport', () => {
+    expect(activityDrawerScrollableContentMaxHeight(667, 20, 0)).toBe(551);
+    expect(activityDrawerScrollableContentMaxHeight(667, 47, 34)).toBe(508);
+    expect(activityDrawerScrollableContentMaxHeight(160, 47, 34)).toBe(120);
   });
 
   it('opens create and active drawers collapsed, and edit drawers expanded', () => {

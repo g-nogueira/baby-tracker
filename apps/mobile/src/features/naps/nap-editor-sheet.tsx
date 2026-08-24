@@ -1,10 +1,11 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { elapsedMilliseconds } from '@baby-tracker/domain';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
+import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
 import { formatLiveDuration } from './nap-clock';
 import {
   editorForPrimaryAction,
@@ -27,13 +28,6 @@ interface NapEditorSheetProps {
 
 type PickerState = { field: 'startedAt' | 'endedAt'; mode: 'date' | 'time' } | null;
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  timeZone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
-});
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: '2-digit',
   minute: '2-digit',
@@ -81,7 +75,6 @@ export function NapEditorSheet({
         : null;
   const canEditStart = editor.mode !== 'stop';
   const canEditEnd = editor.mode !== 'start' && endedAt !== null;
-  const selectedPickerValue = picker?.field === 'endedAt' && endedAt !== null ? endedAt : startedAt;
   const actionTime = editor.mode === 'stop' ? (endedAt ?? editor.endedAt) : startedAt;
   const canSave = !isMutating && error === null && pickerError === null;
 
@@ -172,41 +165,29 @@ export function NapEditorSheet({
           {expanded ? (
             <View style={styles.expandedContent}>
               <Text style={styles.optionsTitle}>Date and time</Text>
-              <TimeField
+              <ActivityTimestampField
                 editable={canEditStart}
                 label="Start"
+                maximumDate={new Date()}
+                onDone={() => setPicker(null)}
                 onPick={(mode) => setPicker({ field: 'startedAt', mode })}
+                onPickerChange={handlePickerChange}
+                pickerMode={picker?.field === 'startedAt' ? picker.mode : null}
+                timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
                 value={startedAt}
               />
               {endedAt !== null ? (
-                <TimeField
+                <ActivityTimestampField
                   editable={canEditEnd}
                   label="End"
+                  maximumDate={new Date()}
+                  onDone={() => setPicker(null)}
                   onPick={(mode) => setPicker({ field: 'endedAt', mode })}
+                  onPickerChange={handlePickerChange}
+                  pickerMode={picker?.field === 'endedAt' ? picker.mode : null}
+                  timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
                   value={endedAt}
                 />
-              ) : null}
-
-              {picker !== null ? (
-                <View style={styles.pickerPanel}>
-                  <DateTimePicker
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    maximumDate={new Date()}
-                    mode={picker.mode}
-                    onChange={handlePickerChange}
-                    timeZoneName={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
-                    value={selectedPickerValue}
-                  />
-                  {Platform.OS === 'ios' ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => setPicker(null)}
-                      style={styles.doneButton}
-                    >
-                      <Text style={styles.doneText}>Done</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
               ) : null}
 
               {editor.mode === 'edit' ? (
@@ -303,52 +284,6 @@ function MinuteButton({ label, onPress }: { label: string; onPress: () => void }
   );
 }
 
-/**
- * Displays a labeled date and time field with optional picker interaction.
- *
- * @param editable - Whether the date and time controls can be pressed
- * @param label - The field label
- * @param onPick - Handles selection of the date or time control
- * @param value - The date and time to display
- */
-function TimeField({
-  editable,
-  label,
-  onPick,
-  value,
-}: {
-  editable: boolean;
-  label: string;
-  onPick: (mode: 'date' | 'time') => void;
-  value: Date;
-}) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.fieldValues}>
-        <Pressable
-          accessibilityLabel={`${label} date, ${dateFormatter.format(value)}`}
-          accessibilityRole="button"
-          disabled={!editable}
-          onPress={() => onPick('date')}
-          style={[styles.valueButton, !editable && styles.readOnly]}
-        >
-          <Text style={styles.valueText}>{dateFormatter.format(value)}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel={`${label} time, ${timeFormatter.format(value)}`}
-          accessibilityRole="button"
-          disabled={!editable}
-          onPress={() => onPick('time')}
-          style={[styles.valueButton, styles.timeButton, !editable && styles.readOnly]}
-        >
-          <Text style={styles.valueText}>{timeFormatter.format(value)}</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 const palette = {
   surface: '#FFFFFF',
   ink: '#292724',
@@ -418,23 +353,6 @@ const styles = StyleSheet.create({
     borderTopColor: palette.border,
   },
   optionsTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
-  field: { gap: 8 },
-  fieldLabel: { color: palette.ink, fontSize: 14, fontWeight: '700' },
-  fieldValues: { flexDirection: 'row', gap: 10 },
-  valueButton: {
-    flex: 1,
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: palette.accentSoft,
-  },
-  timeButton: { flex: 0, minWidth: 104 },
-  readOnly: { backgroundColor: '#F3F1EE' },
-  valueText: { color: palette.ink, fontSize: 15, fontWeight: '600' },
-  pickerPanel: { alignItems: 'flex-end', padding: 8, borderRadius: 14, backgroundColor: '#F7F4EF' },
-  doneButton: { minWidth: 64, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  doneText: { color: palette.accent, fontSize: 15, fontWeight: '700' },
   saveEditButton: {
     minHeight: 52,
     alignItems: 'center',

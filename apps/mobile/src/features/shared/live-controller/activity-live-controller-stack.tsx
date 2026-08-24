@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LIVE_CONTROLLER_STACK_GAP } from './activity-live-controller-layout';
 import {
   liveControllerBottomOffset,
   liveControllerReservedSpace,
@@ -34,5 +35,5 @@ export function ActivityLiveControllerStack({
 }
 
 const styles = StyleSheet.create({
-  stack: { position: 'absolute', left: 16, right: 16, gap: 10 },
+  stack: { position: 'absolute', left: 16, right: 16, gap: LIVE_CONTROLLER_STACK_GAP },
 });
