@@ -1,6 +1,70 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
+
+const CREATE_CARE_EVENTS_SCHEMA = `
+  CREATE TABLE care_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    child_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('diaper', 'medicine')),
+    occurred_at TEXT NOT NULL,
+    timezone TEXT NOT NULL CHECK (length(timezone) > 0),
+    data_json TEXT NOT NULL CHECK (json_valid(data_json)),
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    version INTEGER NOT NULL
+      CHECK (typeof(version) = 'integer' AND version > 0),
+    deleted_at TEXT,
+    CHECK (
+      length(occurred_at) = 24
+      AND substr(occurred_at, 5, 1) = '-'
+      AND substr(occurred_at, 8, 1) = '-'
+      AND substr(occurred_at, 11, 1) = 'T'
+      AND substr(occurred_at, 14, 1) = ':'
+      AND substr(occurred_at, 17, 1) = ':'
+      AND substr(occurred_at, 20, 1) = '.'
+      AND substr(occurred_at, 24, 1) = 'Z'
+      AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at) = occurred_at, 0)
+    ),
+    CHECK (
+      deleted_at IS NULL
+      OR (
+        length(deleted_at) = 24
+        AND substr(deleted_at, 5, 1) = '-'
+        AND substr(deleted_at, 8, 1) = '-'
+        AND substr(deleted_at, 11, 1) = 'T'
+        AND substr(deleted_at, 14, 1) = ':'
+        AND substr(deleted_at, 17, 1) = ':'
+        AND substr(deleted_at, 20, 1) = '.'
+        AND substr(deleted_at, 24, 1) = 'Z'
+        AND COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', deleted_at) = deleted_at, 0)
+      )
+    ),
+    CHECK (deleted_at IS NULL OR deleted_at >= occurred_at),
+    CHECK (
+      COALESCE(
+        (
+          kind = 'diaper'
+          AND json_type(data_json) = 'object'
+          AND json_type(data_json, '$.diaperType') = 'text'
+          AND json_extract(data_json, '$.diaperType') IN ('dry', 'wet', 'dirty', 'mixed')
+        ) OR (
+          kind = 'medicine'
+          AND json_type(data_json) = 'object'
+          AND json_type(data_json, '$.note') = 'text'
+          AND length(
+            trim(json_extract(data_json, '$.note'), char(9) || char(10) || char(13) || ' ')
+          ) > 0
+        ),
+        0
+      )
+    )
+  );
+
+  CREATE INDEX visible_care_events_chronology
+    ON care_events (child_id, occurred_at DESC, id DESC)
+    WHERE deleted_at IS NULL;
+`;
 
 const CREATE_NURSING_SCHEMA = `
   CREATE TABLE nursing_sessions (
@@ -180,6 +244,8 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         ${CREATE_NURSING_SCHEMA}
 
+        ${CREATE_CARE_EVENTS_SCHEMA}
+
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
     });
@@ -195,6 +261,8 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         ${CREATE_NURSING_SCHEMA}
 
+        ${CREATE_CARE_EVENTS_SCHEMA}
+
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
     });
@@ -205,6 +273,19 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
     await database.withExclusiveTransactionAsync(async (transaction) => {
       await transaction.execAsync(`
         ${CREATE_NURSING_SCHEMA}
+
+        ${CREATE_CARE_EVENTS_SCHEMA}
+
+        PRAGMA user_version = ${DATABASE_VERSION};
+      `);
+    });
+    return;
+  }
+
+  if (currentVersion === 3) {
+    await database.withExclusiveTransactionAsync(async (transaction) => {
+      await transaction.execAsync(`
+        ${CREATE_CARE_EVENTS_SCHEMA}
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
