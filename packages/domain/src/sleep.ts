@@ -1,7 +1,7 @@
 import { toUtcInstant } from './time';
 import type {
-  MutationContext,
   JsonValue,
+  MutationContext,
   NightSleepMutation,
   NightSleepSession,
   SleepMutation,
@@ -179,6 +179,82 @@ export function editNightSleep(
   return mutation(edited, phases, context, occurredAt, 'edit_sleep_session', session.version, {
     phases: phases.map(({ id, startedAt, endedAt }) => ({ id, startedAt, endedAt })),
   });
+}
+
+/** Tombstones one completed Night aggregate and every phase in the same mutation. */
+export function deleteNightSleep(
+  session: NightSleepSession,
+  context: MutationContext,
+): NightSleepMutation {
+  assertNotDeleted(session);
+  if (session.status !== 'completed') {
+    throw new SleepTransitionError(
+      'invalid_transition',
+      'Only completed Night sleep can be deleted.',
+    );
+  }
+  const occurredAt = toUtcInstant(context.now);
+  const phases = session.phases.map((phase) => ({
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: occurredAt,
+  }));
+  const deleted: NightSleepSession = {
+    ...session,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+    deletedAt: occurredAt,
+    phases,
+  };
+  assertValidSleepSession(deleted);
+  return mutation(
+    deleted,
+    phases,
+    context,
+    occurredAt,
+    'delete_sleep_session',
+    session.version,
+    {},
+  );
+}
+
+/** Restores one deleted completed Night aggregate and all of its canonical phases. */
+export function restoreNightSleep(
+  session: NightSleepSession,
+  context: MutationContext,
+): NightSleepMutation {
+  assertValidSleepSession(session);
+  if (session.deletedAt === null || session.status !== 'completed') {
+    throw new SleepTransitionError(
+      'invalid_transition',
+      'Only deleted completed Night sleep can be restored.',
+    );
+  }
+  const occurredAt = toUtcInstant(context.now);
+  const phases = session.phases.map((phase) => ({
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: null,
+  }));
+  const restored: NightSleepSession = {
+    ...session,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+    deletedAt: null,
+    phases,
+  };
+  assertValidSleepSession(restored);
+  return mutation(
+    restored,
+    phases,
+    context,
+    occurredAt,
+    'restore_sleep_session',
+    session.version,
+    {},
+  );
 }
 
 /** Validates the persisted Sleep aggregate independently of UI or storage frameworks. */

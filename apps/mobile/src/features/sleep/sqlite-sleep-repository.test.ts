@@ -1,8 +1,10 @@
 /// <reference types="node" />
 
 import {
+  deleteNightSleep,
   endNightSleep,
   resumeNightSleep,
+  restoreNightSleep,
   startNap,
   startNightSleep,
   startNightWaking,
@@ -61,6 +63,31 @@ describe('SQLite sleep repository', () => {
       'resume_night_sleep',
       'end_night_sleep',
     ]);
+  });
+
+  it('persists completed Night delete and restore with all phase tombstones atomically', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:30:00.000Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-13T00:15:00.000Z'));
+    await repository.save(waking);
+    const completed = endNightSleep(waking.session, context('2026-08-13T06:00:00.000Z'));
+    await repository.save(completed);
+
+    const deleted = deleteNightSleep(completed.session, context('2026-08-13T07:00:00.000Z'));
+    await repository.save(deleted);
+    expect(await repository.findById(completed.session.id)).toEqual(deleted.session);
+    expect(
+      await repository.listVisible(
+        'child-arthur',
+        '2026-08-12T00:00:00.000Z',
+        '2026-08-14T00:00:00.000Z',
+      ),
+    ).toEqual([]);
+
+    const restored = restoreNightSleep(deleted.session, context('2026-08-13T07:05:00.000Z'));
+    await repository.save(restored);
+    expect(await repository.findById(completed.session.id)).toEqual(restored.session);
+    expect(await repository.pendingOperationCount()).toBe(5);
   });
 
   it('recovers the canonical active Night session and final open phase after restart', async () => {

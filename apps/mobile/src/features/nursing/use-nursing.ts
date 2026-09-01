@@ -1,9 +1,13 @@
 import {
+  type CompletedNursingCorrection,
   createUuidV7,
+  deleteNursing,
+  editCompletedNursing,
   type NursingMutation,
   type NursingSession,
   type NursingSide,
   pauseNursing,
+  restoreNursing,
   resumeNursing,
   startNursing,
   stopNursing,
@@ -15,12 +19,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
-import { zonedDayBounds } from '@/features/naps/calendar-day';
+import { shiftCalendarDay, zonedDayBounds } from '@/features/naps/calendar-day';
 import { recoverFromMutationFailure } from '@/features/naps/mutation-recovery';
 import { SQLiteNursingRepository } from './sqlite-nursing-repository';
 
 interface NursingState {
   sessions: NursingSession[];
+  cycleSessions: NursingSession[];
   activeSession: NursingSession | null;
   latestCompletedLast: NursingSide | null;
   pendingOperationCount: number;
@@ -39,6 +44,7 @@ export function useNursing(selectedDay: string) {
   const [isMutating, setIsMutating] = useState(false);
   const [state, setState] = useState<NursingState>({
     sessions: [],
+    cycleSessions: [],
     activeSession: null,
     latestCompletedLast: null,
     pendingOperationCount: 0,
@@ -53,17 +59,26 @@ export function useNursing(selectedDay: string) {
       selectedDay,
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [sessions, activeSession, latestCompletedLast, pendingOperationCount] = await Promise.all(
-      [
+    const [cycleStartedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, -1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    const [, cycleEndedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, 1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    const [sessions, cycleSessions, activeSession, latestCompletedLast, pendingOperationCount] =
+      await Promise.all([
         repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
+        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
         repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
         repository.latestCompletedLastBreast(LOCAL_DEVELOPMENT_IDENTITY.childId),
         repository.pendingOperationCount(),
-      ],
-    );
+      ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
       sessions,
+      cycleSessions,
       activeSession,
       latestCompletedLast,
       pendingOperationCount,
@@ -150,6 +165,12 @@ export function useNursing(selectedDay: string) {
         ? Promise.resolve(null)
         : mutate((now) => stopNursing(session, createContext(now)));
     },
+    editCompleted: (session: Readonly<NursingSession>, correction: CompletedNursingCorrection) =>
+      mutate((now) => editCompletedNursing({ ...session }, correction, createContext(now))),
+    removeCompleted: (session: Readonly<NursingSession>) =>
+      mutate((now) => deleteNursing({ ...session }, createContext(now))),
+    restoreCompleted: (session: Readonly<NursingSession>) =>
+      mutate((now) => restoreNursing({ ...session }, createContext(now))),
     clearError: () => setState((current) => ({ ...current, error: null })),
   };
 }

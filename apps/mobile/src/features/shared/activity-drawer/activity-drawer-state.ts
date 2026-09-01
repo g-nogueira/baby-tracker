@@ -9,6 +9,24 @@ export interface ActivityDrawerGesture {
   vy: number;
 }
 
+export interface ActivityDrawerSurfaceGesture {
+  dx: number;
+  dy: number;
+}
+
+/** Returns whether the drawer surface should own a vertical drag. */
+export function shouldActivityDrawerClaimSurfaceGesture(
+  state: ActivityDrawerState,
+  scrollContent: boolean,
+  gesture: ActivityDrawerSurfaceGesture,
+): boolean {
+  const isVerticalDrag = Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx);
+
+  if (!isVerticalDrag) return false;
+
+  return state === 'collapsed' || !scrollContent;
+}
+
 const EXPAND_DISTANCE = -38;
 const EXPAND_VELOCITY = -0.8;
 const DISMISS_DISTANCE = 72;

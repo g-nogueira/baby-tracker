@@ -1,12 +1,17 @@
 import {
   createUuidV7,
   deleteNap,
+  deleteNightSleep,
   editNap,
+  editNightSleep,
   endNightSleep,
   type NapSession,
+  type NightSleepSession,
   restoreNap,
+  restoreNightSleep,
   resumeNightSleep,
   type SleepMutation,
+  type SleepPhaseBoundary,
   type SleepSession,
   startNap,
   startNightSleep,
@@ -25,6 +30,7 @@ import { recoverFromMutationFailure } from './mutation-recovery';
 
 interface NapState {
   naps: NapSession[];
+  sleepSessions: SleepSession[];
   activeSleep: SleepSession | null;
   pendingOperationCount: number;
   latestCompletedEnd: string | null;
@@ -56,6 +62,7 @@ export function useNaps() {
   selectedDayRef.current = selectedDay;
   const [state, setState] = useState<NapState>({
     naps: [],
+    sleepSessions: [],
     activeSleep: null,
     pendingOperationCount: 0,
     latestCompletedEnd: null,
@@ -91,7 +98,15 @@ export function useNaps() {
       selectedDay,
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [sleepSessions, activeSleep, pendingOperationCount, latestCompletedEnd] =
+    const [cycleStartedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, -1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    const [, cycleEndedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, 1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    const [napSessions, sleepSessions, activeSleep, pendingOperationCount, latestCompletedEnd] =
       await Promise.all([
         repository.listVisible(
           LOCAL_DEVELOPMENT_IDENTITY.childId,
@@ -99,13 +114,15 @@ export function useNaps() {
           nextDayStartedAt,
           'nap',
         ),
+        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
         repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
         repository.pendingOperationCount(),
         repository.latestCompletedEnd(LOCAL_DEVELOPMENT_IDENTITY.childId),
       ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
-      naps: sleepSessions.filter((session): session is NapSession => session.kind === 'nap'),
+      naps: napSessions.filter((session): session is NapSession => session.kind === 'nap'),
+      sleepSessions,
       activeSleep,
       pendingOperationCount,
       latestCompletedEnd,
@@ -195,9 +212,15 @@ export function useNaps() {
     },
     edit: (nap: NapSession, startedAt: Date, endedAt: Date | null) =>
       mutate((now) => editNap(nap, startedAt, endedAt, createContext(now))),
+    editNight: (session: NightSleepSession, boundaries: readonly SleepPhaseBoundary[]) =>
+      mutate((now) => editNightSleep(session, boundaries, createContext(now))),
     remove: (nap: NapSession) => mutate((now) => deleteNap(nap, createContext(now))),
     restore: (deletedNap: NapSession) =>
       mutate((now) => restoreNap(deletedNap, createContext(now))),
+    removeNight: (session: NightSleepSession) =>
+      mutate((now) => deleteNightSleep(session, createContext(now))),
+    restoreNight: (session: NightSleepSession) =>
+      mutate((now) => restoreNightSleep(session, createContext(now))),
     startNight: (startedAt?: Date) =>
       mutate((now) => startNightSleep(createContext(now), startedAt ?? now)),
     startNightWaking: (startedAt?: Date) => {

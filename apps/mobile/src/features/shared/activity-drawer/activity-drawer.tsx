@@ -22,6 +22,7 @@ import {
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
   initialActivityDrawerState,
+  shouldActivityDrawerClaimSurfaceGesture,
 } from './activity-drawer-state';
 
 interface ActivityDrawerRenderState {
@@ -116,7 +117,7 @@ export function ActivityDrawer({
     [dismissDrawer, settleDrawer],
   );
 
-  const panResponder = useMemo(
+  const handlePanResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gesture) =>
@@ -133,6 +134,28 @@ export function ActivityDrawer({
         onPanResponderTerminate: settleDrawer,
       }),
     [applyDecision, drawerState, expanded, settleDrawer, translation],
+  );
+
+  const surfacePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          shouldActivityDrawerClaimSurfaceGesture(drawerState, scrollContent, {
+            dx: gesture.dx,
+            dy: gesture.dy,
+          }),
+        onPanResponderMove: (_event, gesture) => {
+          const upwardResistance = expanded ? 0.12 : 0.22;
+          translation.setValue(gesture.dy < 0 ? gesture.dy * upwardResistance : gesture.dy);
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          applyDecision(
+            decideActivityDrawerGesture(drawerState, { dy: gesture.dy, vy: gesture.vy }),
+          );
+        },
+        onPanResponderTerminate: settleDrawer,
+      }),
+    [applyDecision, drawerState, expanded, scrollContent, settleDrawer, translation],
   );
 
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
@@ -165,6 +188,7 @@ export function ActivityDrawer({
               transform: [{ translateY: translation }],
             },
           ]}
+          {...surfacePanResponder.panHandlers}
         >
           <Pressable
             accessibilityActions={
@@ -181,7 +205,7 @@ export function ActivityDrawer({
             onAccessibilityAction={handleAccessibilityAction}
             onPress={() => applyDecision(decideActivityDrawerHandlePress(drawerState))}
             style={styles.handleTarget}
-            {...panResponder.panHandlers}
+            {...handlePanResponder.panHandlers}
           >
             <View style={styles.handle} />
           </Pressable>

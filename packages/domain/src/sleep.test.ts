@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertValidSleepSession,
+  deleteNightSleep,
   editNightSleep,
   endNightSleep,
+  restoreNightSleep,
   resumeNightSleep,
   SleepTransitionError,
   startNightSleep,
@@ -241,6 +243,25 @@ describe('Night sleep transitions', () => {
     expect(() =>
       assertValidSleepSession({ ...bedtime, deletedAt: '2026-08-12T21:00:00.000Z' }),
     ).toThrow('Session and phase tombstones must be consistent.');
+  });
+
+  it('deletes and restores a completed Night with every phase in one versioned mutation', () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:30:00.000Z')).session;
+    const waking = startNightWaking(bedtime, context('2026-08-13T00:15:00.000Z')).session;
+    const completed = endNightSleep(waking, context('2026-08-13T00:35:00.000Z')).session;
+    const deleted = deleteNightSleep(completed, context('2026-08-13T01:00:00.000Z'));
+
+    expect(deleted.session.deletedAt).toBe('2026-08-13T01:00:00.000Z');
+    expect(
+      deleted.session.phases.every((phase) => phase.deletedAt === deleted.session.deletedAt),
+    ).toBe(true);
+    expect(deleted.changedPhases).toHaveLength(2);
+    expect(deleted.operation).toMatchObject({ action: 'delete_sleep_session', baseVersion: 3 });
+
+    const restored = restoreNightSleep(deleted.session, context('2026-08-13T01:05:00.000Z'));
+    expect(restored.session.deletedAt).toBeNull();
+    expect(restored.session.phases.every((phase) => phase.deletedAt === null)).toBe(true);
+    expect(restored.operation).toMatchObject({ action: 'restore_sleep_session', baseVersion: 4 });
   });
 });
 

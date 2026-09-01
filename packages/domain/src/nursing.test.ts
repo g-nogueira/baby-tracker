@@ -3,6 +3,7 @@ import type { NursingSession } from './nursing';
 import {
   assertValidNursingSession,
   deleteNursing,
+  editCompletedNursing,
   pauseNursing,
   projectNursingDurations,
   restoreNursing,
@@ -265,6 +266,192 @@ describe('Nursing lifecycle', () => {
     });
   });
 });
+
+describe('completed Nursing correction', () => {
+  it('updates the stable aggregate with a full structured payload and preserved pause', () => {
+    const original = completedSession();
+    const edited = editCompletedNursing(
+      original,
+      {
+        startedAt: new Date('2026-08-15T23:58:00.000Z'),
+        endedAt: new Date('2026-08-16T00:02:00.000Z'),
+        leftDurationSeconds: 70,
+      },
+      context('2026-08-16T00:05:00.000Z'),
+    );
+
+    expect(edited.session).toMatchObject({
+      id: original.id,
+      startedAt: '2026-08-15T23:58:00.000Z',
+      endedAt: '2026-08-16T00:02:00.000Z',
+      leftDurationSeconds: 70,
+      rightDurationSeconds: 140,
+      totalPauseDurationSeconds: 30,
+      lastBreastUsed: 'right',
+      version: 6,
+    });
+    expect(edited.operation).toEqual({
+      operationId: '2026-08-16T00:05:00.000Z-id-0',
+      entityId: original.id,
+      entityType: 'nursing_session',
+      action: 'edit_nursing_session',
+      baseVersion: 5,
+      clientOccurredAt: '2026-08-16T00:05:00.000Z',
+      clientTimezone: 'Europe/Lisbon',
+      payload: {
+        startedAt: '2026-08-15T23:58:00.000Z',
+        endedAt: '2026-08-16T00:02:00.000Z',
+        status: 'completed',
+        leftDurationSeconds: 70,
+        rightDurationSeconds: 140,
+        totalPauseDurationSeconds: 30,
+        activeSide: null,
+        activeSideStartedAt: null,
+        pauseStartedAt: null,
+        lastBreastUsed: 'right',
+        deletedAt: null,
+      },
+    });
+  });
+
+  it('preserves explicit Last with two used sides and changes it only for a zero side', () => {
+    const original = completedSession();
+    const both = editCompletedNursing(
+      original,
+      {
+        startedAt: new Date(original.startedAt),
+        endedAt: new Date(original.endedAt ?? ''),
+        leftDurationSeconds: 89,
+      },
+      context('2026-08-16T00:05:00.000Z'),
+    ).session;
+    expect(both).toMatchObject({
+      leftDurationSeconds: 89,
+      rightDurationSeconds: 1,
+      lastBreastUsed: 'right',
+    });
+
+    expect(
+      editCompletedNursing(
+        original,
+        {
+          startedAt: new Date(original.startedAt),
+          endedAt: new Date(original.endedAt ?? ''),
+          leftDurationSeconds: 90,
+        },
+        context('2026-08-16T00:05:00.000Z'),
+      ).session.lastBreastUsed,
+    ).toBe('left');
+    expect(
+      editCompletedNursing(
+        { ...original, lastBreastUsed: 'left' },
+        {
+          startedAt: new Date(original.startedAt),
+          endedAt: new Date(original.endedAt ?? ''),
+          leftDurationSeconds: 0,
+        },
+        context('2026-08-16T00:05:00.000Z'),
+      ).session.lastBreastUsed,
+    ).toBe('right');
+  });
+
+  it('rejects non-completed, deleted, subsecond, future, reversed, pause-short, and split-invalid edits', () => {
+    const original = completedSession();
+    const valid = {
+      startedAt: new Date(original.startedAt),
+      endedAt: new Date(original.endedAt ?? ''),
+      leftDurationSeconds: 45,
+    };
+    const now = context('2026-08-16T00:05:00.000Z');
+    expect(() =>
+      editCompletedNursing(
+        startNursing('left', context('2026-08-16T00:00:00.000Z')).session,
+        valid,
+        now,
+      ),
+    ).toThrow('Only completed Nursing sessions can be corrected.');
+    expect(() =>
+      editCompletedNursing({ ...original, deletedAt: '2026-08-16T00:03:00.000Z' }, valid, now),
+    ).toThrow('A deleted Nursing session cannot change.');
+    expect(() =>
+      editCompletedNursing(
+        original,
+        { ...valid, startedAt: new Date('2026-08-15T23:59:00.500Z') },
+        now,
+      ),
+    ).toThrow('whole-second');
+    expect(() =>
+      editCompletedNursing(
+        original,
+        { ...valid, endedAt: new Date('2026-08-16T00:06:00.000Z') },
+        now,
+      ),
+    ).toThrow('future');
+    expect(() =>
+      editCompletedNursing(
+        original,
+        { ...valid, startedAt: new Date('2026-08-16T00:02:00.000Z') },
+        now,
+      ),
+    ).toThrow('must not precede');
+    expect(() =>
+      editCompletedNursing(
+        original,
+        {
+          ...valid,
+          startedAt: new Date('2026-08-15T23:59:50.000Z'),
+          endedAt: new Date('2026-08-16T00:00:10.000Z'),
+        },
+        now,
+      ),
+    ).toThrow('preserved pause');
+    for (const leftDurationSeconds of [-1, 91, 1.5]) {
+      expect(() => editCompletedNursing(original, { ...valid, leftDurationSeconds }, now)).toThrow(
+        'whole second within active duration',
+      );
+    }
+  });
+
+  it('maintains the duration invariant at every whole-second split boundary', () => {
+    const original = completedSession();
+    for (let leftDurationSeconds = 0; leftDurationSeconds <= 90; leftDurationSeconds += 1) {
+      const edited = editCompletedNursing(
+        original,
+        {
+          startedAt: new Date(original.startedAt),
+          endedAt: new Date(original.endedAt ?? ''),
+          leftDurationSeconds,
+        },
+        context('2026-08-16T00:05:00.000Z'),
+      ).session;
+      expect(
+        edited.leftDurationSeconds + edited.rightDurationSeconds + edited.totalPauseDurationSeconds,
+      ).toBe(120);
+    }
+  });
+});
+
+function completedSession(): NursingSession {
+  return {
+    id: 'nursing-cross-midnight',
+    childId: 'child-arthur',
+    startedAt: '2026-08-15T23:59:00.000Z',
+    endedAt: '2026-08-16T00:01:00.000Z',
+    status: 'completed',
+    leftDurationSeconds: 30,
+    rightDurationSeconds: 60,
+    totalPauseDurationSeconds: 30,
+    activeSide: null,
+    activeSideStartedAt: null,
+    pauseStartedAt: null,
+    lastBreastUsed: 'right',
+    timezone: 'Europe/Lisbon',
+    createdBy: 'caregiver-paloma',
+    updatedBy: 'caregiver-paloma',
+    version: 5,
+    deletedAt: null,
+  };
+}
 
 function context(at: string): MutationContext {
   let sequence = 0;
