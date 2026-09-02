@@ -2,8 +2,80 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 const DATABASE_VERSION = 4;
 
+const EXPECTED_TABLE_COLUMNS = {
+  sleep_sessions: [
+    'id',
+    'child_id',
+    'kind',
+    'started_at',
+    'ended_at',
+    'status',
+    'timezone',
+    'created_by',
+    'updated_by',
+    'version',
+    'deleted_at',
+  ],
+  sleep_phases: [
+    'id',
+    'sleep_session_id',
+    'kind',
+    'started_at',
+    'ended_at',
+    'created_by',
+    'updated_by',
+    'version',
+    'deleted_at',
+  ],
+  outbox_operations: [
+    'local_sequence',
+    'operation_id',
+    'entity_id',
+    'entity_type',
+    'action',
+    'base_version',
+    'client_occurred_at',
+    'client_timezone',
+    'payload_json',
+    'state',
+    'attempts',
+    'created_at',
+  ],
+  nursing_sessions: [
+    'id',
+    'child_id',
+    'started_at',
+    'ended_at',
+    'status',
+    'left_duration_seconds',
+    'right_duration_seconds',
+    'total_pause_duration_seconds',
+    'active_side',
+    'active_side_started_at',
+    'pause_started_at',
+    'last_breast_used',
+    'timezone',
+    'created_by',
+    'updated_by',
+    'version',
+    'deleted_at',
+  ],
+  care_events: [
+    'id',
+    'child_id',
+    'kind',
+    'occurred_at',
+    'timezone',
+    'data_json',
+    'created_by',
+    'updated_by',
+    'version',
+    'deleted_at',
+  ],
+} as const;
+
 const CREATE_CARE_EVENTS_SCHEMA = `
-  CREATE TABLE care_events (
+  CREATE TABLE IF NOT EXISTS care_events (
     id TEXT PRIMARY KEY NOT NULL,
     child_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('diaper', 'medicine')),
@@ -61,13 +133,13 @@ const CREATE_CARE_EVENTS_SCHEMA = `
     )
   );
 
-  CREATE INDEX visible_care_events_chronology
+  CREATE INDEX IF NOT EXISTS visible_care_events_chronology
     ON care_events (child_id, occurred_at DESC, id DESC)
     WHERE deleted_at IS NULL;
 `;
 
 const CREATE_NURSING_SCHEMA = `
-  CREATE TABLE nursing_sessions (
+  CREATE TABLE IF NOT EXISTS nursing_sessions (
     id TEXT PRIMARY KEY NOT NULL,
     child_id TEXT NOT NULL,
     started_at TEXT NOT NULL,
@@ -163,11 +235,11 @@ const CREATE_NURSING_SCHEMA = `
     )
   );
 
-  CREATE UNIQUE INDEX one_open_nursing_per_child
+  CREATE UNIQUE INDEX IF NOT EXISTS one_open_nursing_per_child
     ON nursing_sessions (child_id)
     WHERE status IN ('active', 'paused') AND deleted_at IS NULL;
 
-  CREATE INDEX completed_nursing_chronology
+  CREATE INDEX IF NOT EXISTS completed_nursing_chronology
     ON nursing_sessions (child_id, ended_at DESC, started_at DESC, id DESC)
     WHERE status = 'completed' AND deleted_at IS NULL;
 `;
@@ -185,7 +257,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
   if (currentVersion === 0) {
     await database.withExclusiveTransactionAsync(async (transaction) => {
       await transaction.execAsync(`
-        CREATE TABLE sleep_sessions (
+        CREATE TABLE IF NOT EXISTS sleep_sessions (
         id TEXT PRIMARY KEY NOT NULL,
         child_id TEXT NOT NULL,
         kind TEXT NOT NULL CHECK (kind IN ('nap', 'night')),
@@ -199,11 +271,11 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
         deleted_at TEXT
       );
 
-        CREATE UNIQUE INDEX one_active_sleep_per_child
+        CREATE UNIQUE INDEX IF NOT EXISTS one_active_sleep_per_child
           ON sleep_sessions (child_id)
           WHERE status = 'active' AND deleted_at IS NULL;
 
-        CREATE TABLE sleep_phases (
+        CREATE TABLE IF NOT EXISTS sleep_phases (
           id TEXT PRIMARY KEY NOT NULL,
           sleep_session_id TEXT NOT NULL REFERENCES sleep_sessions(id),
           kind TEXT NOT NULL CHECK (kind IN ('asleep', 'awake')),
@@ -215,14 +287,14 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
           deleted_at TEXT
         );
 
-        CREATE INDEX sleep_phases_session_started_at
+        CREATE INDEX IF NOT EXISTS sleep_phases_session_started_at
           ON sleep_phases (sleep_session_id, started_at);
 
-        CREATE UNIQUE INDEX one_open_phase_per_session
+        CREATE UNIQUE INDEX IF NOT EXISTS one_open_phase_per_session
           ON sleep_phases (sleep_session_id)
           WHERE ended_at IS NULL AND deleted_at IS NULL;
 
-        CREATE TABLE outbox_operations (
+        CREATE TABLE IF NOT EXISTS outbox_operations (
         local_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         operation_id TEXT UNIQUE NOT NULL,
         entity_id TEXT NOT NULL,
@@ -238,7 +310,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
         created_at TEXT NOT NULL
       );
 
-        CREATE INDEX pending_outbox_in_creation_order
+        CREATE INDEX IF NOT EXISTS pending_outbox_in_creation_order
           ON outbox_operations (local_sequence)
           WHERE state = 'pending';
 
@@ -248,6 +320,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await assertCurrentTableShapes(transaction);
     });
     return;
   }
@@ -255,7 +328,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
   if (currentVersion === 1) {
     await database.withExclusiveTransactionAsync(async (transaction) => {
       await transaction.execAsync(`
-        CREATE UNIQUE INDEX one_open_phase_per_session
+        CREATE UNIQUE INDEX IF NOT EXISTS one_open_phase_per_session
           ON sleep_phases (sleep_session_id)
           WHERE ended_at IS NULL AND deleted_at IS NULL;
 
@@ -265,6 +338,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await assertCurrentTableShapes(transaction);
     });
     return;
   }
@@ -278,6 +352,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await assertCurrentTableShapes(transaction);
     });
     return;
   }
@@ -289,6 +364,38 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await assertCurrentTableShapes(transaction);
     });
+    return;
+  }
+
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    await transaction.execAsync(`
+      CREATE UNIQUE INDEX IF NOT EXISTS one_open_phase_per_session
+        ON sleep_phases (sleep_session_id)
+        WHERE ended_at IS NULL AND deleted_at IS NULL;
+
+      ${CREATE_NURSING_SCHEMA}
+
+      ${CREATE_CARE_EVENTS_SCHEMA}
+    `);
+    await assertCurrentTableShapes(transaction);
+  });
+}
+
+async function assertCurrentTableShapes(database: SQLiteDatabase): Promise<void> {
+  for (const [tableName, expectedColumns] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
+    const columns = await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+    const actualColumns = columns.map(({ name }) => name);
+
+    if (
+      actualColumns.length !== expectedColumns.length ||
+      actualColumns.some((column, index) => column !== expectedColumns[index])
+    ) {
+      throw new Error(
+        `Local database table ${tableName} has an incompatible shape. ` +
+          `Expected [${expectedColumns.join(', ')}], found [${actualColumns.join(', ')}].`,
+      );
+    }
   }
 }

@@ -57,6 +57,49 @@ describe('mobile database migrations', () => {
     ).toThrow();
   });
 
+  it('reconciles an additive prerelease schema that is ahead of its user_version', async () => {
+    database = new DatabaseSync(':memory:');
+    createVersionThreeDatabase(database);
+    database.exec('PRAGMA user_version = 1;');
+    const beforeNursing = database.prepare('SELECT * FROM nursing_sessions').all();
+
+    await migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase());
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('SELECT * FROM nursing_sessions').all()).toEqual(beforeNursing);
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'care_events'")
+        .get(),
+    ).toEqual({ name: 'care_events' });
+  });
+
+  it('reconciles missing additive schema objects at the current user_version', async () => {
+    database = new DatabaseSync(':memory:');
+    const adapter = new NodeSQLiteAdapter(database);
+    await migrateDatabase(adapter.asExpoDatabase());
+    database.exec(`
+      DROP TABLE care_events;
+      DROP INDEX completed_nursing_chronology;
+    `);
+
+    await migrateDatabase(adapter.asExpoDatabase());
+
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'care_events'")
+        .get(),
+    ).toEqual({ name: 'care_events' });
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'completed_nursing_chronology'",
+        )
+        .get(),
+    ).toEqual({ name: 'completed_nursing_chronology' });
+  });
+
   it('upgrades version 2 in place and enforces canonical Nursing open-state combinations', async () => {
     database = new DatabaseSync(':memory:');
     createVersionTwoDatabase(database);
@@ -661,6 +704,10 @@ class NodeSQLiteAdapter {
 
   public async getFirstAsync<T>(sql: string, ...params: SQLInputValue[]): Promise<T | null> {
     return (this.database.prepare(sql).get(...params) as T | undefined) ?? null;
+  }
+
+  public async getAllAsync<T>(sql: string, ...params: SQLInputValue[]): Promise<T[]> {
+    return this.database.prepare(sql).all(...params) as T[];
   }
 
   public async withExclusiveTransactionAsync<T>(
