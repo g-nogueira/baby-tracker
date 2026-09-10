@@ -16,4 +16,9 @@ describe('Home quick-action layout', () => {
     expect(layout.actionWidth * 5 + layout.gap * 4).toBeLessThanOrEqual(280);
     expect(layout.circleSize).toBeLessThanOrEqual(layout.actionWidth);
   });
+  it('keeps narrow-screen targets tappable so the row can wrap instead of overlap', () => {
+    const layout = homeQuickActionsLayout(200, 5);
+    expect(layout.actionWidth).toBeGreaterThanOrEqual(44);
+    expect(layout.circleSize).toBeLessThanOrEqual(layout.actionWidth);
+  });
 });

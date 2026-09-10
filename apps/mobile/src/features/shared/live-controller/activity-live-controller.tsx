@@ -43,6 +43,8 @@ export function ActivityLiveController({
         accessibilityHint="Opens activity controls"
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
+        accessibilityState={{ disabled, busy: disabled }}
+        disabled={disabled}
         onPress={onOpen}
         style={({ pressed }) => [styles.body, pressed && styles.pressed]}
       >

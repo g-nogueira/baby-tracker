@@ -223,24 +223,39 @@ export function useNaps() {
       mutate((now) => restoreNightSleep(session, createContext(now))),
     startNight: (startedAt?: Date) =>
       mutate((now) => startNightSleep(createContext(now), startedAt ?? now)),
-    startNightWaking: (startedAt?: Date) => {
-      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+    startNightWaking: (startedAt?: Date, expectedSession?: NightSleepSession | null) => {
+      const activeNight =
+        expectedSession === undefined
+          ? state.activeSleep?.kind === 'night'
+            ? state.activeSleep
+            : null
+          : expectedSession;
       if (activeNight === null) {
         setState((current) => ({ ...current, error: 'There is no active Night sleep.' }));
         return Promise.resolve(null);
       }
       return mutate((now) => startNightWaking(activeNight, createContext(now), startedAt ?? now));
     },
-    resumeNight: (startedAt?: Date) => {
-      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+    resumeNight: (startedAt?: Date, expectedSession?: NightSleepSession | null) => {
+      const activeNight =
+        expectedSession === undefined
+          ? state.activeSleep?.kind === 'night'
+            ? state.activeSleep
+            : null
+          : expectedSession;
       if (activeNight === null) {
         setState((current) => ({ ...current, error: 'There is no active Night waking.' }));
         return Promise.resolve(null);
       }
       return mutate((now) => resumeNightSleep(activeNight, createContext(now), startedAt ?? now));
     },
-    endNight: (endedAt?: Date) => {
-      const activeNight = state.activeSleep?.kind === 'night' ? state.activeSleep : null;
+    endNight: (endedAt?: Date, expectedSession?: NightSleepSession | null) => {
+      const activeNight =
+        expectedSession === undefined
+          ? state.activeSleep?.kind === 'night'
+            ? state.activeSleep
+            : null
+          : expectedSession;
       if (activeNight === null) {
         setState((current) => ({ ...current, error: 'There is no active Night sleep.' }));
         return Promise.resolve(null);

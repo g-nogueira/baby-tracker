@@ -1,10 +1,20 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   type AccessibilityActionEvent,
   AccessibilityInfo,
   Animated,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -52,6 +62,10 @@ export function ActivityDrawer({
   onDismiss,
   scrollContent = false,
 }: ActivityDrawerProps) {
+  const onDismissRef = useRef(onDismiss);
+  useLayoutEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
   const insets = useSafeAreaInsets();
   const viewport = useWindowDimensions();
   const [drawerState, setDrawerState] = useState(() => initialActivityDrawerState(mode));
@@ -94,15 +108,15 @@ export function ActivityDrawer({
 
   const dismissDrawer = useCallback(() => {
     if (reduceMotion) {
-      onDismiss();
+      onDismissRef.current();
       return;
     }
     Animated.timing(translation, {
       toValue: 700,
       duration: 180,
       useNativeDriver: true,
-    }).start(onDismiss);
-  }, [onDismiss, reduceMotion, translation]);
+    }).start(() => onDismissRef.current());
+  }, [reduceMotion, translation]);
 
   const applyDecision = useCallback(
     (decision: ActivityDrawerDecision) => {
@@ -172,7 +186,10 @@ export function ActivityDrawer({
 
   return (
     <Modal animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onDismiss} transparent>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.overlay}
+      >
         <Pressable
           accessibilityLabel={`Close ${activityLabel.toLocaleLowerCase()} controls`}
           accessibilityRole="button"
@@ -231,7 +248,7 @@ export function ActivityDrawer({
             content
           )}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -239,6 +256,8 @@ export function ActivityDrawer({
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(35, 31, 28, 0.38)' },
   sheet: {
+    flexShrink: 1,
+    maxHeight: '100%',
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 2,

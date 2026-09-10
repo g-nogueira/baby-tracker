@@ -55,12 +55,12 @@ import { ActivityLiveController } from '@/features/shared/live-controller/activi
 import { minimumLiveControllerStackHeight } from '@/features/shared/live-controller/activity-live-controller-layout';
 import { ActivityLiveControllerStack } from '@/features/shared/live-controller/activity-live-controller-stack';
 import { liveControllerReservedSpace } from '@/features/shared/live-controller/activity-live-controller-stack-state';
-import { CompletedNightEditorDrawer } from '@/features/sleep/completed-night-editor-drawer';
+import { NightRecordEditorDrawer } from '@/features/sleep/night-record-editor-drawer';
 import {
-  type CompletedNightEditorState,
-  completedNightBoundariesForSave,
-  createCompletedNightEditorState,
-} from '@/features/sleep/completed-night-editor-state';
+  createNightRecordEditorState,
+  type NightRecordEditorState,
+  nightRecordBoundariesForSave,
+} from '@/features/sleep/night-record-editor-state';
 import { NightTransitionDrawer } from '@/features/sleep/night-transition-drawer';
 import {
   createNightTransitionDraft,
@@ -183,8 +183,10 @@ export function TodayScreen() {
   const now = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
-  const [nightEditor, setNightEditor] = useState<CompletedNightEditorState | null>(null);
-  const [cycleSelection, setCycleSelection] = useState<RadialCycleSelection>('day');
+  const [nightEditor, setNightEditor] = useState<NightRecordEditorState | null>(null);
+  const [chosenCycle, setCycleSelection] = useState<RadialCycleSelection | null>(null);
+  const cycleSelection =
+    chosenCycle ?? (isToday && activeSleep?.kind === 'night' ? 'night' : 'day');
   const [nursingDrawerOpen, setNursingDrawerOpen] = useState(false);
   const [nursingEditor, setNursingEditor] = useState<CompletedNursingEditorState | null>(null);
   const [careEventDrawer, setCareEventDrawer] = useState<CareEventDrawerState | null>(null);
@@ -220,6 +222,7 @@ export function TodayScreen() {
   const nursingModel = deriveNursingHomeModel(activeNursing, latestCompletedLast, now);
   const nursingController = nursingModel.controller;
   const cycleViews = buildRadialCycleViews({
+    showActiveNight: isToday,
     careEvents: cycleEvents,
     childId: LOCAL_DEVELOPMENT_IDENTITY.childId,
     localDate: selectedDay,
@@ -267,6 +270,7 @@ export function TodayScreen() {
       return;
     }
     const session = activeSleep?.kind === 'night' ? activeSleep : null;
+    setNightEditor(null);
     setNightDraft(createNightTransitionDraft(kind, session, new Date()));
   };
 
@@ -275,11 +279,14 @@ export function TodayScreen() {
       draft.kind === 'start-night-sleep'
         ? await startNight(draft.effectiveAt)
         : draft.kind === 'start-night-waking'
-          ? await startNightWaking(draft.effectiveAt)
+          ? await startNightWaking(draft.effectiveAt, draft.session)
           : draft.kind === 'resume-night-sleep'
-            ? await resumeNight(draft.effectiveAt)
-            : await endNight(draft.effectiveAt);
-    if (saved !== null) setNightDraft(null);
+            ? await resumeNight(draft.effectiveAt, draft.session)
+            : await endNight(draft.effectiveAt, draft.session);
+    if (saved !== null) {
+      setNightDraft(null);
+      setCycleSelection(saved.status === 'active' ? 'night' : 'day');
+    }
   };
 
   const openNapRecord = (napId: string) => {
@@ -334,14 +341,18 @@ export function TodayScreen() {
     setNursingEditor(createCompletedNursingEditorState(session));
   };
 
-  const openNightRecord = (session: NightSleepSession) => {
+  const openNightRecord = (
+    session: NightSleepSession,
+    phaseId: string | null = null,
+    mode: 'active' | 'edit' = 'edit',
+  ) => {
     clearSleepError();
     setNightDraft(null);
-    setNightEditor(createCompletedNightEditorState(session));
+    setNightEditor(createNightRecordEditorState(session, phaseId, mode));
   };
 
-  const saveNightEditor = async (candidate: CompletedNightEditorState) => {
-    const saved = await editNight(candidate.session, completedNightBoundariesForSave(candidate));
+  const saveNightEditor = async (candidate: NightRecordEditorState) => {
+    const saved = await editNight(candidate.session, nightRecordBoundariesForSave(candidate));
     if (saved !== null) setNightEditor(null);
   };
 
@@ -428,12 +439,7 @@ export function TodayScreen() {
     }
     const night = sleepSessions.find((session) => session.id === record.editorRecordId);
     if (night?.kind !== 'night') return;
-    if (night.status === 'completed') {
-      openNightRecord(night);
-      return;
-    }
-    const controller = deriveSleepHomeModel(night, latestCompletedEnd).controller;
-    if (controller !== null && controller.kind !== 'nap') openSleepAction(controller.primaryAction);
+    openNightRecord(night, record.kind === 'night-waking' ? record.id : null);
   };
 
   const runNursingTransition = async (
@@ -635,7 +641,7 @@ export function TodayScreen() {
         </View>
       </ScrollView>
 
-      {hasLiveController && isToday ? (
+      {hasLiveController ? (
         <ActivityLiveControllerStack
           onReservedSpaceChange={setControllerReservedSpace}
           raised={undo !== null}
@@ -655,8 +661,20 @@ export function TodayScreen() {
               controller={activeController}
               isMutating={isSleepMutating}
               now={now}
-              onEnd={() => void endNight()}
-              onOpen={() => openSleepAction(activeController.primaryAction)}
+              onEnd={() => {
+                void endNight().then((saved) => {
+                  if (saved !== null) setCycleSelection('day');
+                });
+              }}
+              onOpen={() =>
+                openNightRecord(
+                  activeSleep,
+                  activeController.kind === 'night-awake'
+                    ? (activeSleep.phases.at(-1)?.id ?? null)
+                    : null,
+                  'active',
+                )
+              }
               onResume={() => void resumeNight()}
             />
           ) : null}
@@ -721,7 +739,7 @@ export function TodayScreen() {
       ) : null}
 
       {nightEditor !== null ? (
-        <CompletedNightEditorDrawer
+        <NightRecordEditorDrawer
           editor={nightEditor}
           isMutating={isSleepMutating}
           mutationError={sleepError}
@@ -730,7 +748,24 @@ export function TodayScreen() {
             clearSleepError();
             setNightEditor(candidate);
           }}
-          onDelete={() => void deleteNightEditor()}
+          onDelete={
+            nightEditor.phaseId === null && nightEditor.session.status === 'completed'
+              ? () => void deleteNightEditor()
+              : null
+          }
+          now={now}
+          onFinish={() => {
+            const result =
+              nightEditor.phaseId === null
+                ? endNight(undefined, nightEditor.session)
+                : resumeNight(undefined, nightEditor.session);
+            void result.then((saved) => {
+              if (saved !== null) {
+                setNightEditor(null);
+                setCycleSelection(saved.status === 'active' ? 'night' : 'day');
+              }
+            });
+          }}
           onSave={(candidate) => void saveNightEditor(candidate)}
         />
       ) : null}
@@ -866,7 +901,7 @@ function ActiveNightTimer({
     <ActivityLiveController
       accentColor={awake ? '#52728A' : '#5B4C94'}
       accessibilityLabel={`${awake ? 'Night waking' : 'Night sleep'} running for ${liveDuration}`}
-      actionIcon={awake ? '↻' : undefined}
+      actionIcon={awake ? 'z' : '☀'}
       activityLabel={awake ? 'Night waking' : 'Night sleep'}
       disabled={isMutating}
       elapsedLabel={liveDuration}

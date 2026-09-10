@@ -1,14 +1,11 @@
-import { elapsedMilliseconds } from '@baby-tracker/domain';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useMemo, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
-import { formatLiveDuration } from '@/features/naps/nap-clock';
 import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
 import {
-  activeNightDurationStartedAt,
   adjustNightTransitionTime,
   type NightTransitionDraft,
   nightTransitionDraftForSave,
@@ -54,14 +51,6 @@ export function NightTransitionDrawer({
   const metadata = transitionMetadata(draft.kind);
   const error = useMemo(() => nightTransitionError(draft), [draft]);
   const canSave = !isMutating && error === null && pickerError === null;
-  const liveDurationStartedAt =
-    draft.session === null ? null : activeNightDurationStartedAt(draft.session);
-  const liveNow = useLiveNow(liveDurationStartedAt !== null);
-  const liveDuration =
-    liveDurationStartedAt === null
-      ? null
-      : formatLiveDuration(elapsedMilliseconds(liveDurationStartedAt, liveNow));
-
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const activePicker = picker;
     if (Platform.OS === 'android') setPicker(null);
@@ -81,11 +70,7 @@ export function NightTransitionDrawer({
   };
 
   return (
-    <ActivityDrawer
-      activityLabel={metadata.title}
-      mode={draft.kind === 'start-night-sleep' ? 'create' : 'active'}
-      onDismiss={onCancel}
-    >
+    <ActivityDrawer activityLabel={metadata.title} mode="create" scrollContent onDismiss={onCancel}>
       {({ expanded }) => (
         <>
           <View style={styles.hero}>
@@ -95,18 +80,12 @@ export function NightTransitionDrawer({
             <Text accessibilityRole="header" style={styles.title}>
               {metadata.title}
             </Text>
-            <Text accessibilityLiveRegion="polite" style={styles.actionTime}>
-              {liveDuration ?? timeFormatter.format(draft.effectiveAt)}
-            </Text>
-            {liveDuration === null ? null : (
-              <Text style={styles.transitionTime}>
-                Transition at {timeFormatter.format(draft.effectiveAt)}
-              </Text>
-            )}
+            <Text style={styles.actionTime}>{timeFormatter.format(draft.effectiveAt)}</Text>
           </View>
 
           <View style={styles.quickActions}>
             <MinuteButton
+              disabled={isMutating}
               label="−1 min"
               onPress={() => onChange(adjustNightTransitionTime(draft, -1))}
             />
@@ -127,6 +106,7 @@ export function NightTransitionDrawer({
               <Text style={styles.primaryActionLabel}>{metadata.primaryLabel}</Text>
             </Pressable>
             <MinuteButton
+              disabled={isMutating}
               label="+1 min"
               onPress={() => onChange(adjustNightTransitionTime(draft, 1))}
             />
@@ -196,27 +176,18 @@ export function NightTransitionDrawer({
   );
 }
 
-function useLiveNow(enabled: boolean): Date {
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    if (!enabled) return;
-    const interval = setInterval(() => setNow(new Date()), 1_000);
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setNow(new Date());
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
-  }, [enabled]);
-
-  return now;
-}
-
-function MinuteButton({ label, onPress }: { label: string; onPress: () => void }) {
+function MinuteButton({
+  disabled,
+  label,
+  onPress,
+}: {
+  disabled: boolean;
+  label: string;
+  onPress: () => void;
+}) {
   return (
     <Pressable
+      disabled={disabled}
       accessibilityLabel={`Adjust time ${label}`}
       accessibilityRole="button"
       onPress={onPress}
@@ -256,7 +227,7 @@ function transitionMetadata(kind: NightTransitionDraft['kind']) {
     case 'start-night-waking':
       return metadata('Night waking', '↯', 'Start', '▶', 'Start Night waking', '#52728A');
     case 'resume-night-sleep':
-      return metadata('Fell asleep again', 'z', 'Resume', '▶', 'Resume Night sleep', '#7367B9');
+      return metadata('Fell asleep again', 'z', 'Save', '✓', 'Save Fell asleep again', '#7367B9');
     case 'end-night-sleep':
       return metadata('Wake up', '☀', 'Finish', '■', 'End Night sleep', '#5B4C94');
   }

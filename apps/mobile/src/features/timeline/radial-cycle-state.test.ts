@@ -50,6 +50,26 @@ describe('radial cycle state', () => {
     ]);
   });
 
+  it('keeps Today on the same active Night after midnight without changing dated history', () => {
+    const active = night('night-active', '2026-08-15T20:00:00.000Z', null);
+    const input = {
+      careEvents: [],
+      childId,
+      localDate: '2026-08-16',
+      now: new Date('2026-08-16T02:00:00Z'),
+      nursingSessions: [],
+      sleepSessions: [active],
+      timezone,
+    };
+    const today = buildRadialCycleViews({ ...input, showActiveNight: true }).night;
+    expect(today.projection?.cycle.id).toBe(active.id);
+    expect(today.records[0]?.projection.arc?.actualDurationMs).toBe(6 * 60 * 60 * 1000);
+    expect(buildRadialCycleViews(input).night.projection).toBeNull();
+    expect(
+      buildRadialCycleViews({ ...input, localDate: '2026-08-15' }).night.projection?.cycle.id,
+    ).toBe(active.id);
+  });
+
   it('projects Night waking in the inner lane and point events without fake arcs', () => {
     const session = night('night-1', '2026-08-15T20:00:00.000Z', '2026-08-16T06:00:00.000Z', true);
     const diaper = careEvent('diaper-1', 'diaper', '2026-08-15T23:00:00.000Z');
@@ -153,7 +173,12 @@ function sleep(id: string, kind: 'nap', startedAt: string, endedAt: string): Sle
   };
 }
 
-function night(id: string, startedAt: string, endedAt: string, waking = false): NightSleepSession {
+function night(
+  id: string,
+  startedAt: string,
+  endedAt: string | null,
+  waking = false,
+): NightSleepSession {
   const boundary = '2026-08-15T22:00:00.000Z';
   return {
     id,
@@ -161,7 +186,7 @@ function night(id: string, startedAt: string, endedAt: string, waking = false): 
     kind: 'night',
     startedAt,
     endedAt,
-    status: 'completed',
+    status: endedAt === null ? 'active' : 'completed',
     timezone,
     createdBy: 'caregiver',
     updatedBy: 'caregiver',

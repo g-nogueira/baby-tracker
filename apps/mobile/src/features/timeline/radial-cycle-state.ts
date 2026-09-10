@@ -3,6 +3,7 @@ import {
   type CycleProjection,
   type CycleRecord,
   type CycleTick,
+  createNightCycle,
   type DiaperType,
   type NursingSession,
   type NursingStatus,
@@ -49,6 +50,8 @@ export interface RadialCycleViews {
 }
 
 interface BuildRadialCycleViewsInput {
+  /** Today follows the containing Night through midnight; dated history keeps its own cycle. */
+  showActiveNight?: boolean;
   careEvents: readonly CareEvent[];
   childId: string;
   localDate: string;
@@ -67,21 +70,31 @@ export function buildRadialCycleViews(input: BuildRadialCycleViewsInput): Radial
     localDate: input.localDate,
     timezone: input.timezone,
   });
+  const activeNight = input.showActiveNight
+    ? input.sleepSessions.find(
+        (session) =>
+          session.kind === 'night' &&
+          session.childId === input.childId &&
+          session.status === 'active' &&
+          session.deletedAt === null,
+      )
+    : undefined;
+  const nightCycle = activeNight?.kind === 'night' ? createNightCycle(activeNight) : cycles.night;
   const { records, metadata } = radialRecords(input);
   const dayProjection = projectCycle(cycles.day, records, { now: input.now });
 
   return {
     day: projectedView('day', dayProjection, metadata),
     night:
-      cycles.night.kind === 'empty_night'
+      nightCycle.kind === 'empty_night'
         ? {
             kind: 'night',
-            emptyLabel: cycles.night.label,
+            emptyLabel: nightCycle.label,
             projection: null,
             records: [],
             ticks: [],
           }
-        : projectedView('night', projectCycle(cycles.night, records, { now: input.now }), metadata),
+        : projectedView('night', projectCycle(nightCycle, records, { now: input.now }), metadata),
   };
 }
 

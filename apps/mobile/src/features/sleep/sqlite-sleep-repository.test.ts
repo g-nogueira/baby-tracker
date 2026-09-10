@@ -1,24 +1,29 @@
 /// <reference types="node" />
 
-import {
-  deleteNightSleep,
-  endNightSleep,
-  resumeNightSleep,
-  restoreNightSleep,
-  startNap,
-  startNightSleep,
-  startNightWaking,
-  stopNap,
-  type MutationContext,
-} from '@baby-tracker/domain';
-import type { SQLiteDatabase } from 'expo-sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import {
+  deleteNightSleep,
+  editNightSleep,
+  endNightSleep,
+  type MutationContext,
+  restoreNightSleep,
+  resumeNightSleep,
+  startNap,
+  startNightSleep,
+  startNightWaking,
+  stopNap,
+} from '@baby-tracker/domain';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { migrateDatabase } from '../../storage/migrations';
+import {
+  createNightRecordEditorState,
+  nightRecordBoundariesForSave,
+} from './night-record-editor-state';
 import { ActiveSleepSessionError, SQLiteSleepRepository } from './sqlite-sleep-repository';
 
 describe('SQLite sleep repository', () => {
@@ -88,6 +93,42 @@ describe('SQLite sleep repository', () => {
     await repository.save(restored);
     expect(await repository.findById(completed.session.id)).toEqual(restored.session);
     expect(await repository.pendingOperationCount()).toBe(5);
+  });
+
+  it('persists active Night and awake-time corrections across restart and rejects stale transitions', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:30:00.123Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-13T00:15:00.456Z'));
+    await repository.save(waking);
+    const draft = {
+      ...createNightRecordEditorState(waking.session, waking.session.phases[1].id),
+      startedAt: new Date('2026-08-13T00:10:00Z'),
+    };
+    const edited = editNightSleep(
+      waking.session,
+      nightRecordBoundariesForSave(draft),
+      context('2026-08-13T00:20:00Z'),
+    );
+    await repository.save(edited);
+    restartDatabase();
+    const afterRestart = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await afterRestart.active('child-arthur')).toEqual(edited.session);
+    expect(await afterRestart.pendingOperationCount()).toBe(3);
+    const stale = resumeNightSleep(waking.session, context('2026-08-13T00:25:00Z'));
+    await expect(afterRestart.save(stale)).rejects.toThrow('changed');
+    expect(await afterRestart.active('child-arthur')).toEqual(edited.session);
+    expect(await afterRestart.pendingOperationCount()).toBe(3);
+    const outerDraft = {
+      ...createNightRecordEditorState(edited.session),
+      startedAt: new Date('2026-08-12T20:20:00Z'),
+    };
+    const outerEdit = editNightSleep(
+      edited.session,
+      nightRecordBoundariesForSave(outerDraft),
+      context('2026-08-13T00:30:00Z'),
+    );
+    await afterRestart.save(outerEdit);
+    expect(await afterRestart.active('child-arthur')).toEqual(outerEdit.session);
   });
 
   it('recovers the canonical active Night session and final open phase after restart', async () => {

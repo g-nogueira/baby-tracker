@@ -1,5 +1,5 @@
-import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { elapsedMilliseconds } from '@baby-tracker/domain';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -73,7 +73,7 @@ export function NapEditorSheet({
       : editor.mode === 'edit'
         ? editor.endedAt
         : null;
-  const canEditStart = editor.mode !== 'stop';
+  const canEditStart = !isMutating;
   const canEditEnd = editor.mode !== 'start' && endedAt !== null;
   const actionTime = editor.mode === 'stop' ? (endedAt ?? editor.endedAt) : startedAt;
   const canSave = !isMutating && error === null && pickerError === null;
@@ -115,6 +115,7 @@ export function NapEditorSheet({
       activityLabel="Nap"
       mode={editor.mode === 'start' ? 'create' : editor.mode === 'stop' ? 'active' : 'edit'}
       onDismiss={onCancel}
+      scrollContent
     >
       {({ expanded }) => (
         <>
@@ -123,7 +124,7 @@ export function NapEditorSheet({
               <Text style={styles.napIcon}>z</Text>
             </View>
             <Text accessibilityRole="header" style={styles.title}>
-              {editor.mode === 'stop' ? 'Stop nap' : editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
+              {editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
             </Text>
             {editor.mode !== 'edit' ? (
               <Text style={styles.actionTime}>
@@ -170,7 +171,17 @@ export function NapEditorSheet({
                 label="Start"
                 maximumDate={new Date()}
                 onDone={() => setPicker(null)}
-                onPick={(mode) => setPicker({ field: 'startedAt', mode })}
+                onPick={(mode) => {
+                  if (editor.mode === 'stop') {
+                    onChange({
+                      mode: 'edit',
+                      nap: editor.nap,
+                      startedAt: new Date(editor.nap.startedAt),
+                      endedAt: null,
+                    });
+                  }
+                  setPicker({ field: 'startedAt', mode });
+                }}
                 onPickerChange={handlePickerChange}
                 pickerMode={picker?.field === 'startedAt' ? picker.mode : null}
                 timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
