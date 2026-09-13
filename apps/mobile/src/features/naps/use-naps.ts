@@ -2,6 +2,7 @@ import {
   createUuidV7,
   deleteNap,
   deleteNightSleep,
+  deleteNightWaking,
   editNap,
   editNightSleep,
   endNightSleep,
@@ -9,6 +10,7 @@ import {
   type NightSleepSession,
   restoreNap,
   restoreNightSleep,
+  restoreNightWaking,
   resumeNightSleep,
   type SleepMutation,
   type SleepPhaseBoundary,
@@ -262,6 +264,10 @@ export function useNaps() {
       }
       return mutate((now) => endNightSleep(activeNight, createContext(now), endedAt ?? now));
     },
+    removeNightWaking: (session: NightSleepSession, phaseId: string) =>
+      mutate((now) => deleteNightWaking(session, phaseId, createContext(now))),
+    restoreNightWaking: (session: NightSleepSession, previous: NightSleepSession) =>
+      mutate((now) => restoreNightWaking(session, previous, createContext(now))),
     clearError: () => setState((current) => ({ ...current, error: null })),
   };
 }

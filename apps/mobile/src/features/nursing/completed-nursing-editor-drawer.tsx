@@ -21,7 +21,7 @@ interface CompletedNursingEditorDrawerProps {
   mutationError: string | null;
   onCancel: () => void;
   onChange: (editor: CompletedNursingEditorState) => void;
-  onDelete: () => void;
+  onDelete: (() => void) | null;
   onSave: (editor: CompletedNursingEditorState) => void;
 }
 
@@ -50,6 +50,7 @@ export function CompletedNursingEditorDrawer({
   onDelete,
   onSave,
 }: CompletedNursingEditorDrawerProps) {
+  const live = editor.activeSession;
   const [picker, setPicker] = useState<PickerState>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const totals = useMemo(() => completedNursingEditorTotals(editor), [editor]);
@@ -60,10 +61,10 @@ export function CompletedNursingEditorDrawer({
   const selectedPickerValue = picker?.field === 'endedAt' ? editor.endedAt : editor.startedAt;
 
   useEffect(() => {
-    if (editor.lastAdjustmentAnnouncement !== null) {
+    if (live === undefined && editor.lastAdjustmentAnnouncement !== null) {
       AccessibilityInfo.announceForAccessibility(editor.lastAdjustmentAnnouncement);
     }
-  }, [editor.lastAdjustmentAnnouncement]);
+  }, [editor.lastAdjustmentAnnouncement, live]);
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const activePicker = picker;
@@ -98,21 +99,29 @@ export function CompletedNursingEditorDrawer({
             <Text accessibilityRole="header" style={styles.title}>
               Edit Nursing
             </Text>
-            <Text style={styles.subtitle}>Adjust the interval and redistribute active time.</Text>
+            <Text style={styles.subtitle}>
+              {live === undefined
+                ? 'Adjust the interval and redistribute active time.'
+                : `Adjust time through ${timeFormatter.format(editor.endedAt)}. ${live.status === 'paused' ? 'The pause' : 'The current breast'} keeps running.`}
+            </Text>
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Date and time</Text>
             <TimestampField
+              disabled={isMutating}
               label="Start"
               onPick={(mode) => setPicker({ field: 'startedAt', mode })}
               value={editor.startedAt}
             />
-            <TimestampField
-              label="End"
-              onPick={(mode) => setPicker({ field: 'endedAt', mode })}
-              value={editor.endedAt}
-            />
+            {live === undefined ? (
+              <TimestampField
+                disabled={isMutating}
+                label="End"
+                onPick={(mode) => setPicker({ field: 'endedAt', mode })}
+                value={editor.endedAt}
+              />
+            ) : null}
             {picker !== null ? (
               <View style={styles.pickerPanel}>
                 <DateTimePicker
@@ -140,7 +149,8 @@ export function CompletedNursingEditorDrawer({
             <View style={styles.sectionHeadingRow}>
               <Text style={styles.sectionTitle}>Left / Right split</Text>
               <Text style={styles.lastLabel}>
-                Last · {editor.lastBreastUsed === 'left' ? 'Left' : 'Right'}
+                Last ·{' '}
+                {(live?.lastBreastUsed ?? editor.lastBreastUsed) === 'left' ? 'Left' : 'Right'}
               </Text>
             </View>
             <NursingSplitSlider
@@ -161,7 +171,7 @@ export function CompletedNursingEditorDrawer({
                 value={rightDurationSeconds === null ? '—' : formatSeconds(rightDurationSeconds)}
               />
             </View>
-            {editor.lastAdjustmentAnnouncement === null ? null : (
+            {live !== undefined || editor.lastAdjustmentAnnouncement === null ? null : (
               <Text style={styles.adjustmentText}>{editor.lastAdjustmentAnnouncement}</Text>
             )}
           </View>
@@ -211,14 +221,16 @@ export function CompletedNursingEditorDrawer({
           >
             <Text style={styles.saveText}>Save changes</Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            disabled={isMutating}
-            onPress={onDelete}
-            style={styles.deleteButton}
-          >
-            <Text style={styles.deleteText}>Delete Nursing session</Text>
-          </Pressable>
+          {onDelete === null ? null : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={isMutating}
+              onPress={onDelete}
+              style={styles.deleteButton}
+            >
+              <Text style={styles.deleteText}>Delete Nursing session</Text>
+            </Pressable>
+          )}
         </>
       )}
     </ActivityDrawer>
@@ -226,10 +238,12 @@ export function CompletedNursingEditorDrawer({
 }
 
 function TimestampField({
+  disabled,
   label,
   onPick,
   value,
 }: {
+  disabled: boolean;
   label: string;
   onPick: (mode: 'date' | 'time') => void;
   value: Date;
@@ -241,6 +255,7 @@ function TimestampField({
         <Pressable
           accessibilityLabel={`${label} date, ${dateFormatter.format(value)}`}
           accessibilityRole="button"
+          disabled={disabled}
           onPress={() => onPick('date')}
           style={styles.valueButton}
         >
@@ -249,6 +264,7 @@ function TimestampField({
         <Pressable
           accessibilityLabel={`${label} time, ${timeFormatter.format(value)}`}
           accessibilityRole="button"
+          disabled={disabled}
           onPress={() => onPick('time')}
           style={[styles.valueButton, styles.timeButton]}
         >

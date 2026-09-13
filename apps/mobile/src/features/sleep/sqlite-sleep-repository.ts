@@ -41,6 +41,7 @@ interface StoredPhaseRow {
   updated_by: string;
   version: number;
   deleted_at: string | null;
+  retired_at: string | null;
 }
 
 const SELECT_SLEEP = `
@@ -65,7 +66,7 @@ const SELECT_SLEEP = `
     phase.version AS phase_version,
     phase.deleted_at AS phase_deleted_at
   FROM sleep_sessions AS session
-  INNER JOIN sleep_phases AS phase ON phase.sleep_session_id = session.id
+  INNER JOIN sleep_phases AS phase ON phase.sleep_session_id = session.id AND phase.retired_at IS NULL
 `;
 
 export class SQLiteSleepRepository {
@@ -157,8 +158,15 @@ export class SQLiteSleepRepository {
       );
       if (sessionResult.changes === 0) throw new SleepWriteConflictError();
 
-      for (const phase of mutation.changedPhases) {
-        const phaseResult = await upsertPhase(transaction, phase);
+      // Close/tombstone the former open phase before opening its replacement.
+      const orderedChanges = [...mutation.changedPhases].sort(
+        (a, b) =>
+          Number(a.endedAt === null && a.deletedAt === null) -
+          Number(b.endedAt === null && b.deletedAt === null),
+      );
+      const retiredIds = new Set(mutation.retiredPhases?.map(({ id }) => id));
+      for (const phase of orderedChanges) {
+        const phaseResult = await upsertPhase(transaction, phase, retiredIds.has(phase.id));
         if (phaseResult.changes === 0) throw new SleepWriteConflictError();
       }
 
@@ -279,18 +287,20 @@ async function upsertSession(
 async function upsertPhase(
   transaction: SQLiteDatabase,
   phase: SleepPhase,
+  retired: boolean,
 ): Promise<SQLiteRunResult> {
   return transaction.runAsync(
     `INSERT INTO sleep_phases (
       id, sleep_session_id, kind, started_at, ended_at,
-      created_by, updated_by, version, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_by, updated_by, version, deleted_at, retired_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       started_at = excluded.started_at,
       ended_at = excluded.ended_at,
       updated_by = excluded.updated_by,
       version = excluded.version,
       deleted_at = excluded.deleted_at
+      , retired_at = excluded.retired_at
     WHERE sleep_phases.version = ?`,
     phase.id,
     phase.sleepSessionId,
@@ -301,6 +311,7 @@ async function upsertPhase(
     phase.updatedBy,
     phase.version,
     phase.deletedAt,
+    retired ? phase.deletedAt : null,
     phase.version - 1,
   );
 }
@@ -317,7 +328,21 @@ function assertMutationRootSemantics(mutation: SleepMutation): void {
 }
 
 function assertChangedPhasesMatchAggregate(mutation: SleepMutation): void {
-  const aggregatePhases = new Map(mutation.session.phases.map((phase) => [phase.id, phase]));
+  const retired = mutation.retiredPhases ?? [];
+  if (
+    retired.length > 0 &&
+    (mutation.operation.action !== 'delete_night_waking' ||
+      mutation.session.kind !== 'night' ||
+      retired.some(
+        (phase) =>
+          phase.deletedAt !== mutation.operation.clientOccurredAt ||
+          mutation.session.phases.some(({ id }) => id === phase.id),
+      ))
+  )
+    throw new Error('Only waking deletion can retire canonical Night phases.');
+  const allPhases = [...mutation.session.phases, ...retired];
+  const aggregatePhases = new Map(allPhases.map((phase) => [phase.id, phase]));
+  if (aggregatePhases.size !== allPhases.length) throw new Error('Duplicate phase identity.');
   const changedIds = new Set(mutation.changedPhases.map((phase) => phase.id));
   if (mutation.changedPhases.length === 0 || changedIds.size !== mutation.changedPhases.length) {
     throw new Error('A sleep mutation must identify each changed phase exactly once.');
@@ -340,19 +365,35 @@ async function assertPhaseChangesMatchStorage(
 ): Promise<void> {
   const rows = await transaction.getAllAsync<StoredPhaseRow>(
     `SELECT id, sleep_session_id, kind, started_at, ended_at,
-            created_by, updated_by, version, deleted_at
+            created_by, updated_by, version, deleted_at, retired_at
      FROM sleep_phases
      WHERE sleep_session_id = ?`,
     mutation.session.id,
   );
   const storedPhases = new Map(rows.map((row) => [row.id, mapStoredPhase(row)]));
-  const aggregateIds = new Set(mutation.session.phases.map((phase) => phase.id));
-  if (rows.some((row) => !aggregateIds.has(row.id))) {
+  const allPhases = [...mutation.session.phases, ...(mutation.retiredPhases ?? [])];
+  const aggregateIds = new Set(allPhases.map((phase) => phase.id));
+  if (rows.some((row) => row.retired_at === null && !aggregateIds.has(row.id))) {
     throw new Error('A sleep mutation cannot omit persisted aggregate phases.');
   }
 
+  const retiredIds = new Set(mutation.retiredPhases?.map(({ id }) => id));
+  for (const row of rows) {
+    if (
+      row.retired_at !== null &&
+      aggregateIds.has(row.id) &&
+      mutation.operation.action !== 'restore_night_waking'
+    ) {
+      throw new Error('Only waking Undo can restore a retired phase.');
+    }
+  }
+  for (const id of retiredIds) {
+    if (!rows.some((row) => row.id === id && row.retired_at === null && row.deleted_at === null)) {
+      throw new SleepWriteConflictError();
+    }
+  }
   const requiredChanges = new Set<string>();
-  for (const phase of mutation.session.phases) {
+  for (const phase of allPhases) {
     const stored = storedPhases.get(phase.id);
     if (stored === undefined) {
       if (phase.version !== 1) {

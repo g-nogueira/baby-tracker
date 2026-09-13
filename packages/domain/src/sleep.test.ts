@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   assertValidSleepSession,
   deleteNightSleep,
+  deleteNightWaking,
   editNightSleep,
   endNightSleep,
   restoreNightSleep,
+  restoreNightWaking,
   resumeNightSleep,
   SleepTransitionError,
   startNightSleep,
@@ -14,6 +16,78 @@ import {
 import type { MutationContext } from './types';
 
 describe('Night sleep transitions', () => {
+  it.each(['active-asleep', 'active-awake', 'completed-asleep', 'completed-awake'])(
+    'deletes a waking and restores exact boundaries in %s',
+    (state) => {
+      const bedtime = startNightSleep(context('2026-08-12T20:00:00Z')).session;
+      const waking = startNightWaking(bedtime, context('2026-08-12T21:00:00Z')).session;
+      let session = state.endsWith('-asleep')
+        ? resumeNightSleep(waking, context('2026-08-12T21:10:00Z')).session
+        : waking;
+      if (state.startsWith('completed'))
+        session = endNightSleep(session, context('2026-08-13T06:00:00Z')).session;
+      const deleted = deleteNightWaking(
+        session,
+        waking.phases[1]?.id ?? 'missing',
+        context('2026-08-13T07:00:00Z'),
+      );
+      expect(deleted.session.phases).toHaveLength(1);
+      expect(deleted.session.phases[0]).toMatchObject({
+        id: bedtime.phases[0]?.id ?? 'missing',
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+      });
+      expect(deleted.retiredPhases).toHaveLength(session.phases.length - 1);
+      expect(deleted.retiredPhases?.every((phase) => phase.deletedAt !== null)).toBe(true);
+      const restored = restoreNightWaking(
+        deleted.session,
+        session,
+        context('2026-08-13T07:01:00Z'),
+      );
+      expect(restored.session.phases).toEqual(
+        session.phases.map((phase) => ({ ...phase, version: phase.version + 2 })),
+      );
+      expect(restored.operation.baseVersion).toBe(deleted.session.version);
+    },
+  );
+
+  it('keeps later wakings when deleting a middle waking and refuses stale Undo', () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z')).session;
+    const first = startNightWaking(bedtime, context('2026-08-12T21:00:00Z')).session;
+    const resumed = resumeNightSleep(first, context('2026-08-12T21:10:00Z')).session;
+    const second = startNightWaking(resumed, context('2026-08-12T23:00:00Z')).session;
+    const deleted = deleteNightWaking(
+      second,
+      first.phases[1]?.id ?? 'missing',
+      context('2026-08-12T23:05:00Z'),
+    ).session;
+    expect(deleted.phases.map(({ id }) => id)).toEqual([
+      bedtime.phases[0]?.id ?? 'missing',
+      second.phases[3]?.id ?? 'missing',
+    ]);
+    expect(deleted.phases[0]?.endedAt).toBe(second.phases[3]?.startedAt);
+    const changed = resumeNightSleep(deleted, context('2026-08-12T23:10:00Z')).session;
+    expect(() => restoreNightWaking(changed, second, context('2026-08-12T23:11:00Z'))).toThrow(
+      'Undo',
+    );
+    expect(() =>
+      deleteNightWaking(
+        second,
+        bedtime.phases[0]?.id ?? 'missing',
+        context('2026-08-12T23:12:00Z'),
+      ),
+    ).toThrow('existing Night waking');
+  });
+
+  it('can remove an accidental waking immediately at its start instant', () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z')).session;
+    const ctx = context('2026-08-12T21:00:00Z');
+    const waking = startNightWaking(bedtime, ctx).session;
+    const deleted = deleteNightWaking(waking, waking.phases[1]?.id ?? 'missing', ctx);
+    expect(deleted.session.phases).toHaveLength(1);
+    expect(deleted.session.phases[0]?.endedAt).toBeNull();
+  });
+
   it('creates Bedtime as one aggregate with its first asleep phase', () => {
     const started = startNightSleep(context('2026-08-12T20:30:00.000Z'));
 

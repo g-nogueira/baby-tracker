@@ -31,6 +31,7 @@ export type NursingAction =
   | 'resume_nursing'
   | 'stop_nursing'
   | 'edit_nursing_session'
+  | 'edit_active_nursing'
   | 'delete_nursing_session'
   | 'restore_nursing_session';
 
@@ -60,6 +61,13 @@ export interface NursingDurationProjection {
 export interface CompletedNursingCorrection {
   startedAt: Date;
   endedAt: Date;
+  leftDurationSeconds: number;
+}
+
+export interface ActiveNursingCorrection {
+  startedAt: Date;
+  /** Fixed instant at which the user reviewed the accumulated L/R split. */
+  snapshotAt: Date;
   leftDurationSeconds: number;
 }
 
@@ -314,6 +322,60 @@ export function editCompletedNursing(
     pauseStartedAt: corrected.pauseStartedAt,
     lastBreastUsed: corrected.lastBreastUsed,
     deletedAt: corrected.deletedAt,
+  });
+}
+
+/** Corrects the elapsed split through a fixed snapshot while retaining the running side/pause. */
+export function editActiveNursing(
+  session: NursingSession,
+  correction: ActiveNursingCorrection,
+  context: MutationContext,
+): NursingMutation {
+  assertMutable(session);
+  if (session.status === 'completed')
+    throw new NursingError(
+      'invalid_transition',
+      'Only active or paused Nursing can use live corrections.',
+    );
+  const occurredAt = toUtcInstant(context.now);
+  const snapshotAt = correctedBoundary(correction.snapshotAt, occurredAt);
+  const openStartedAt = session.activeSideStartedAt ?? session.pauseStartedAt;
+  effectiveBoundary(correction.snapshotAt, occurredAt, openStartedAt);
+  const startedAt = correctedBoundary(correction.startedAt, occurredAt);
+  if (startedAt > snapshotAt)
+    throw invalidCorrection('Start must not be after the time being corrected.');
+  const pause = projectNursingDurations(session, correction.snapshotAt).pauseDurationSeconds;
+  const activeDuration = elapsedSeconds(startedAt, snapshotAt) - pause;
+  if (activeDuration < 0)
+    throw invalidCorrection('Nursing duration cannot be shorter than the preserved pause time.');
+  if (
+    !Number.isSafeInteger(correction.leftDurationSeconds) ||
+    correction.leftDurationSeconds < 0 ||
+    correction.leftDurationSeconds > activeDuration
+  ) {
+    throw invalidCorrection('Left Nursing time must be a whole second within active duration.');
+  }
+  const corrected: NursingSession = {
+    ...session,
+    startedAt,
+    leftDurationSeconds: correction.leftDurationSeconds,
+    rightDurationSeconds: activeDuration - correction.leftDurationSeconds,
+    totalPauseDurationSeconds: pause,
+    activeSideStartedAt: session.status === 'active' ? snapshotAt : null,
+    pauseStartedAt: session.status === 'paused' ? snapshotAt : null,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+  };
+  assertValidNursingSession(corrected);
+  return mutation(corrected, context, occurredAt, 'edit_active_nursing', session.version, {
+    startedAt,
+    snapshotAt,
+    leftDurationSeconds: corrected.leftDurationSeconds,
+    rightDurationSeconds: corrected.rightDurationSeconds,
+    totalPauseDurationSeconds: pause,
+    activeSide: corrected.activeSide,
+    status: corrected.status,
+    lastBreastUsed: corrected.lastBreastUsed,
   });
 }
 

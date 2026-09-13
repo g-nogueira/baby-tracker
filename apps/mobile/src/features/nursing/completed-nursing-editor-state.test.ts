@@ -1,4 +1,4 @@
-import type { NursingSession } from '@baby-tracker/domain';
+import { type NursingSession, startNursing, projectNursingDurations } from '@baby-tracker/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,12 +6,37 @@ import {
   completedNursingEditorError,
   completedNursingEditorTotals,
   createCompletedNursingEditorState,
+  createActiveNursingEditorState,
   updateCompletedNursingBoundary,
   updateCompletedNursingLeftSeconds,
 } from './completed-nursing-editor-state';
 
 describe('completed Nursing editor state', () => {
   const now = new Date('2026-08-16T01:00:00.000Z');
+
+  it('freezes live edit totals and keeps its end read-only as the real timer advances', () => {
+    const original = startNursing('left', {
+      now: new Date('2026-08-15T10:00:00Z'),
+      childId: 'child',
+      caregiverId: 'parent',
+      timezone: 'Europe/Lisbon',
+      newId: () => 'id',
+    }).session;
+    const draft = createActiveNursingEditorState(original, new Date('2026-08-15T10:02:00.999Z'));
+    const edited = updateCompletedNursingBoundary(
+      draft,
+      'startedAt',
+      new Date('2026-08-15T09:59:00Z'),
+    );
+    expect(edited.activeSession).toEqual(original);
+    expect(edited.endedAt.toISOString()).toBe('2026-08-15T10:02:00.000Z');
+    expect(completedNursingEditorTotals(edited).activeDurationSeconds).toBe(180);
+    expect(updateCompletedNursingBoundary(edited, 'endedAt', now)).toBe(edited);
+    expect(
+      projectNursingDurations(original, new Date('2026-08-15T10:03:00Z')).totalDurationSeconds,
+    ).toBe(180);
+    expect(original.status).toBe('active');
+  });
 
   it('derives Right from the one editable Left value at every slider position', () => {
     const initial = createCompletedNursingEditorState(session());

@@ -7,6 +7,8 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
   deleteNursing,
   editCompletedNursing,
+  editActiveNursing,
+  projectNursingDurations,
   endNightSleep,
   type MutationContext,
   type NursingSide,
@@ -51,6 +53,74 @@ describe('SQLite Nursing repository', () => {
   afterEach(() => {
     database.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it.each([false, true])(
+    'persists live corrections across restart without changing pause state (%s)',
+    async (pause) => {
+      const started = startNursing('left', context('2026-08-15T10:00:00Z'));
+      await repository.save(started);
+      const original = pause
+        ? pauseNursing(started.session, context('2026-08-15T10:01:00Z'))
+        : started;
+      if (pause) await repository.save(original);
+      const corrected = editActiveNursing(
+        original.session,
+        {
+          startedAt: new Date('2026-08-15T09:59:00Z'),
+          snapshotAt: new Date('2026-08-15T10:02:00Z'),
+          leftDurationSeconds: 100,
+        },
+        context('2026-08-15T10:03:00Z'),
+      );
+      await repository.save(corrected);
+      database.close();
+      database = new DatabaseSync(databasePath);
+      adapter = new NodeSQLiteAdapter(database);
+      await migrateDatabase(adapter.asExpoDatabase());
+      repository = new SQLiteNursingRepository(adapter.asExpoDatabase());
+      expect(await repository.findById(started.session.id)).toEqual(corrected.session);
+      expect(
+        projectNursingDurations(corrected.session, new Date('2026-08-15T10:03:00Z'))
+          .totalDurationSeconds,
+      ).toBe(pause ? 120 : 240);
+      const count = await repository.pendingOperationCount();
+      await expect(
+        repository.save(stopNursing(original.session, context('2026-08-15T10:04:00Z'))),
+      ).rejects.toThrow(NursingWriteConflictError);
+      expect(await repository.pendingOperationCount()).toBe(count);
+      const stopped = stopNursing(corrected.session, context('2026-08-15T10:05:00Z'));
+      await repository.save(stopped);
+      expect(await repository.findById(stopped.session.id)).toEqual(stopped.session);
+    },
+  );
+
+  it('rolls back live correction on outbox failure and rejects forged pause totals', async () => {
+    const started = startNursing('left', context('2026-08-15T10:00:00Z'));
+    await repository.save(started);
+    const corrected = editActiveNursing(
+      started.session,
+      {
+        startedAt: new Date('2026-08-15T09:59:00Z'),
+        snapshotAt: new Date('2026-08-15T10:02:00Z'),
+        leftDurationSeconds: 100,
+      },
+      context('2026-08-15T10:03:00Z'),
+    );
+    await expect(
+      repository.save({
+        ...corrected,
+        operation: { ...corrected.operation, operationId: started.operation.operationId },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      repository.save({
+        ...corrected,
+        session: { ...corrected.session, totalPauseDurationSeconds: 1, rightDurationSeconds: 79 },
+      }),
+    ).rejects.toThrow('pause time');
+    expect(await repository.findById(started.session.id)).toEqual(started.session);
+    expect(await repository.pendingOperationCount()).toBe(1);
   });
 
   it('atomically persists switch, pause, resume, stop, and privacy-minimal outbox payloads', async () => {

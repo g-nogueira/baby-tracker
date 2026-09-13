@@ -4,10 +4,13 @@ import {
   correctedNursingLastBreast,
   type NursingSession,
   type NursingSide,
+  projectNursingDurations,
 } from '@baby-tracker/domain';
 
 export interface CompletedNursingEditorState {
   session: Readonly<NursingSession>;
+  /** Present only for live edits; session above is an unpersisted fixed-time projection. */
+  activeSession?: Readonly<NursingSession>;
   startedAt: Date;
   endedAt: Date;
   leftDurationSeconds: number;
@@ -53,12 +56,40 @@ export function createCompletedNursingEditorState(
   return applySplit(state, session.leftDurationSeconds, activeDurationSeconds);
 }
 
+/** Freezes only the editable totals; elapsed time continues on the original live session. */
+export function createActiveNursingEditorState(
+  session: NursingSession,
+  now: Date,
+): CompletedNursingEditorState {
+  assertValidNursingSession(session);
+  if (session.status === 'completed' || session.deletedAt !== null)
+    throw new Error('Choose active or paused Nursing.');
+  const snapshotAt = new Date(Math.floor(now.getTime() / 1_000) * 1_000);
+  const totals = projectNursingDurations(session, snapshotAt);
+  const projected: NursingSession = {
+    ...session,
+    status: 'completed',
+    endedAt: snapshotAt.toISOString(),
+    activeSide: null,
+    activeSideStartedAt: null,
+    pauseStartedAt: null,
+    leftDurationSeconds: totals.leftDurationSeconds,
+    rightDurationSeconds: totals.rightDurationSeconds,
+    totalPauseDurationSeconds: totals.pauseDurationSeconds,
+  };
+  return {
+    ...createCompletedNursingEditorState(projected),
+    activeSession: Object.freeze({ ...session }),
+  };
+}
+
 /** Changes one boundary and rescales the split when the proposed interval becomes valid. */
 export function updateCompletedNursingBoundary(
   state: CompletedNursingEditorState,
   boundary: CompletedNursingBoundary,
   value: Date,
 ): CompletedNursingEditorState {
+  if (state.activeSession !== undefined && boundary === 'endedAt') return state;
   const next = {
     ...state,
     [boundary]: new Date(value.getTime()),

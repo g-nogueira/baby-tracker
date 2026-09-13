@@ -1,4 +1,10 @@
-import { resumeNightSleep, startNightSleep, startNightWaking } from '@baby-tracker/domain';
+import {
+  deleteNightWaking,
+  resumeNightSleep,
+  startNightSleep,
+  startNightWaking,
+  startNursing,
+} from '@baby-tracker/domain';
 import { useState } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -18,6 +24,8 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1, absoluteFill: {} },
   useWindowDimensions: () => ({ width: 360, height: 640 }),
   AccessibilityInfo: {
+    announceForAccessibility: vi.fn(),
+    getRecommendedTimeoutMillis: async (value: number) => value,
     isReduceMotionEnabled: async () => true,
     addEventListener: () => ({ remove: vi.fn() }),
   },
@@ -51,6 +59,8 @@ vi.mock('react-native-svg', () => ({
 }));
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
+import { CompletedNursingEditorDrawer } from '@/features/nursing/completed-nursing-editor-drawer';
+import { NursingSplitSlider } from '@/features/nursing/nursing-split-slider';
 import { TodayScreen } from '@/features/naps/today-screen';
 import { HomeQuickActions } from '@/features/shared/home-actions/home-quick-actions';
 import { RadialCycle } from '@/features/timeline/radial-cycle';
@@ -263,6 +273,12 @@ it('routes controller, quick action and past waking tokens to their own correct 
     error: null,
     clearError: vi.fn(),
     editNight: vi.fn(),
+    removeNightWaking: vi
+      .fn()
+      .mockResolvedValue(
+        deleteNightWaking(current, awake.phases[1].id, context('2026-08-16T02:00:00Z')).session,
+      ),
+    restoreNightWaking: vi.fn().mockResolvedValue(current),
   };
   hooks.sleep.mockReturnValue(sleep);
   hooks.nursing.mockReturnValue({
@@ -316,7 +332,17 @@ it('routes controller, quick action and past waking tokens to their own correct 
     mode: 'edit',
     endedAt: new Date('2026-08-16T01:20:00Z'),
   });
-  await act(async () => renderer.root.findByType(NightRecordEditorDrawer).props.onCancel());
+  expect(text()).toContain('Delete Night waking');
+  expect(text()).not.toContain('Delete Night sleep');
+  await act(async () => pressable('Delete Night waking')?.props.onPress());
+  expect(sleep.removeNightWaking).toHaveBeenCalledWith(current, awake.phases[1].id);
+  expect(text()).toContain('Night waking deleted');
+  await act(async () => pressable('Undo')?.props.onPress());
+  expect(sleep.restoreNightWaking).toHaveBeenCalledWith(
+    expect.objectContaining({ id: current.id, version: current.version + 1 }),
+    current,
+  );
+  expect(text()).not.toContain('Night waking deleted');
 
   hooks.sleep.mockReturnValue({ ...sleep, isToday: false, selectedDay: '2026-08-15' });
   await act(async () => renderer.update(<TodayScreen />));
@@ -325,4 +351,83 @@ it('routes controller, quick action and past waking tokens to their own correct 
       .findAllByType('Pressable' as never)
       .some((node) => String(node.props.accessibilityLabel).startsWith('Night sleep running')),
   ).toBe(true);
+});
+
+it('opens a live Nursing correction, edits its start and split, and keeps a failed save draft', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-16T02:00:00Z'));
+  const session = startNursing('right', context('2026-08-16T01:50:00Z')).session;
+  const editActive = vi.fn().mockResolvedValue(null);
+  hooks.sleep.mockReturnValue({
+    activeSleep: null,
+    activeNap: null,
+    isLoading: false,
+    isMutating: false,
+    isToday: true,
+    selectedDay: '2026-08-16',
+    sleepSessions: [],
+    latestCompletedEnd: null,
+    pendingOperationCount: 1,
+    error: null,
+  });
+  hooks.nursing.mockReturnValue({
+    activeSession: session,
+    cycleSessions: [session],
+    isLoading: false,
+    isMutating: false,
+    latestCompletedLast: null,
+    pendingOperationCount: 1,
+    error: null,
+    clearError: vi.fn(),
+    editActive,
+  });
+  hooks.care.mockReturnValue({
+    cycleEvents: [],
+    isLoading: false,
+    isMutating: false,
+    pendingOperationCount: 1,
+    error: null,
+  });
+  await act(async () => {
+    renderer = create(<TodayScreen />);
+  });
+  const action = renderer.root
+    .findByType(HomeQuickActions)
+    .props.actions.find((item: { id: string }) => item.id === 'nursing');
+  expect(action).toBeDefined();
+  await act(async () => action.onPress());
+  await act(async () => pressable('Nursing controls collapsed')?.props.onPress());
+  await act(async () => pressable('Edit start time and split')?.props.onPress());
+  expect(renderer.root.findByType(CompletedNursingEditorDrawer).props.editor.activeSession).toEqual(
+    session,
+  );
+  expect(text()).toContain('keeps running');
+  expect(text()).not.toContain('Delete Nursing session');
+  expect(
+    renderer.root
+      .findAllByType('Pressable' as never)
+      .some((node) => String(node.props.accessibilityLabel).startsWith('End time')),
+  ).toBe(false);
+  const startTime = renderer.root
+    .findAllByType('Pressable' as never)
+    .find((node) => String(node.props.accessibilityLabel).startsWith('Start time'));
+  await act(async () => startTime?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-08-16T01:45:00Z')),
+  );
+  await act(async () => renderer.root.findByType(NursingSplitSlider).props.onValueChange(300));
+  await act(async () => {
+    vi.advanceTimersByTime(60_000);
+  });
+  await act(async () => pressable('Save changes')?.props.onPress());
+  expect(editActive).toHaveBeenCalledWith(session, {
+    startedAt: new Date('2026-08-16T01:45:00Z'),
+    snapshotAt: new Date('2026-08-16T02:00:00Z'),
+    leftDurationSeconds: 300,
+  });
+  expect(renderer.root.findByType(CompletedNursingEditorDrawer).props.editor.startedAt).toEqual(
+    new Date('2026-08-16T01:45:00Z'),
+  );
 });

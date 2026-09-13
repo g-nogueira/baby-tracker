@@ -151,6 +151,11 @@ export function NightRecordEditorDrawer({
               >
                 <Text style={styles.primaryText}>Save changes</Text>
               </Pressable>
+              {onDelete !== null && awake ? (
+                <Text style={styles.subtitle}>
+                  Deleting this waking counts its time as sleep. Undo is available.
+                </Text>
+              ) : null}
               {onDelete === null ? null : (
                 <Pressable
                   accessibilityRole="button"
@@ -158,7 +163,9 @@ export function NightRecordEditorDrawer({
                   onPress={onDelete}
                   style={styles.delete}
                 >
-                  <Text style={styles.deleteText}>Delete Night sleep</Text>
+                  <Text style={styles.deleteText}>
+                    {awake ? 'Delete Night waking' : 'Delete Night sleep'}
+                  </Text>
                 </Pressable>
               )}
             </>

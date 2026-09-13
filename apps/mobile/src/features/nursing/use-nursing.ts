@@ -1,4 +1,6 @@
 import {
+  type ActiveNursingCorrection,
+  editActiveNursing,
   type CompletedNursingCorrection,
   createUuidV7,
   deleteNursing,
@@ -165,6 +167,8 @@ export function useNursing(selectedDay: string) {
         ? Promise.resolve(null)
         : mutate((now) => stopNursing(session, createContext(now)));
     },
+    editActive: (session: NursingSession, correction: ActiveNursingCorrection) =>
+      mutate((now) => editActiveNursing(session, correction, createContext(now))),
     editCompleted: (session: Readonly<NursingSession>, correction: CompletedNursingCorrection) =>
       mutate((now) => editCompletedNursing({ ...session }, correction, createContext(now))),
     removeCompleted: (session: Readonly<NursingSession>) =>

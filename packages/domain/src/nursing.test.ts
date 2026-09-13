@@ -4,6 +4,7 @@ import {
   assertValidNursingSession,
   deleteNursing,
   editCompletedNursing,
+  editActiveNursing,
   pauseNursing,
   projectNursingDurations,
   restoreNursing,
@@ -15,6 +16,87 @@ import {
 import type { MutationContext } from './types';
 
 describe('Nursing lifecycle', () => {
+  it.each(['left', 'right'] as const)(
+    'corrects live totals without losing edit-time accrual on %s',
+    (side) => {
+      const started = startNursing(side, context('2026-08-15T10:00:00Z')).session;
+      const corrected = editActiveNursing(
+        started,
+        {
+          startedAt: new Date('2026-08-15T09:59:00Z'),
+          snapshotAt: new Date('2026-08-15T10:02:00Z'),
+          leftDurationSeconds: 100,
+        },
+        context('2026-08-15T10:03:00Z'),
+      );
+      expect(corrected.session).toMatchObject({
+        status: 'active',
+        activeSide: side,
+        lastBreastUsed: side,
+        activeSideStartedAt: '2026-08-15T10:02:00.000Z',
+        leftDurationSeconds: 100,
+        rightDurationSeconds: 80,
+      });
+      const totals = projectNursingDurations(corrected.session, new Date('2026-08-15T10:03:00Z'));
+      expect(totals.totalDurationSeconds).toBe(240);
+      expect(totals.leftDurationSeconds).toBe(side === 'left' ? 160 : 100);
+      const stopped = stopNursing(corrected.session, context('2026-08-15T10:04:00Z')).session;
+      expect(stopped.leftDurationSeconds + stopped.rightDurationSeconds).toBe(300);
+    },
+  );
+
+  it('preserves the accumulated pause and keeps accruing it while an edit is open', () => {
+    const started = startNursing('left', context('2026-08-15T10:00:00Z')).session;
+    const paused = pauseNursing(started, context('2026-08-15T10:01:00Z')).session;
+    const corrected = editActiveNursing(
+      paused,
+      {
+        startedAt: new Date('2026-08-15T09:59:00Z'),
+        snapshotAt: new Date('2026-08-15T10:02:00Z'),
+        leftDurationSeconds: 120,
+      },
+      context('2026-08-15T10:03:00Z'),
+    ).session;
+    expect(corrected).toMatchObject({
+      status: 'paused',
+      pauseStartedAt: '2026-08-15T10:02:00.000Z',
+      totalPauseDurationSeconds: 60,
+      activeSide: null,
+    });
+    expect(projectNursingDurations(corrected, new Date('2026-08-15T10:03:00Z'))).toMatchObject({
+      totalDurationSeconds: 120,
+      pauseDurationSeconds: 120,
+    });
+    const resumed = resumeNursing(corrected, 'right', context('2026-08-15T10:04:00Z')).session;
+    expect(resumed.totalPauseDurationSeconds).toBe(180);
+    expect(resumed.activeSide).toBe('right');
+  });
+
+  it('rejects future, fractional, pre-transition and impossible live corrections', () => {
+    const started = startNursing('left', context('2026-08-15T10:00:00Z')).session;
+    const paused = pauseNursing(started, context('2026-08-15T10:01:00Z')).session;
+    const correction = {
+      startedAt: new Date('2026-08-15T10:00:00Z'),
+      snapshotAt: new Date('2026-08-15T10:02:00Z'),
+      leftDurationSeconds: 60,
+    };
+    for (const changes of [
+      { snapshotAt: new Date('2026-08-15T11:00:00Z') },
+      { snapshotAt: new Date('2026-08-15T10:00:30Z') },
+      { startedAt: new Date('2026-08-15T10:00:00.123Z') },
+      { startedAt: new Date('2026-08-15T10:01:30Z') },
+      { leftDurationSeconds: 61 },
+      { leftDurationSeconds: -1 },
+    ])
+      expect(() =>
+        editActiveNursing(paused, { ...correction, ...changes }, context('2026-08-15T10:03:00Z')),
+      ).toThrow();
+    const stopped = stopNursing(paused, context('2026-08-15T10:03:00Z')).session;
+    expect(() => editActiveNursing(stopped, correction, context('2026-08-15T10:04:00Z'))).toThrow(
+      'Only active',
+    );
+  });
+
   it.each(['left', 'right'] as const)(
     'starts immediately on %s at a whole-second boundary',
     (side) => {

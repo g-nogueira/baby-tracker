@@ -15,6 +15,12 @@ not a completed shared-caregiver MVP.
   without dropping the draft or overwriting newer data.
 - Timer rerenders preserve the drawer gesture handler. Nap start correction is
   reachable from its live drawer; Night/Nap details scroll and avoid the keyboard.
+- Each Night waking can be deleted with Undo. Adjacent sleep is joined within the
+  same Night; retired phase rows stay in SQLite and Undo restores the original IDs.
+  Database v5 adds explicit retirement metadata without clearing existing records.
+- Active/paused Nursing supports start-time and L/R split correction. The editor
+  fixes its reviewed totals at opening; elapsed time afterward still accrues to the
+  running side or pause. Saved corrections preserve live state and Last.
 - Live controllers remain visible during history browsing. Today opens the active
   Night and retains its cycle after midnight. Very narrow action rows wrap.
 
@@ -42,7 +48,12 @@ Use synthetic records; do not clear an existing care database.
 8. Start Nursing during Night; verify both controllers, independent stop, pause,
    side switch, and restart. Browse history while timers run; both stay reachable.
 9. Cross midnight with Night active. Today must retain that Night's arc and events.
-10. Test a small screen, large text, open keyboard, and iOS date/time spinners.
+10. Delete a previous waking and the currently running waking; Undo each. Verify
+    the Night remains intact, the elapsed totals change, and restart retains the result.
+11. Expand active/paused Nursing, tap **Edit start time and split**, correct the start,
+    adjust L/R, wait a minute, and save. Check that minute is still counted on the
+    current breast/pause and that stop/resume/side switching still work.
+12. Test a small screen, large text, open keyboard, and iOS date/time spinners.
     Drag while seconds tick; collapse/dismiss must never stop the activity.
 
 ## Remaining MVP work
@@ -54,8 +65,7 @@ Use synthetic records; do not clear an existing care database.
 | 3 | Canonical Nap sync and explicit conflicts | Local outbox exists; server push/pull and mobile transport do not. Implement #6–#8. |
 | 4 | Android/iPhone offline convergence | Run #9 on both phones and the intended server before extending sync beyond Naps. |
 | 5 | Sync Night, Nursing, Diaper, Medicine | Extend the proven aggregate protocol; preserve all local proposals. |
-| 6 | Remaining local correction flows | Active Nursing time correction and deleting an individual waking need domain/UI work. Waking deletion must merge adjacent sleep phases and preserve Undo, not delete the whole Night. |
-| 7 | Home Assistant and recovery | MQTT publishing, secure device storage, export/backup/restore and release recovery remain unimplemented. |
-| 8 | Release evidence | Native interaction checks, outage/restart tests and the specified seven-day two-caregiver trial remain required. |
+| 6 | Home Assistant and recovery | MQTT publishing, secure device storage, export/backup/restore and release recovery remain unimplemented. |
+| 7 | Release evidence | Native interaction checks, outage/restart tests and the specified seven-day two-caregiver trial remain required. |
 
 Keep prediction, advanced analytics and optional Bath out of the critical path.

@@ -1,5 +1,6 @@
 import {
   assertValidNursingSession,
+  editActiveNursing,
   correctedNursingLastBreast,
   type JsonValue,
   type NursingMutation,
@@ -254,6 +255,13 @@ function assertStoredActionTransition(stored: NursingSession, mutation: NursingM
           stored.status !== 'completed' &&
           mutation.session.status === 'completed'
         );
+      case 'edit_active_nursing':
+        return (
+          storedIsVisible &&
+          currentIsVisible &&
+          stored.status !== 'completed' &&
+          stored.status === mutation.session.status
+        );
       case 'edit_nursing_session':
         return (
           storedIsVisible &&
@@ -282,6 +290,33 @@ function assertStoredActionTransition(stored: NursingSession, mutation: NursingM
 
   if (!valid) {
     throw new Error('The Nursing action does not match the stored lifecycle transition.');
+  }
+
+  if (mutation.operation.action === 'edit_active_nursing') {
+    const snapshot = mutation.operation.payload.snapshotAt;
+    if (typeof snapshot !== 'string')
+      throw new Error('A live Nursing edit requires its snapshot time.');
+    const expected = editActiveNursing(
+      stored,
+      {
+        startedAt: new Date(mutation.session.startedAt),
+        snapshotAt: new Date(snapshot),
+        leftDurationSeconds: mutation.session.leftDurationSeconds,
+      },
+      {
+        caregiverId: mutation.session.updatedBy,
+        childId: stored.childId,
+        timezone: mutation.operation.clientTimezone,
+        now: new Date(mutation.operation.clientOccurredAt),
+        newId: () => mutation.operation.operationId,
+      },
+    );
+    if (
+      !sameNursingBusinessFields(expected.session, mutation.session) ||
+      !jsonRecordsEqual(expected.operation.payload, mutation.operation.payload)
+    ) {
+      throw new Error('A live Nursing edit must preserve the running side and pause time.');
+    }
   }
 
   if (mutation.operation.action === 'edit_nursing_session') {

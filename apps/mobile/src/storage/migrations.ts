@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 
 const EXPECTED_TABLE_COLUMNS = {
   sleep_sessions: [
@@ -26,6 +26,7 @@ const EXPECTED_TABLE_COLUMNS = {
     'updated_by',
     'version',
     'deleted_at',
+    'retired_at',
   ],
   outbox_operations: [
     'local_sequence',
@@ -320,6 +321,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await ensurePhaseRetirementColumn(transaction);
       await assertCurrentTableShapes(transaction);
     });
     return;
@@ -338,6 +340,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await ensurePhaseRetirementColumn(transaction);
       await assertCurrentTableShapes(transaction);
     });
     return;
@@ -352,6 +355,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await ensurePhaseRetirementColumn(transaction);
       await assertCurrentTableShapes(transaction);
     });
     return;
@@ -364,6 +368,7 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
         PRAGMA user_version = ${DATABASE_VERSION};
       `);
+      await ensurePhaseRetirementColumn(transaction);
       await assertCurrentTableShapes(transaction);
     });
     return;
@@ -379,7 +384,9 @@ export async function migrateDatabase(database: SQLiteDatabase): Promise<void> {
 
       ${CREATE_CARE_EVENTS_SCHEMA}
     `);
+    await ensurePhaseRetirementColumn(transaction);
     await assertCurrentTableShapes(transaction);
+    await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION};`);
   });
 }
 
@@ -397,5 +404,12 @@ async function assertCurrentTableShapes(database: SQLiteDatabase): Promise<void>
           `Expected [${expectedColumns.join(', ')}], found [${actualColumns.join(', ')}].`,
       );
     }
+  }
+}
+
+async function ensurePhaseRetirementColumn(database: SQLiteDatabase): Promise<void> {
+  const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(sleep_phases)');
+  if (!columns.some(({ name }) => name === 'retired_at')) {
+    await database.execAsync('ALTER TABLE sleep_phases ADD COLUMN retired_at TEXT;');
   }
 }

@@ -24,11 +24,13 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
       beforeSessions,
     );
-    expect(database.prepare('SELECT * FROM sleep_phases ORDER BY id').all()).toEqual(beforePhases);
+    expect(database.prepare('SELECT * FROM sleep_phases ORDER BY id').all()).toEqual(
+      beforePhases.map((phase) => ({ ...phase, retired_at: null })),
+    );
     expect(database.prepare('SELECT * FROM outbox_operations ORDER BY operation_id').all()).toEqual(
       beforeOutbox,
     );
@@ -65,7 +67,7 @@ describe('mobile database migrations', () => {
 
     await migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(database.prepare('SELECT * FROM nursing_sessions').all()).toEqual(beforeNursing);
     expect(
       database
@@ -85,7 +87,7 @@ describe('mobile database migrations', () => {
 
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(
       database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'care_events'")
@@ -112,7 +114,7 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(
       beforeSessions,
     );
@@ -276,7 +278,7 @@ describe('mobile database migrations', () => {
     await migrateDatabase(adapter.asExpoDatabase());
     await migrateDatabase(adapter.asExpoDatabase());
 
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(database.prepare('SELECT * FROM nursing_sessions').all()).toEqual(beforeNursing);
     expect(database.prepare('SELECT * FROM sleep_sessions ORDER BY id').all()).toEqual(beforeSleep);
     expect(
@@ -403,14 +405,30 @@ describe('mobile database migrations', () => {
     ]);
   });
 
+  it('upgrades version 4 with phase retirement support and remains idempotent', async () => {
+    database = new DatabaseSync(':memory:');
+    const adapter = new NodeSQLiteAdapter(database).asExpoDatabase();
+    await migrateDatabase(adapter);
+    database.exec('ALTER TABLE sleep_phases DROP COLUMN retired_at; PRAGMA user_version = 4;');
+    await migrateDatabase(adapter);
+    await migrateDatabase(adapter);
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+    expect(
+      database
+        .prepare('PRAGMA table_info(sleep_phases)')
+        .all()
+        .filter((row) => row.name === 'retired_at'),
+    ).toHaveLength(1);
+  });
+
   it('rejects a future database version without mutating its schema', async () => {
     database = new DatabaseSync(':memory:');
-    database.exec('PRAGMA user_version = 5;');
+    database.exec('PRAGMA user_version = 6;');
 
     await expect(migrateDatabase(new NodeSQLiteAdapter(database).asExpoDatabase())).rejects.toThrow(
       'This app is older than the local database. Please update the app.',
     );
-    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+    expect(database.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
     expect(
       database
         .prepare(

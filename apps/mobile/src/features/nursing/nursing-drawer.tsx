@@ -14,6 +14,7 @@ interface NursingDrawerProps {
   isMutating: boolean;
   mutationError: string | null;
   onDismiss: () => void;
+  onEdit: () => void;
   onPause: () => void;
   onResume: (side: NursingSide) => void;
   onStart: (side: NursingSide) => void;
@@ -38,6 +39,7 @@ export function NursingDrawer({
   isMutating,
   mutationError,
   onDismiss,
+  onEdit,
   onPause,
   onResume,
   onStart,
@@ -162,6 +164,11 @@ export function NursingDrawer({
               ) : (
                 <>
                   <DetailRow label="Started" value={formatClock(activeSession.startedAt)} />
+                  <ActionButton
+                    disabled={isMutating}
+                    label="Edit start time and split"
+                    onPress={onEdit}
+                  />
                   <DetailRow
                     label="Pause time"
                     value={formatSeconds(controller.pauseDurationSeconds)}

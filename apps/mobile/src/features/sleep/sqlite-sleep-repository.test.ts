@@ -6,10 +6,12 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
   deleteNightSleep,
+  deleteNightWaking,
   editNightSleep,
   endNightSleep,
   type MutationContext,
   restoreNightSleep,
+  restoreNightWaking,
   resumeNightSleep,
   startNap,
   startNightSleep,
@@ -45,6 +47,106 @@ describe('SQLite sleep repository', () => {
   afterEach(() => {
     database.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it.each([false, true])(
+    'retains removed waking rows across restart and atomically restores IDs (resumed=%s)',
+    async (resume) => {
+      const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+      await repository.save(bedtime);
+      const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+      await repository.save(waking);
+      const original = resume
+        ? resumeNightSleep(waking.session, context('2026-08-12T21:10:00Z'))
+        : waking;
+      if (resume) await repository.save(original);
+      const deleted = deleteNightWaking(
+        original.session,
+        waking.session.phases[1]?.id ?? 'missing',
+        context('2026-08-12T21:15:00Z'),
+      );
+      await repository.save(deleted);
+      expect(
+        database
+          .prepare('SELECT COUNT(*) AS count FROM sleep_phases WHERE retired_at IS NOT NULL')
+          .get(),
+      ).toEqual({ count: resume ? 2 : 1 });
+      database.close();
+      database = new DatabaseSync(databasePath);
+      adapter = new NodeSQLiteAdapter(database);
+      await migrateDatabase(adapter.asExpoDatabase());
+      repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+      expect(await repository.activeNight('child-arthur')).toEqual(deleted.session);
+      const restored = restoreNightWaking(
+        deleted.session,
+        original.session,
+        context('2026-08-12T21:16:00Z'),
+      );
+      await repository.save(restored);
+      expect(await repository.findById(original.session.id)).toEqual(restored.session);
+      expect(
+        database
+          .prepare('SELECT COUNT(*) AS count FROM sleep_phases WHERE retired_at IS NOT NULL')
+          .get(),
+      ).toEqual({ count: 0 });
+      const count = await repository.pendingOperationCount();
+      await expect(repository.save(deleted)).rejects.toThrow();
+      expect(await repository.pendingOperationCount()).toBe(count);
+    },
+  );
+
+  it('keeps retired phases out of whole-Night delete/restore even at the same deletion instant', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+    await repository.save(waking);
+    const ended = endNightSleep(waking.session, context('2026-08-13T06:00:00Z'));
+    await repository.save(ended);
+    const ctx = context('2026-08-13T07:00:00Z');
+    const removed = deleteNightWaking(
+      ended.session,
+      waking.session.phases[1]?.id ?? 'missing',
+      ctx,
+    );
+    await repository.save(removed);
+    const whole = deleteNightSleep(removed.session, ctx);
+    await repository.save(whole);
+    expect(await repository.findById(whole.session.id)).toEqual(whole.session);
+    const restored = restoreNightSleep(whole.session, context('2026-08-13T07:01:00Z'));
+    await repository.save(restored);
+    expect(await repository.findById(restored.session.id)).toEqual(restored.session);
+    expect(restored.session.phases).toHaveLength(1);
+  });
+
+  it('rolls back waking deletion when its outbox insert fails and rejects Undo after a new transition', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+    await repository.save(waking);
+    const removed = deleteNightWaking(
+      waking.session,
+      waking.session.phases[1]?.id ?? 'missing',
+      context('2026-08-12T21:05:00Z'),
+    );
+    await expect(
+      repository.save({
+        ...removed,
+        operation: { ...removed.operation, operationId: waking.operation.operationId },
+      }),
+    ).rejects.toThrow();
+    expect(await repository.findById(waking.session.id)).toEqual(waking.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+    await repository.save(removed);
+    const next = startNightWaking(removed.session, context('2026-08-12T22:00:00Z'));
+    await repository.save(next);
+    const undo = restoreNightWaking(
+      removed.session,
+      waking.session,
+      context('2026-08-12T22:01:00Z'),
+    );
+    await expect(repository.save(undo)).rejects.toThrow();
+    expect(await repository.findById(next.session.id)).toEqual(next.session);
+    expect(await repository.pendingOperationCount()).toBe(4);
   });
 
   it('persists every Night transition and ordered phases with one outbox row each', async () => {
@@ -101,7 +203,7 @@ describe('SQLite sleep repository', () => {
     const waking = startNightWaking(bedtime.session, context('2026-08-13T00:15:00.456Z'));
     await repository.save(waking);
     const draft = {
-      ...createNightRecordEditorState(waking.session, waking.session.phases[1].id),
+      ...createNightRecordEditorState(waking.session, waking.session.phases[1]?.id ?? 'missing'),
       startedAt: new Date('2026-08-13T00:10:00Z'),
     };
     const edited = editNightSleep(

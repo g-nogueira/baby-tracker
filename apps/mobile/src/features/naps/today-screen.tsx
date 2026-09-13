@@ -33,6 +33,7 @@ import {
   type CompletedNursingEditorState,
   completedNursingCorrectionForSave,
   createCompletedNursingEditorState,
+  createActiveNursingEditorState,
 } from '@/features/nursing/completed-nursing-editor-state';
 import { NursingDrawer } from '@/features/nursing/nursing-drawer';
 import { completedNursingRecordById } from '@/features/nursing/nursing-history-state';
@@ -112,6 +113,7 @@ const palette = {
 type UndoState =
   | { kind: 'nap'; deletedNap: NapSession }
   | { kind: 'night'; deletedSession: NightSleepSession }
+  | { kind: 'night-waking'; deletedSession: NightSleepSession; previousSession: NightSleepSession }
   | { kind: 'care-event'; deletedEvent: CareEvent }
   | { kind: 'nursing'; deletedSession: NursingSession };
 
@@ -138,8 +140,10 @@ export function TodayScreen() {
     goToToday,
     remove,
     removeNight,
+    removeNightWaking,
     restore,
     restoreNight,
+    restoreNightWaking,
     resumeNight,
     selectedDay,
     sleepSessions,
@@ -154,6 +158,7 @@ export function TodayScreen() {
     cycleSessions: cycleNursingSessions,
     error: nursingError,
     editCompleted: editCompletedNursing,
+    editActive: editActiveNursing,
     isLoading: isNursingLoading,
     isMutating: isNursingMutating,
     latestCompletedLast,
@@ -327,9 +332,11 @@ export function TodayScreen() {
       ? restore(undo.deletedNap)
       : undo.kind === 'night'
         ? restoreNight(undo.deletedSession)
-        : undo.kind === 'nursing'
-          ? restoreCompletedNursing(undo.deletedSession)
-          : restoreCareEvent(undo.deletedEvent));
+        : undo.kind === 'night-waking'
+          ? restoreNightWaking(undo.deletedSession, undo.previousSession)
+          : undo.kind === 'nursing'
+            ? restoreCompletedNursing(undo.deletedSession)
+            : restoreCareEvent(undo.deletedEvent));
     if (restored !== null) setUndo(null);
   };
 
@@ -358,15 +365,28 @@ export function TodayScreen() {
 
   const deleteNightEditor = async () => {
     if (nightEditor === null) return;
-    const deletedSession = await removeNight(nightEditor.session);
+    const previousSession = nightEditor.session;
+    const deletedSession = await (nightEditor.phaseId === null
+      ? removeNight(previousSession)
+      : removeNightWaking(previousSession, nightEditor.phaseId));
     if (deletedSession === null) return;
     setNightEditor(null);
-    setUndo({ kind: 'night', deletedSession });
+    setUndo(
+      nightEditor.phaseId === null
+        ? { kind: 'night', deletedSession }
+        : { kind: 'night-waking', deletedSession, previousSession },
+    );
   };
 
   const saveNursingEditor = async (candidate: CompletedNursingEditorState) => {
     const correction = completedNursingCorrectionForSave(candidate);
-    const saved = await editCompletedNursing(candidate.session, correction);
+    const saved = await (candidate.activeSession === undefined
+      ? editCompletedNursing(candidate.session, correction)
+      : editActiveNursing(candidate.activeSession, {
+          startedAt: correction.startedAt,
+          snapshotAt: candidate.endedAt,
+          leftDurationSeconds: correction.leftDurationSeconds,
+        }));
     if (saved !== null) setNursingEditor(null);
   };
 
@@ -749,7 +769,7 @@ export function TodayScreen() {
             setNightEditor(candidate);
           }}
           onDelete={
-            nightEditor.phaseId === null && nightEditor.session.status === 'completed'
+            nightEditor.phaseId !== null || nightEditor.session.status === 'completed'
               ? () => void deleteNightEditor()
               : null
           }
@@ -780,13 +800,21 @@ export function TodayScreen() {
             clearNursingError();
             setNursingEditor(candidate);
           }}
-          onDelete={() => void deleteNursingEditor()}
+          onDelete={
+            nursingEditor.activeSession === undefined ? () => void deleteNursingEditor() : null
+          }
           onSave={(candidate) => void saveNursingEditor(candidate)}
         />
       ) : null}
 
       {nursingDrawerOpen ? (
         <NursingDrawer
+          onEdit={() => {
+            if (activeNursing === null) return;
+            clearNursingError();
+            setNursingEditor(createActiveNursingEditorState(activeNursing, new Date()));
+            setNursingDrawerOpen(false);
+          }}
           activeSession={activeNursing}
           isMutating={isNursingMutating}
           latestCompletedLast={latestCompletedLast}
@@ -1039,6 +1067,7 @@ function cycleRecordDetail(record: ProjectedRadialActivity): string {
 function undoRecordLabel(undo: UndoState): string {
   if (undo.kind === 'nap') return 'Nap';
   if (undo.kind === 'night') return 'Night sleep';
+  if (undo.kind === 'night-waking') return 'Night waking';
   if (undo.kind === 'nursing') return 'Nursing session';
   return undo.deletedEvent.kind === 'diaper' ? 'Diaper' : 'Medicine';
 }
@@ -1050,7 +1079,7 @@ function undoMutationPending(
   careEventPending: boolean,
 ): boolean {
   if (undo.kind === 'nap') return sleepPending;
-  if (undo.kind === 'night') return sleepPending;
+  if (undo.kind === 'night' || undo.kind === 'night-waking') return sleepPending;
   if (undo.kind === 'nursing') return nursingPending;
   return careEventPending;
 }
