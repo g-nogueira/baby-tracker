@@ -1,4 +1,6 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -75,12 +77,19 @@ export function NightTransitionDrawer({
         <>
           <View style={styles.hero}>
             <View style={[styles.iconCircle, { backgroundColor: metadata.softColor }]}>
-              <Text style={[styles.icon, { color: metadata.color }]}>{metadata.icon}</Text>
+              <ActivityIcon name={metadata.icon} color={metadata.color} />
             </View>
             <Text accessibilityRole="header" style={styles.title}>
               {metadata.title}
             </Text>
-            <Text style={styles.actionTime}>{timeFormatter.format(draft.effectiveAt)}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Set transition time"
+              disabled={isMutating}
+              onPress={() => setPicker('time')}
+            >
+              <Text style={styles.actionTime}>{timeFormatter.format(draft.effectiveAt)}</Text>
+            </Pressable>
           </View>
 
           <View style={styles.quickActions}>
@@ -102,8 +111,7 @@ export function NightTransitionDrawer({
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.primaryActionIcon}>{metadata.primaryIcon}</Text>
-              <Text style={styles.primaryActionLabel}>{metadata.primaryLabel}</Text>
+              <ActivityIcon name={metadata.primaryIcon} />
             </Pressable>
             <MinuteButton
               disabled={isMutating}
@@ -116,7 +124,7 @@ export function NightTransitionDrawer({
             <Text style={styles.swipeHint}>Swipe up for exact date and time</Text>
           ) : null}
 
-          {expanded ? (
+          {expanded || picker !== null ? (
             <View style={styles.expandedContent}>
               <Text style={styles.optionsTitle}>Date and time</Text>
               <View style={styles.fieldValues}>
@@ -133,7 +141,8 @@ export function NightTransitionDrawer({
               </View>
               {picker !== null ? (
                 <View style={styles.pickerPanel}>
-                  <DateTimePicker
+                  <StableDateTimePicker
+                    key={picker}
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                     maximumDate={new Date()}
                     mode={picker}

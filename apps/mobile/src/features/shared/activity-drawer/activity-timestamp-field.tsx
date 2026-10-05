@@ -1,4 +1,5 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -72,7 +73,8 @@ export function ActivityTimestampField({
 
       {pickerMode === null ? null : (
         <View style={styles.pickerPanel}>
-          <DateTimePicker
+          <StableDateTimePicker
+            key={pickerMode}
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             maximumDate={maximumDate}
             mode={pickerMode}

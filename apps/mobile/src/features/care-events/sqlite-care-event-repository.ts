@@ -74,6 +74,14 @@ export class SQLiteCareEventRepository {
     return rows.map(mapCareEvent);
   }
 
+  public async latestActivityTimes(childId: string): Promise<Record<string, string>> {
+    const rows = await this.database.getAllAsync<{ kind: string; at: string }>(
+      `SELECT kind, MAX(occurred_at) AS at FROM care_events WHERE child_id=? AND deleted_at IS NULL GROUP BY kind`,
+      childId,
+    );
+    return Object.fromEntries(rows.map((row) => [row.kind, row.at]));
+  }
+
   public async save(mutation: CareEventMutation): Promise<void> {
     assertValidCareEvent(mutation.event);
     assertOperationSemantics(mutation);

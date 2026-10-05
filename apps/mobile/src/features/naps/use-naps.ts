@@ -1,5 +1,8 @@
 import {
   createUuidV7,
+  recordCompletedSleep,
+  recordNightWaking,
+  reopenNap,
   deleteNap,
   deleteNightSleep,
   deleteNightWaking,
@@ -31,6 +34,7 @@ import { calendarDayForInstant, shiftCalendarDay, zonedDayBounds } from './calen
 import { recoverFromMutationFailure } from './mutation-recovery';
 
 interface NapState {
+  latestActivityTimes: Record<string, string>;
   naps: NapSession[];
   sleepSessions: SleepSession[];
   activeSleep: SleepSession | null;
@@ -63,6 +67,7 @@ export function useNaps() {
   );
   selectedDayRef.current = selectedDay;
   const [state, setState] = useState<NapState>({
+    latestActivityTimes: {},
     naps: [],
     sleepSessions: [],
     activeSleep: null,
@@ -108,21 +113,29 @@ export function useNaps() {
       shiftCalendarDay(selectedDay, 1),
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [napSessions, sleepSessions, activeSleep, pendingOperationCount, latestCompletedEnd] =
-      await Promise.all([
-        repository.listVisible(
-          LOCAL_DEVELOPMENT_IDENTITY.childId,
-          dayStartedAt,
-          nextDayStartedAt,
-          'nap',
-        ),
-        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
-        repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
-        repository.pendingOperationCount(),
-        repository.latestCompletedEnd(LOCAL_DEVELOPMENT_IDENTITY.childId),
-      ]);
+    const [
+      latestActivityTimes,
+      napSessions,
+      sleepSessions,
+      activeSleep,
+      pendingOperationCount,
+      latestCompletedEnd,
+    ] = await Promise.all([
+      repository.latestActivityTimes(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.listVisible(
+        LOCAL_DEVELOPMENT_IDENTITY.childId,
+        dayStartedAt,
+        nextDayStartedAt,
+        'nap',
+      ),
+      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
+      repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.pendingOperationCount(),
+      repository.latestCompletedEnd(LOCAL_DEVELOPMENT_IDENTITY.childId),
+    ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
+      latestActivityTimes,
       naps: napSessions.filter((session): session is NapSession => session.kind === 'nap'),
       sleepSessions,
       activeSleep,
@@ -203,6 +216,11 @@ export function useNaps() {
       followingToday.current = true;
       setSelectedDay(currentDayRef.current);
     },
+    recordCompleted: (kind: 'nap' | 'night', startedAt: Date, endedAt: Date) =>
+      mutate((now) => recordCompletedSleep(kind, startedAt, endedAt, createContext(now))),
+    recordWaking: (session: NightSleepSession, startedAt: Date, endedAt: Date) =>
+      mutate((now) => recordNightWaking(session, startedAt, endedAt, createContext(now))),
+    reopen: (nap: NapSession) => mutate((now) => reopenNap(nap, createContext(now))),
     start: (startedAt?: Date) => mutate((now) => startNap(createContext(now), startedAt ?? now)),
     stop: (endedAt?: Date) => {
       const activeNap = state.activeSleep?.kind === 'nap' ? state.activeSleep : null;

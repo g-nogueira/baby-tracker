@@ -1,4 +1,13 @@
 import {
+  calendarDayForInstant,
+  shiftCalendarDay,
+  zonedDayBounds,
+} from '@/features/naps/calendar-day';
+import {
+  CYCLE_HORIZON_MS,
+  CYCLE_START_ANGLE_DEGREES,
+  CYCLE_SWEEP_ANGLE_DEGREES,
+  type ProjectedInstant,
   type CareEvent,
   type CycleProjection,
   type CycleRecord,
@@ -103,6 +112,65 @@ function projectedView(
   projection: CycleProjection,
   metadata: ReadonlyMap<string, RadialActivityRecord>,
 ): RadialCycleView {
+  const startMs = new Date(projection.cycle.startedAt).getTime();
+  const duration = new Date(projection.observedEndedAt).getTime() - startMs;
+  // Completed Nights fit their actual bounds. Active Nights expand only at 3h steps.
+  const horizon =
+    kind === 'night'
+      ? Math.min(
+          CYCLE_HORIZON_MS,
+          projection.cycle.endedAt === null
+            ? Math.max(12 * 3600000, Math.ceil(duration / (3 * 3600000)) * 3 * 3600000)
+            : Math.max(1, duration),
+        )
+      : CYCLE_HORIZON_MS;
+  const position = (instant: ProjectedInstant): ProjectedInstant => ({
+    ...instant,
+    angleDegrees:
+      CYCLE_START_ANGLE_DEGREES +
+      (Math.min(horizon, Math.max(0, instant.elapsedMs)) / horizon) * CYCLE_SWEEP_ANGLE_DEGREES,
+  });
+  const records = projection.records.map((record) => ({
+    ...record,
+    token: record.token ? { ...record.token, projection: position(record.token.projection) } : null,
+    arc: record.arc
+      ? { ...record.arc, start: position(record.arc.start), end: position(record.arc.end) }
+      : null,
+  }));
+  projection = {
+    ...projection,
+    records,
+    anchors: projection.anchors.map((anchor) => ({
+      ...anchor,
+      projection: position(anchor.projection),
+    })),
+  };
+  const offsets =
+    kind === 'night'
+      ? [0, horizon / 4, horizon / 2, (horizon * 3) / 4, horizon].map(Math.round)
+      : TICK_OFFSETS_MS;
+  const startDay = calendarDayForInstant(new Date(startMs), projection.cycle.timezone);
+  const midnightOffsets = [0, 1, 2]
+    .map(
+      (days) =>
+        new Date(
+          zonedDayBounds(shiftCalendarDay(startDay, days), projection.cycle.timezone)[0],
+        ).getTime() - startMs,
+    )
+    .filter((offset) => offset >= 0 && offset <= horizon);
+  // Keep midnight distinct from nearby helper ticks.
+  const ticks = projectCycleTicks(projection.cycle, {
+    offsetsMs: [
+      ...offsets.filter(
+        (offset) => !midnightOffsets.some((midnight) => Math.abs(offset - midnight) < horizon / 12),
+      ),
+      ...midnightOffsets,
+    ].sort((a, b) => a - b),
+  }).map((tick) => ({
+    ...tick,
+    angleDegrees: CYCLE_START_ANGLE_DEGREES + (tick.offsetMs / horizon) * CYCLE_SWEEP_ANGLE_DEGREES,
+    label: midnightOffsets.includes(tick.offsetMs) ? 'Midnight' : tick.label,
+  }));
   return {
     kind,
     emptyLabel: null,
@@ -113,7 +181,7 @@ function projectedView(
         throw new Error('Every projected record requires activity metadata.');
       return { ...activity, projection: record };
     }),
-    ticks: projectCycleTicks(projection.cycle, { offsetsMs: TICK_OFFSETS_MS }),
+    ticks,
   };
 }
 
@@ -212,4 +280,30 @@ function radialRecords(input: BuildRadialCycleViewsInput): {
   }
 
   return { records, metadata };
+}
+
+/** Groups a bounded angular window on one marker rail, retaining every stable record ID. */
+export function clusterRadialTargets(
+  records: readonly ProjectedRadialActivity[],
+  minimumAngleDegrees: number,
+): ProjectedRadialActivity[][] {
+  const angle = (record: ProjectedRadialActivity) =>
+    record.projection.token?.projection.angleDegrees ??
+    ((record.projection.arc?.start.angleDegrees ?? 0) +
+      (record.projection.arc?.end.angleDegrees ?? 0)) /
+      2;
+  const targets = records
+    .filter(
+      (record) =>
+        record.kind !== 'night' &&
+        (record.projection.token !== null || (record.projection.arc?.visibleDurationMs ?? 0) > 0),
+    )
+    .sort((a, b) => angle(a) - angle(b) || a.id.localeCompare(b.id));
+  const groups: ProjectedRadialActivity[][] = [];
+  for (const record of targets) {
+    const previous = groups.at(-1);
+    if (previous && angle(record) - angle(previous[0]) < minimumAngleDegrees) previous.push(record);
+    else groups.push([record]);
+  }
+  return groups;
 }

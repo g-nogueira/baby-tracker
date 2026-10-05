@@ -25,6 +25,7 @@ export interface NursingSession {
 }
 
 export type NursingAction =
+  | 'record_completed_nursing'
   | 'start_nursing'
   | 'switch_nursing_side'
   | 'pause_nursing'

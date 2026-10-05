@@ -49,6 +49,23 @@ describe('SQLite CareEvent repository', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
+  it('reads last action times beyond the selected day and excludes deleted events', async () => {
+    const older = createDiaperEvent('wet', context('2026-08-12T12:00:00Z'));
+    const latest = createDiaperEvent('dirty', context('2026-08-13T12:00:00Z'));
+    const medicine = createMedicineEvent('note', context('2026-08-11T12:00:00Z'));
+    await repository.save(older);
+    await repository.save(latest);
+    await repository.save(medicine);
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      diaper: latest.event.occurredAt,
+      medicine: medicine.event.occurredAt,
+    });
+    await repository.save(deleteCareEvent(latest.event, context('2026-08-14T12:00:00Z')));
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      diaper: older.event.occurredAt,
+      medicine: medicine.event.occurredAt,
+    });
+  });
   it('atomically persists create, edit, delete, restore, and exact outbox metadata', async () => {
     const created = createMedicineEvent(
       '  original private note  ',

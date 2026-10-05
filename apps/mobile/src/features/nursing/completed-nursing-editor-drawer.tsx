@@ -1,4 +1,5 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -124,7 +125,8 @@ export function CompletedNursingEditorDrawer({
             ) : null}
             {picker !== null ? (
               <View style={styles.pickerPanel}>
-                <DateTimePicker
+                <StableDateTimePicker
+                  key={picker.mode}
                   display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                   maximumDate={new Date()}
                   mode={picker.mode}

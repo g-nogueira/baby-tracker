@@ -3,8 +3,6 @@ import {
   type AccessibilityActionEvent,
   type LayoutChangeEvent,
   PanResponder,
-  Pressable,
-  type PressableStateCallbackType,
   StyleSheet,
   View,
 } from 'react-native';
@@ -44,15 +42,22 @@ export function NursingSplitSlider({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) => {
+        onStartShouldSetPanResponder: () => !current.current.disabled,
+        onPanResponderTerminationRequest: () => false,
+        onMoveShouldSetPanResponderCapture: (_event, gesture) => {
           return (
             !current.current.disabled &&
             Math.abs(gesture.dx) > 4 &&
             Math.abs(gesture.dx) > Math.abs(gesture.dy)
           );
         },
-        onPanResponderGrant: () => {
-          dragStartValue.current = current.current.value;
+        onPanResponderGrant: (event) => {
+          dragStartValue.current = nursingSplitValueForPosition(
+            event.nativeEvent.locationX,
+            trackWidth.current,
+            current.current.maximumValue,
+          );
+          update(dragStartValue.current);
         },
         onPanResponderMove: (_event, gesture) => {
           update(
@@ -89,14 +94,9 @@ export function NursingSplitSlider({
   };
 
   const fillRatio = maximumValue <= 0 ? 0 : Math.min(1, Math.max(0, value / maximumValue));
-  const sliderStyle = ({ pressed }: PressableStateCallbackType) => [
-    styles.slider,
-    disabled && styles.disabled,
-    pressed && !disabled && styles.pressed,
-  ];
 
   return (
-    <Pressable
+    <View
       accessibilityActions={[
         { name: 'increment', label: 'Increase Left duration' },
         { name: 'decrement', label: 'Decrease Left duration' },
@@ -110,26 +110,16 @@ export function NursingSplitSlider({
         now: value,
         text: accessibilityText,
       }}
-      disabled={disabled}
       onAccessibilityAction={handleAccessibilityAction}
       onLayout={handleLayout}
-      onPress={(event) => {
-        update(
-          nursingSplitValueForPosition(
-            event.nativeEvent.locationX,
-            trackWidth.current,
-            current.current.maximumValue,
-          ),
-        );
-      }}
-      style={sliderStyle}
+      style={[styles.slider, disabled && styles.disabled]}
       {...panResponder.panHandlers}
     >
-      <View style={styles.track}>
+      <View pointerEvents="none" style={styles.track}>
         <View style={[styles.fill, { width: `${fillRatio * 100}%` }]} />
         <View style={[styles.thumb, { left: `${fillRatio * 100}%` }]} />
       </View>
-    </Pressable>
+    </View>
   );
 }
 

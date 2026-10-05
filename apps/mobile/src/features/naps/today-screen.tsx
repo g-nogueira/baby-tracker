@@ -1,3 +1,8 @@
+import { zonedDayBounds } from './calendar-day';
+import {
+  HistoricalActivityDrawer,
+  type HistoricalActivityDraft,
+} from '@/features/shared/activity-drawer/historical-activity-drawer';
 import {
   type CareEvent,
   elapsedMilliseconds,
@@ -123,6 +128,10 @@ type UndoState =
 export function TodayScreen() {
   const insets = useSafeAreaInsets();
   const {
+    recordCompleted: recordCompletedSleep,
+    recordWaking,
+    reopen,
+    latestActivityTimes: sleepActivityTimes,
     activeNap,
     activeSleep,
     clearError: clearSleepError,
@@ -153,6 +162,8 @@ export function TodayScreen() {
     stop,
   } = useNaps();
   const {
+    recordCompleted: recordCompletedNursing,
+    latestActivityTimes: nursingActivityTimes,
     activeSession: activeNursing,
     clearError: clearNursingError,
     cycleSessions: cycleNursingSessions,
@@ -173,6 +184,7 @@ export function TodayScreen() {
   } = useNursing(selectedDay);
   const {
     clearError: clearCareEventError,
+    latestActivityTimes: careActivityTimes,
     cycleEvents,
     createDiaper,
     createMedicine,
@@ -185,7 +197,9 @@ export function TodayScreen() {
     remove: removeCareEvent,
     restore: restoreCareEvent,
   } = useCareEvents(selectedDay);
-  const now = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
+  const clock = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
+  // A committed mutation can arrive between ticks; project against this render’s wall clock.
+  const now = new Date(Math.max(clock.getTime(), Date.now()));
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
   const [nightEditor, setNightEditor] = useState<NightRecordEditorState | null>(null);
@@ -195,6 +209,7 @@ export function TodayScreen() {
   const [nursingDrawerOpen, setNursingDrawerOpen] = useState(false);
   const [nursingEditor, setNursingEditor] = useState<CompletedNursingEditorState | null>(null);
   const [careEventDrawer, setCareEventDrawer] = useState<CareEventDrawerState | null>(null);
+  const [addingHistory, setAddingHistory] = useState(false);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [controllerReservedSpace, setControllerReservedSpace] = useState(0);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -240,7 +255,9 @@ export function TodayScreen() {
   const cycleRecordCount = selectedCycle.records.length;
   const activeController = homeModel.controller;
   const liveControllers = liveControllerIdentities(
-    activeSleep?.id ?? null,
+    activeSleep?.kind === 'nap' || activeController?.kind === 'night-awake'
+      ? (activeSleep?.id ?? null)
+      : null,
     nursingController?.sessionId ?? null,
   );
   const hasLiveController = liveControllers.length > 0;
@@ -487,6 +504,57 @@ export function TodayScreen() {
         value: null,
         hint: 'Recorded on this day',
       };
+  const historyNight =
+    selectedCycle.projection?.cycle.kind === 'night'
+      ? (sleepSessions.find(
+          (session): session is NightSleepSession =>
+            session.kind === 'night' &&
+            session.id === selectedCycle.projection?.cycle.startAnchor?.recordId,
+        ) ?? null)
+      : null;
+  const historyStart = new Date(
+    selectedCycle.projection?.cycle.startedAt ??
+      zonedDayBounds(selectedDay, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone)[0],
+  );
+  const asleepPhase = historyNight?.phases.find(
+    (phase) =>
+      phase.kind === 'asleep' &&
+      new Date(phase.endedAt ?? now).getTime() - new Date(phase.startedAt).getTime() > 120000,
+  );
+  const suggestedHistoryStart = asleepPhase
+    ? new Date(new Date(asleepPhase.startedAt).getTime() + 60000)
+    : historyStart;
+  const suggestedHistoryEnd = new Date(
+    Math.min(
+      suggestedHistoryStart.getTime() + 300000,
+      asleepPhase ? new Date(asleepPhase.endedAt ?? now).getTime() - 60000 : Date.now(),
+      Date.now(),
+    ),
+  );
+  const saveHistory = async (draft: HistoricalActivityDraft) => {
+    const saved =
+      draft.kind === 'nursing'
+        ? await recordCompletedNursing(
+            draft.startedAt,
+            draft.endedAt,
+            draft.leftDurationSeconds,
+            draft.last,
+          )
+        : draft.kind === 'night-waking'
+          ? historyNight
+            ? await recordWaking(historyNight, draft.startedAt, draft.endedAt)
+            : null
+          : await recordCompletedSleep(draft.kind, draft.startedAt, draft.endedAt);
+    if (saved !== null) {
+      setAddingHistory(false);
+      if (draft.kind === 'night') setCycleSelection('night');
+    }
+  };
+  const activityTimes = { ...sleepActivityTimes, ...nursingActivityTimes, ...careActivityTimes };
+  const recency = (kind: string) => {
+    const at = activityTimes[kind];
+    return at ? `${formatDuration(Math.max(0, now.getTime() - new Date(at).getTime()))} ago` : '—';
+  };
   const quickActions: HomeQuickAction[] = appendCareEventHomeActions(
     appendNursingHomeAction(homeModel.actions, nursingModel.action),
   ).map((action) => {
@@ -494,7 +562,7 @@ export function TodayScreen() {
       return {
         id: action.kind,
         label: action.label,
-        meta: action.meta,
+        meta: recency(action.kind),
         icon: 'N',
         color: '#B35D7D',
         disabled: isNursingMutating,
@@ -507,7 +575,7 @@ export function TodayScreen() {
       return {
         id: action.kind,
         label: action.label,
-        meta: action.meta,
+        meta: recency(action.kind),
         icon: action.kind === 'medicine' ? '+' : 'D',
         color: action.kind === 'medicine' ? '#A65F35' : '#47735A',
         disabled: isCareEventMutating,
@@ -519,7 +587,13 @@ export function TodayScreen() {
     return {
       id: action.kind,
       label: action.label,
-      meta: actionMeta(action.kind),
+      meta: recency(
+        action.kind === 'start-nap' || action.kind === 'open-current-nap'
+          ? 'nap'
+          : action.kind === 'start-night-waking' || action.kind === 'resume-night-sleep'
+            ? 'night-waking'
+            : 'night',
+      ),
       icon: actionIcon(action.kind),
       color: actionColor(action.kind),
       disabled: isSleepMutating || activeUndoPending || action.disabledReason !== null,
@@ -594,11 +668,28 @@ export function TodayScreen() {
         <RadialCycle
           centerStatus={centerStatus}
           disabled={isSleepMutating || isNursingMutating || isCareEventMutating}
+          onPressAnchor={(recordId) => {
+            const night = sleepSessions.find((session) => session.id === recordId);
+            if (night?.kind === 'night')
+              openNightRecord(night, null, night.status === 'active' ? 'active' : 'edit');
+          }}
           onPressRecord={openRadialRecord}
           view={selectedCycle}
         />
 
         {isToday ? <HomeQuickActions actions={quickActions} /> : null}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            clearSleepError();
+            clearNursingError();
+            clearCareEventError();
+            setAddingHistory(true);
+          }}
+          style={styles.todayButton}
+        >
+          <Text style={styles.todayButtonText}>Add past activity</Text>
+        </Pressable>
 
         {!isToday ? (
           <Pressable accessibilityRole="button" onPress={goToToday} style={styles.todayButton}>
@@ -676,7 +767,7 @@ export function TodayScreen() {
             />
           ) : activeSleep?.kind === 'night' &&
             activeController !== null &&
-            activeController.kind !== 'nap' ? (
+            activeController.kind === 'night-awake' ? (
             <ActiveNightTimer
               controller={activeController}
               isMutating={isSleepMutating}
@@ -729,6 +820,24 @@ export function TodayScreen() {
         </View>
       ) : null}
 
+      {addingHistory ? (
+        <HistoricalActivityDrawer
+          startedAt={suggestedHistoryStart}
+          endedAt={suggestedHistoryEnd}
+          timezone={
+            selectedCycle.projection?.cycle.timezone ?? LOCAL_DEVELOPMENT_IDENTITY.dayTimezone
+          }
+          hasNight={historyNight !== null}
+          busy={isSleepMutating || isNursingMutating}
+          error={sleepError ?? nursingError}
+          onDismiss={() => setAddingHistory(false)}
+          onSave={(draft) => void saveHistory(draft)}
+          onCare={(kind, at) => {
+            setAddingHistory(false);
+            setCareEventDrawer(createCareEventDraft(kind, at));
+          }}
+        />
+      ) : null}
       {editor !== null ? (
         <NapEditorSheet
           editor={editor}
@@ -739,6 +848,16 @@ export function TodayScreen() {
             clearSleepError();
             setEditor(nextEditor);
           }}
+          onContinue={
+            editor.mode === 'edit' && editor.nap.status === 'completed' && activeSleep === null
+              ? () => {
+                  void reopen(editor.nap).then((saved) => {
+                    if (saved?.kind === 'nap')
+                      setEditor({ mode: 'stop', nap: saved, endedAt: new Date() });
+                  });
+                }
+              : null
+          }
           onDelete={editor.mode === 'start' ? null : () => void deleteFromEditor()}
           onSave={(candidate) => void saveEditor(candidate)}
         />
@@ -831,9 +950,9 @@ export function TodayScreen() {
               `Nursing resumed on ${side === 'left' ? 'Left' : 'Right'} breast`,
             )
           }
-          onStart={(side) =>
+          onStart={(side, startedAt) =>
             void runNursingTransition(
-              startNursing(side),
+              startNursing(side, startedAt),
               `Nursing started on ${side === 'left' ? 'Left' : 'Right'} breast`,
             )
           }
@@ -929,7 +1048,6 @@ function ActiveNightTimer({
     <ActivityLiveController
       accentColor={awake ? '#52728A' : '#5B4C94'}
       accessibilityLabel={`${awake ? 'Night waking' : 'Night sleep'} running for ${liveDuration}`}
-      actionIcon={awake ? 'z' : '☀'}
       activityLabel={awake ? 'Night waking' : 'Night sleep'}
       disabled={isMutating}
       elapsedLabel={liveDuration}
@@ -975,21 +1093,6 @@ function ActiveNursingTimer({
       subtitle={`L ${left} · R ${right} · ${status}`}
     />
   );
-}
-
-function actionMeta(kind: SleepHomeActionKind): string {
-  switch (kind) {
-    case 'open-current-nap':
-      return 'Running';
-    case 'end-night-sleep':
-      return 'End Night';
-    case 'start-night-waking':
-      return 'Awake phase';
-    case 'resume-night-sleep':
-      return 'Resume sleep';
-    default:
-      return 'Start';
-  }
 }
 
 function actionIcon(kind: SleepHomeActionKind): string {

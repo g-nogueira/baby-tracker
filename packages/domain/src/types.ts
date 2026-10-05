@@ -43,6 +43,9 @@ export interface NightSleepSession extends SleepSessionBase {
 export type SleepSession = NapSession | NightSleepSession;
 
 export type SyncAction =
+  | 'record_completed_sleep'
+  | 'reopen_nap'
+  | 'record_night_waking'
   | 'start_nap'
   | 'stop_nap'
   | 'start_night_sleep'

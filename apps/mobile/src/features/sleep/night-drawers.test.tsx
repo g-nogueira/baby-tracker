@@ -1,9 +1,15 @@
+import { recordCompletedSleep, reopenNap } from '@baby-tracker/domain';
+import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
+import { NapEditorSheet } from '@/features/naps/nap-editor-sheet';
+import { HistoricalActivityDrawer } from '@/features/shared/activity-drawer/historical-activity-drawer';
 import {
   deleteNightWaking,
   resumeNightSleep,
   startNightSleep,
   startNightWaking,
   startNursing,
+  endNightSleep,
 } from '@baby-tracker/domain';
 import { useState } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -209,9 +215,11 @@ it('expands by drag, corrects Bedtime and saves without waking up', async () => 
   );
   expect(finish).not.toHaveBeenCalled();
   const handle = renderer.root
-    .findAllByType('Pressable' as never)
+    .findAllByType('View' as never)
     .find((node) => node.props.accessibilityRole === 'adjustable');
-  await act(async () => handle?.props.onPress());
+  expect(handle?.props.onStartShouldSetPanResponder()).toBe(true);
+  expect(handle?.props.onPanResponderTerminationRequest()).toBe(false);
+  await act(async () => handle?.props.onPanResponderRelease({}, { dx: 0, dy: 0, vy: 0 }));
   await act(async () =>
     renderer.root
       .findByType('AnimatedView' as never)
@@ -304,7 +312,8 @@ it('routes controller, quick action and past waking tokens to their own correct 
   const live = renderer.root
     .findAllByType('Pressable' as never)
     .find((node) => String(node.props.accessibilityLabel).startsWith('Night sleep running'));
-  await act(async () => live?.props.onPress());
+  expect(live).toBeUndefined();
+  await act(async () => renderer.root.findByType(RadialCycle).props.onPressAnchor(current.id));
   expect(renderer.root.findByType(NightRecordEditorDrawer).props.editor).toMatchObject({
     phaseId: null,
     mode: 'active',
@@ -350,7 +359,7 @@ it('routes controller, quick action and past waking tokens to their own correct 
     renderer.root
       .findAllByType('Pressable' as never)
       .some((node) => String(node.props.accessibilityLabel).startsWith('Night sleep running')),
-  ).toBe(true);
+  ).toBe(false);
 });
 
 it('opens a live Nursing correction, edits its start and split, and keeps a failed save draft', async () => {
@@ -396,7 +405,10 @@ it('opens a live Nursing correction, edits its start and split, and keeps a fail
     .props.actions.find((item: { id: string }) => item.id === 'nursing');
   expect(action).toBeDefined();
   await act(async () => action.onPress());
-  await act(async () => pressable('Nursing controls collapsed')?.props.onPress());
+  const handle = renderer.root
+    .findAllByType('View' as never)
+    .find((node) => node.props.accessibilityLabel === 'Nursing controls collapsed');
+  await act(async () => handle?.props.onPanResponderRelease({}, { dx: 0, dy: 0, vy: 0 }));
   await act(async () => pressable('Edit start time and split')?.props.onPress());
   expect(renderer.root.findByType(CompletedNursingEditorDrawer).props.editor.activeSession).toEqual(
     session,
@@ -430,4 +442,275 @@ it('opens a live Nursing correction, edits its start and split, and keeps a fail
   expect(renderer.root.findByType(CompletedNursingEditorDrawer).props.editor.startedAt).toEqual(
     new Date('2026-08-16T01:45:00Z'),
   );
+});
+
+it('keeps the Android dialog value and callback stable through timer renders', async () => {
+  const firstChange = vi.fn();
+  const latestChange = vi.fn();
+  await act(async () => {
+    renderer = create(<StableDateTimePicker value={now} mode="time" onChange={firstChange} />);
+  });
+  const native = renderer.root.findByType('DateTimePicker' as never);
+  const callback = native.props.onChange;
+  await act(async () => {
+    renderer.update(
+      <StableDateTimePicker
+        value={new Date(now.getTime() + 1000)}
+        mode="time"
+        onChange={latestChange}
+      />,
+    );
+  });
+  expect(renderer.root.findByType('DateTimePicker' as never).props.value).toBe(now);
+  expect(renderer.root.findByType('DateTimePicker' as never).props.onChange).toBe(callback);
+  callback({ type: 'set' }, new Date('2026-08-16T00:45:00Z'));
+  expect(latestChange).toHaveBeenCalledOnce();
+  expect(firstChange).not.toHaveBeenCalled();
+});
+it('opens the proposed Nap start time before expanding and saves the edited start', async () => {
+  const save = vi.fn();
+  function Harness() {
+    const [editor, setEditor] = useState<import('@/features/naps/nap-editor-state').NapEditorState>(
+      { mode: 'start', startedAt: now },
+    );
+    return (
+      <NapEditorSheet
+        editor={editor}
+        isMutating={false}
+        mutationError={null}
+        onCancel={vi.fn()}
+        onDelete={null}
+        onChange={setEditor}
+        onSave={save}
+      />
+    );
+  }
+  await act(async () => {
+    renderer = create(<Harness />);
+  });
+  await act(async () => pressable('Set nap start time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-08-16T01:00:00Z')),
+  );
+  await act(async () => pressable('Start nap')?.props.onPress());
+  expect(save).toHaveBeenCalledWith({ mode: 'start', startedAt: new Date('2026-08-16T01:00:00Z') });
+});
+it('updates the Nursing slider during the drag before releasing the finger', async () => {
+  function Harness() {
+    const [value, setValue] = useState(0);
+    return (
+      <NursingSplitSlider
+        accessibilityText="Split"
+        disabled={false}
+        maximumValue={600}
+        value={value}
+        onValueChange={setValue}
+      />
+    );
+  }
+  await act(async () => {
+    renderer = create(<Harness />);
+  });
+  const slider = () =>
+    renderer.root
+      .findAllByType('View' as never)
+      .find((node) => node.props.accessibilityRole === 'adjustable');
+  slider()?.props.onLayout({ nativeEvent: { layout: { width: 200 } } });
+  expect(slider()?.props.onStartShouldSetPanResponder()).toBe(true);
+  await act(async () => slider()?.props.onPanResponderGrant({ nativeEvent: { locationX: 50 } }));
+  expect(renderer.root.findByType(NursingSplitSlider).props.value).toBe(150);
+  await act(async () => slider()?.props.onPanResponderMove({}, { dx: 60, dy: 0 }));
+  expect(renderer.root.findByType(NursingSplitSlider).props.value).toBe(330);
+});
+it('projects a newly persisted Nursing start between idle ticks without crashing', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-16T02:00:00Z'));
+  const sleep = {
+    activeSleep: null,
+    activeNap: null,
+    isLoading: false,
+    isMutating: false,
+    isToday: true,
+    selectedDay: '2026-08-16',
+    sleepSessions: [],
+    latestCompletedEnd: null,
+    pendingOperationCount: 0,
+    error: null,
+  };
+  const nursing = {
+    activeSession: null,
+    cycleSessions: [],
+    isLoading: false,
+    isMutating: false,
+    latestCompletedLast: null,
+    pendingOperationCount: 0,
+    error: null,
+  };
+  hooks.sleep.mockReturnValue(sleep);
+  hooks.nursing.mockReturnValue(nursing);
+  hooks.care.mockReturnValue({
+    cycleEvents: [],
+    isLoading: false,
+    isMutating: false,
+    pendingOperationCount: 0,
+    error: null,
+  });
+  await act(async () => {
+    renderer = create(<TodayScreen />);
+  });
+  vi.setSystemTime(new Date('2026-08-16T02:00:00.250Z'));
+  const session = startNursing('left', context('2026-08-16T02:00:00.250Z')).session;
+  hooks.nursing.mockReturnValue({ ...nursing, activeSession: session, cycleSessions: [session] });
+  await act(async () => renderer.update(<TodayScreen />));
+  expect(
+    renderer.root
+      .findByType(RadialCycle)
+      .props.view.records.some((record: { id: string }) => record.id === session.id),
+  ).toBe(true);
+});
+it('adds a completed waking to the selected historical Night without a live transition', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-17T12:00:00Z'));
+  const night = endNightSleep(asleep, context('2026-08-16T06:00:00Z')).session;
+  const recordWaking = vi.fn().mockResolvedValue(null);
+  hooks.sleep.mockReturnValue({
+    activeSleep: null,
+    activeNap: null,
+    isLoading: false,
+    isMutating: false,
+    isToday: false,
+    selectedDay: '2026-08-15',
+    sleepSessions: [night],
+    latestCompletedEnd: night.endedAt,
+    pendingOperationCount: 0,
+    error: null,
+    clearError: vi.fn(),
+    recordWaking,
+  });
+  hooks.nursing.mockReturnValue({
+    activeSession: null,
+    cycleSessions: [],
+    isLoading: false,
+    isMutating: false,
+    latestCompletedLast: null,
+    pendingOperationCount: 0,
+    error: null,
+    clearError: vi.fn(),
+  });
+  hooks.care.mockReturnValue({
+    cycleEvents: [],
+    isLoading: false,
+    isMutating: false,
+    pendingOperationCount: 0,
+    error: null,
+    clearError: vi.fn(),
+  });
+  await act(async () => {
+    renderer = create(<TodayScreen />);
+  });
+  const selector = renderer.root
+    .findAllByType('Pressable' as never)
+    .find(
+      (node) =>
+        node.props.accessibilityRole === 'tab' &&
+        node.findByType('Text' as never).children[0] === 'Night',
+    );
+  await act(async () => selector?.props.onPress());
+  await act(async () => pressable('Add past activity')?.props.onPress());
+  const drawer = renderer.root.findByType(HistoricalActivityDrawer);
+  const draft = {
+    kind: 'night-waking',
+    startedAt: new Date('2026-08-16T00:00:00Z'),
+    endedAt: new Date('2026-08-16T00:10:00Z'),
+    leftDurationSeconds: 0,
+    last: 'left',
+  };
+  await act(async () => drawer.props.onSave(draft));
+  expect(recordWaking).toHaveBeenCalledWith(night, draft.startedAt, draft.endedAt);
+  expect(renderer.root.findByType(HistoricalActivityDrawer)).toBeDefined();
+});
+
+it('edits the saved Night timezone rather than the device timezone', async () => {
+  const session = { ...asleep, timezone: 'America/New_York' };
+  await act(async () => {
+    renderer = create(
+      <NightRecordEditorDrawer
+        editor={createNightRecordEditorState(session, null, 'edit')}
+        now={now}
+        isMutating={false}
+        mutationError={null}
+        onCancel={vi.fn()}
+        onChange={vi.fn()}
+        onDelete={null}
+        onSave={vi.fn()}
+        onFinish={vi.fn()}
+      />,
+    );
+  });
+  expect(renderer.root.findByType(ActivityTimestampField).props.timezone).toBe('America/New_York');
+  const bedtime = renderer.root
+    .findAllByType('Pressable' as never)
+    .find((node) => String(node.props.accessibilityLabel).startsWith('Bedtime time'));
+  expect(String(bedtime?.props.accessibilityLabel)).toMatch(/04:00|16:00/);
+  await act(async () => bedtime?.props.onPress());
+  expect(renderer.root.findByType('DateTimePicker' as never).props.timeZoneName).toBe(
+    'America/New_York',
+  );
+});
+it('routes Continue this nap to the same stopped record and returns to its running drawer', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-16T12:00:00Z'));
+  const nap = recordCompletedSleep(
+    'nap',
+    new Date('2026-08-16T10:00:00Z'),
+    new Date('2026-08-16T10:30:00Z'),
+    context('2026-08-16T10:31:00Z'),
+  ).session;
+  if (nap.kind !== 'nap') throw new Error('Expected Nap');
+  const resumed = reopenNap(nap, context('2026-08-16T10:32:00Z')).session;
+  const reopen = vi.fn().mockResolvedValue(resumed);
+  hooks.sleep.mockReturnValue({
+    activeSleep: null,
+    activeNap: null,
+    isLoading: false,
+    isMutating: false,
+    isToday: true,
+    selectedDay: '2026-08-16',
+    sleepSessions: [nap],
+    latestCompletedEnd: nap.endedAt,
+    pendingOperationCount: 0,
+    error: null,
+    clearError: vi.fn(),
+    reopen,
+  });
+  hooks.nursing.mockReturnValue({
+    activeSession: null,
+    cycleSessions: [],
+    isLoading: false,
+    isMutating: false,
+    latestCompletedLast: null,
+    pendingOperationCount: 0,
+    error: null,
+  });
+  hooks.care.mockReturnValue({
+    cycleEvents: [],
+    isLoading: false,
+    isMutating: false,
+    pendingOperationCount: 0,
+    error: null,
+  });
+  await act(async () => {
+    renderer = create(<TodayScreen />);
+  });
+  const radial = renderer.root.findByType(RadialCycle);
+  const record = radial.props.view.records.find((record: { id: string }) => record.id === nap.id);
+  await act(async () => radial.props.onPressRecord(record));
+  await act(async () => pressable('Continue this nap')?.props.onPress());
+  expect(reopen).toHaveBeenCalledWith(nap);
+  expect(renderer.root.findByType(NapEditorSheet).props.editor).toMatchObject({
+    mode: 'stop',
+    nap: resumed,
+  });
 });

@@ -3,14 +3,17 @@ import {
   CYCLE_SWEEP_ANGLE_DEGREES,
   formatDuration,
 } from '@baby-tracker/domain';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
-import type {
-  ProjectedRadialActivity,
-  RadialActivityKind,
-  RadialCycleView,
+import {
+  clusterRadialTargets,
+  type ProjectedRadialActivity,
+  type RadialActivityKind,
+  type RadialCycleView,
 } from './radial-cycle-state';
 
 export type RadialCycleSelection = 'day' | 'night';
@@ -18,6 +21,7 @@ export type RadialCycleSelection = 'day' | 'night';
 interface RadialCycleProps {
   centerStatus: { hint: string; label: string; value: string | null };
   disabled: boolean;
+  onPressAnchor?: (recordId: string) => void;
   onPressRecord: (record: ProjectedRadialActivity) => void;
   view: RadialCycleView;
 }
@@ -57,8 +61,15 @@ export function RadialCycleSelector({
   );
 }
 
-/** Renders one fixed 24-hour, multi-lane cycle from deterministic projection output. */
-export function RadialCycle({ centerStatus, disabled, onPressRecord, view }: RadialCycleProps) {
+/** Renders time-faithful arcs with bounded, selectable clusters for crowded records. */
+export function RadialCycle({
+  centerStatus,
+  disabled,
+  onPressRecord,
+  onPressAnchor,
+  view,
+}: RadialCycleProps) {
+  const [cluster, setCluster] = useState<readonly ProjectedRadialActivity[] | null>(null);
   const { width } = useWindowDimensions();
   const size = Math.min(340, width - 32);
   const scale = size / VIEWBOX_SIZE;
@@ -173,48 +184,91 @@ export function RadialCycle({ centerStatus, disabled, onPressRecord, view }: Rad
         })}
       </Svg>
 
-      {view.records.map((record) => {
-        const token = record.projection.token;
-        if (token === null) return null;
-        const radius = laneRadius(token.lane) + token.collision.radialOffset;
-        const point = polarPoint(token.projection.angleDegrees, radius);
-        return (
-          <RecordTarget
-            disabled={disabled}
-            key={`token:${record.id}`}
-            label={activityAccessibilityLabel(record, projection.cycle.timezone)}
-            left={point.x * scale - 22}
-            onPress={() => onPressRecord(record)}
-            top={point.y * scale - 22}
-          >
-            <View style={[styles.token, { backgroundColor: radialActivityColor(record.kind) }]}>
-              <Text style={styles.tokenText}>{activityIcon(record.kind)}</Text>
-            </View>
-          </RecordTarget>
-        );
-      })}
-
-      {view.records.map((record) => {
-        const arc = record.projection.arc;
-        if (record.projection.token !== null || arc === null || arc.visibleDurationMs <= 0)
-          return null;
-        const middle = arc.start.angleDegrees + (arc.end.angleDegrees - arc.start.angleDegrees) / 2;
-        const point = polarPoint(middle, laneRadius(record.projection.lane));
-        return (
-          <RecordTarget
-            disabled={disabled}
-            key={`continuation:${record.id}`}
-            label={`${activityAccessibilityLabel(record, projection.cycle.timezone)}, continued from the previous cycle`}
-            left={point.x * scale - 22}
-            onPress={() => onPressRecord(record)}
-            top={point.y * scale - 22}
-          >
-            <View
-              style={[styles.continuation, { backgroundColor: radialActivityColor(record.kind) }]}
-            />
-          </RecordTarget>
-        );
-      })}
+      {clusterRadialTargets(view.records, (2 * Math.asin(22 / (102 * scale)) * 180) / Math.PI).map(
+        (group) => {
+          const first = group[0];
+          const token = first.projection.token;
+          const arc = first.projection.arc;
+          const angle =
+            token?.projection.angleDegrees ??
+            (arc ? (arc.start.angleDegrees + arc.end.angleDegrees) / 2 : 0);
+          const point = polarPoint(angle, 102);
+          return (
+            <RecordTarget
+              disabled={disabled}
+              key={`token:${first.id}`}
+              label={
+                group.length === 1
+                  ? activityAccessibilityLabel(first, projection.cycle.timezone)
+                  : `${group.length} activities near ${formatClock(first.occurredAt, projection.cycle.timezone)}. Choose a record`
+              }
+              left={point.x * scale - 22}
+              top={point.y * scale - 22}
+              onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
+            >
+              <View style={[styles.token, { backgroundColor: radialActivityColor(first.kind) }]}>
+                {group.length === 1 ? (
+                  <ActivityIcon name={first.kind} size={18} />
+                ) : (
+                  <Text style={styles.tokenText}>{group.length}</Text>
+                )}
+              </View>
+            </RecordTarget>
+          );
+        },
+      )}
+      {projection.anchors
+        .filter((anchor) => anchor.recordId !== null)
+        .map((anchor) => {
+          const point = polarPoint(anchor.projection.angleDegrees, 139);
+          return (
+            <RecordTarget
+              key={`anchor:${anchor.boundary}:${anchor.at}`}
+              disabled={disabled}
+              label={`Edit ${anchorLabel(anchor.kind)}, ${formatClock(anchor.at, projection.cycle.timezone)}`}
+              left={point.x * scale - 22}
+              top={point.y * scale - 22}
+              onPress={() => {
+                if (anchor.recordId) onPressAnchor?.(anchor.recordId);
+              }}
+            >
+              <View style={styles.anchorTarget} />
+            </RecordTarget>
+          );
+        })}
+      {cluster ? (
+        <ActivityDrawer
+          activityLabel="Nearby activities"
+          mode="edit"
+          scrollContent
+          onDismiss={() => setCluster(null)}
+        >
+          {() => (
+            <>
+              <Text accessibilityRole="header" style={styles.clusterTitle}>
+                Nearby activities
+              </Text>
+              {cluster.map((record) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={record.id}
+                  disabled={disabled}
+                  onPress={() => {
+                    setCluster(null);
+                    onPressRecord(record);
+                  }}
+                  style={styles.clusterRow}
+                >
+                  <ActivityIcon name={record.kind} color={radialActivityColor(record.kind)} />
+                  <Text style={styles.clusterText}>
+                    {activityAccessibilityLabel(record, projection.cycle.timezone)}
+                  </Text>
+                </Pressable>
+              ))}
+            </>
+          )}
+        </ActivityDrawer>
+      ) : null}
 
       <View
         accessible
@@ -223,7 +277,8 @@ export function RadialCycle({ centerStatus, disabled, onPressRecord, view }: Rad
         pointerEvents="none"
         style={styles.centerStatus}
       >
-        <Text style={styles.status}>{status}</Text>
+        <Text style={styles.statusLabel}>{centerStatus.label}</Text>
+        {centerStatus.value ? <Text style={styles.status}>{centerStatus.value}</Text> : null}
         <Text style={styles.statusHint}>{centerStatus.hint}</Text>
         {projection.overflow.hasOverflow ? (
           <Text style={styles.overflow}>Cycle exceeds 24 hours</Text>
@@ -313,23 +368,6 @@ function formatClock(instant: string, timezone: string): string {
   }).format(new Date(instant));
 }
 
-function activityIcon(kind: RadialActivityKind): string {
-  switch (kind) {
-    case 'nap':
-      return 'z';
-    case 'night':
-      return '☾';
-    case 'night-waking':
-      return '↯';
-    case 'nursing':
-      return 'N';
-    case 'diaper':
-      return 'D';
-    case 'medicine':
-      return '+';
-  }
-}
-
 export function radialActivityColor(kind: RadialActivityKind): string {
   switch (kind) {
     case 'nap':
@@ -402,19 +440,38 @@ const styles = StyleSheet.create({
   continuation: { width: 20, height: 6, borderRadius: 3 },
   centerStatus: {
     position: 'absolute',
-    width: '48%',
-    minHeight: '42%',
+    width: '36%',
+    minHeight: '30%',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     borderRadius: 999,
     backgroundColor: '#F9F7F3',
   },
+  statusLabel: { color: '#746F68', fontSize: 12, textAlign: 'center' },
+  anchorTarget: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#5B4C94',
+    backgroundColor: '#FFFFFF',
+  },
+  clusterTitle: { fontSize: 18, fontWeight: '700', color: '#292724' },
+  clusterRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E7E0D7',
+  },
+  clusterText: { flex: 1, fontSize: 14, color: '#292724' },
   status: {
     color: '#292724',
-    fontSize: 22,
+    fontSize: 29,
     fontWeight: '700',
-    lineHeight: 27,
+    lineHeight: 35,
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },

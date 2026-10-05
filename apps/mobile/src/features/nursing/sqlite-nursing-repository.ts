@@ -94,6 +94,14 @@ export class SQLiteNursingRepository {
     return row?.last_breast_used ?? null;
   }
 
+  public async latestActivityTimes(childId: string): Promise<Record<string, string>> {
+    const row = await this.database.getFirstAsync<{ at: string | null }>(
+      `SELECT MAX(COALESCE(ended_at,started_at)) AS at FROM nursing_sessions WHERE child_id=? AND deleted_at IS NULL`,
+      childId,
+    );
+    return row?.at ? { nursing: row.at } : {};
+  }
+
   public async save(mutation: NursingMutation): Promise<void> {
     assertValidNursingSession(mutation.session);
     assertOperationSemantics(mutation);
@@ -160,13 +168,19 @@ function assertOperationSemantics(mutation: NursingMutation): void {
 
   const creating = mutation.operation.baseVersion === null;
   if (
-    (creating && mutation.operation.action !== 'start_nursing') ||
-    (!creating && mutation.operation.action === 'start_nursing')
+    (creating &&
+      !['start_nursing', 'record_completed_nursing'].includes(mutation.operation.action)) ||
+    (!creating && ['start_nursing', 'record_completed_nursing'].includes(mutation.operation.action))
   ) {
-    throw new Error('Only a new Nursing aggregate can use the start action.');
+    throw new Error('Only a new Nursing aggregate can use a creation action.');
   }
-  if (creating && (mutation.session.status !== 'active' || mutation.session.deletedAt !== null)) {
-    throw new Error('A new Nursing aggregate must begin as an active, visible session.');
+  if (
+    creating &&
+    (mutation.session.status !==
+      (mutation.operation.action === 'record_completed_nursing' ? 'completed' : 'active') ||
+      mutation.session.deletedAt !== null)
+  ) {
+    throw new Error('A Nursing creation must produce the requested visible lifecycle state.');
   }
   if (
     mutation.operation.action === 'edit_nursing_session' &&
@@ -284,6 +298,7 @@ function assertStoredActionTransition(stored: NursingSession, mutation: NursingM
           mutation.session.status === 'completed'
         );
       case 'start_nursing':
+      case 'record_completed_nursing':
         return false;
     }
   })();
@@ -344,7 +359,10 @@ function assertStoredActionTransition(stored: NursingSession, mutation: NursingM
 
 function assertOperationPayload(mutation: NursingMutation): void {
   let expected: Readonly<Record<string, JsonValue>> | null = null;
-  if (mutation.operation.action === 'edit_nursing_session') {
+  if (
+    mutation.operation.action === 'edit_nursing_session' ||
+    mutation.operation.action === 'record_completed_nursing'
+  ) {
     expected = {
       startedAt: mutation.session.startedAt,
       endedAt: mutation.session.endedAt,

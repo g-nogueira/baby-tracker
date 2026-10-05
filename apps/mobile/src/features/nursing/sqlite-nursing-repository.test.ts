@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
+  recordCompletedNursing,
   deleteNursing,
   editCompletedNursing,
   editActiveNursing,
@@ -55,6 +56,47 @@ describe('SQLite Nursing repository', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
+  it('saves historical Nursing with its split/Last in one transaction while another session runs', async () => {
+    const active = startNursing('left', context('2026-08-15T12:00:00Z'));
+    await repository.save(active);
+    const historical = recordCompletedNursing(
+      new Date('2026-08-14T22:00:00.125Z'),
+      new Date('2026-08-14T22:20:00.125Z'),
+      420,
+      'right',
+      context('2026-08-15T12:01:00Z'),
+    );
+    await repository.save(historical);
+    expect(historical.session).toMatchObject({
+      status: 'completed',
+      version: 1,
+      leftDurationSeconds: 420,
+      rightDurationSeconds: 780,
+      lastBreastUsed: 'right',
+      totalPauseDurationSeconds: 0,
+    });
+    expect(await repository.active('child-arthur')).toEqual(active.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteNursingRepository(adapter.asExpoDatabase());
+    expect(await repository.findById(historical.session.id)).toEqual(historical.session);
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      nursing: active.session.startedAt,
+    });
+    const failed = recordCompletedNursing(
+      new Date('2026-08-14T21:00:00Z'),
+      new Date('2026-08-14T21:10:00Z'),
+      0,
+      'right',
+      context('2026-08-15T12:02:00Z'),
+    );
+    failed.operation.operationId = historical.operation.operationId;
+    await expect(repository.save(failed)).rejects.toThrow();
+    expect(await repository.findById(failed.session.id)).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
   it.each([false, true])(
     'persists live corrections across restart without changing pause state (%s)',
     async (pause) => {
@@ -623,7 +665,7 @@ describe('SQLite Nursing repository', () => {
     );
     invalidAction.operation.action = 'start_nursing';
     await expect(repository.save(invalidAction)).rejects.toThrow(
-      'Only a new Nursing aggregate can use the start action.',
+      'Only a new Nursing aggregate can use a creation action.',
     );
 
     const invalidTransition = pauseNursing(started.session, context('2026-08-15T10:00:25.000Z'));

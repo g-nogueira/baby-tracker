@@ -131,45 +131,64 @@ export function ActivityDrawer({
     [dismissDrawer, settleDrawer],
   );
 
+  const scrollOffset = useRef(0);
+  const gestureState = useRef({
+    drawerState,
+    expanded,
+    scrollContent,
+    applyDecision,
+    settleDrawer,
+  });
+  gestureState.current = { drawerState, expanded, scrollContent, applyDecision, settleDrawer };
   const handlePanResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_event, gesture) => {
-          const upwardResistance = expanded ? 0.12 : 0.22;
-          translation.setValue(gesture.dy < 0 ? gesture.dy * upwardResistance : gesture.dy);
+          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.15 : gesture.dy);
         },
         onPanResponderRelease: (_event, gesture) => {
-          applyDecision(
-            decideActivityDrawerGesture(drawerState, { dy: gesture.dy, vy: gesture.vy }),
+          const state = gestureState.current;
+          state.applyDecision(
+            Math.abs(gesture.dy) < 6 && Math.abs(gesture.dx) < 6
+              ? decideActivityDrawerHandlePress(state.drawerState)
+              : decideActivityDrawerGesture(state.drawerState, gesture),
           );
         },
-        onPanResponderTerminate: settleDrawer,
+        onPanResponderTerminate: () => gestureState.current.settleDrawer(),
       }),
-    [applyDecision, drawerState, expanded, settleDrawer, translation],
+    [translation],
   );
 
   const surfacePanResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          shouldActivityDrawerClaimSurfaceGesture(drawerState, scrollContent, {
-            dx: gesture.dx,
-            dy: gesture.dy,
-          }),
-        onPanResponderMove: (_event, gesture) => {
-          const upwardResistance = expanded ? 0.12 : 0.22;
-          translation.setValue(gesture.dy < 0 ? gesture.dy * upwardResistance : gesture.dy);
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          applyDecision(
-            decideActivityDrawerGesture(drawerState, { dy: gesture.dy, vy: gesture.vy }),
+        onMoveShouldSetPanResponderCapture: (_event, gesture) => {
+          const state = gestureState.current;
+          return (
+            shouldActivityDrawerClaimSurfaceGesture(
+              state.drawerState,
+              state.scrollContent,
+              gesture,
+            ) ||
+            (state.expanded &&
+              scrollOffset.current <= 0 &&
+              gesture.dy > 8 &&
+              Math.abs(gesture.dy) > Math.abs(gesture.dx))
           );
         },
-        onPanResponderTerminate: settleDrawer,
+        onPanResponderMove: (_event, gesture) => {
+          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.15 : gesture.dy);
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const state = gestureState.current;
+          state.applyDecision(decideActivityDrawerGesture(state.drawerState, gesture));
+        },
+        onPanResponderTerminate: () => gestureState.current.settleDrawer(),
       }),
-    [applyDecision, drawerState, expanded, scrollContent, settleDrawer, translation],
+    [translation],
   );
 
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
@@ -207,7 +226,7 @@ export function ActivityDrawer({
           ]}
           {...surfacePanResponder.panHandlers}
         >
-          <Pressable
+          <View
             accessibilityActions={
               expanded
                 ? [{ name: 'decrement', label: `Collapse ${activityLabel} controls` }]
@@ -220,18 +239,22 @@ export function ActivityDrawer({
             accessibilityLabel={handleLabel}
             accessibilityRole="adjustable"
             onAccessibilityAction={handleAccessibilityAction}
-            onPress={() => applyDecision(decideActivityDrawerHandlePress(drawerState))}
+            onAccessibilityTap={() => applyDecision(decideActivityDrawerHandlePress(drawerState))}
             style={styles.handleTarget}
             {...handlePanResponder.panHandlers}
           >
-            <View style={styles.handle} />
-          </Pressable>
+            <View pointerEvents="none" style={styles.handle} />
+          </View>
           {scrollContent ? (
             <ScrollView
               alwaysBounceVertical={false}
               contentContainerStyle={styles.scrollContent}
               keyboardShouldPersistTaps="handled"
               key={mode}
+              onScroll={(event) => {
+                scrollOffset.current = event.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
               style={{

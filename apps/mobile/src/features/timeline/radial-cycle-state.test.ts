@@ -6,7 +6,7 @@ import type {
 } from '@baby-tracker/domain';
 import { describe, expect, it } from 'vitest';
 
-import { buildRadialCycleViews } from './radial-cycle-state';
+import { buildRadialCycleViews, clusterRadialTargets } from './radial-cycle-state';
 
 const childId = 'child-1';
 const timezone = 'Europe/Lisbon';
@@ -270,3 +270,67 @@ function careEvent(id: string, kind: 'diaper' | 'medicine', occurredAt: string):
     ? { ...common, kind, data: { diaperType: 'wet' } }
     : { ...common, kind, data: { note: 'private' } };
 }
+
+it('fits a completed Night to its real duration and places a timezone-aware midnight marker', () => {
+  const session = night('fit-night', '2026-08-15T20:00:00.000Z', '2026-08-16T06:00:00.000Z');
+  const view = buildRadialCycleViews({
+    careEvents: [],
+    childId,
+    localDate: '2026-08-15',
+    now,
+    nursingSessions: [],
+    sleepSessions: [session],
+    timezone,
+  }).night;
+  expect(
+    view.projection?.anchors.find((anchor) => anchor.kind === 'wake_up')?.projection.angleDegrees,
+  ).toBe(495);
+  const midnight = view.ticks.find((tick) => tick.label === 'Midnight');
+  expect(midnight?.at).toBe('2026-08-15T23:00:00.000Z');
+  expect(midnight?.angleDegrees).toBe(306);
+});
+it('keeps active Night marker scale stable between second ticks and expands at bounded steps', () => {
+  const session = night('active-fit-night', '2026-08-15T20:00:00.000Z', null);
+  const input = {
+    careEvents: [careEvent('point', 'diaper', '2026-08-15T21:00:00.000Z')],
+    childId,
+    localDate: '2026-08-15',
+    nursingSessions: [],
+    sleepSessions: [session],
+    timezone,
+  };
+  const first = buildRadialCycleViews({ ...input, now: new Date('2026-08-16T06:00:00Z') }).night;
+  const second = buildRadialCycleViews({ ...input, now: new Date('2026-08-16T06:00:01Z') }).night;
+  expect(
+    first.records.find((record) => record.id === 'point')?.projection.token?.projection
+      .angleDegrees,
+  ).toBe(
+    second.records.find((record) => record.id === 'point')?.projection.token?.projection
+      .angleDegrees,
+  );
+  expect(first.projection?.anchors.some((anchor) => anchor.kind === 'wake_up')).toBe(false);
+});
+it('retains every crowded record ID in bounded groups across activity types', () => {
+  const events = Array.from({ length: 30 }, (_, index) =>
+    careEvent(
+      `event-${index}`,
+      index % 2 ? 'medicine' : 'diaper',
+      new Date(Date.parse('2026-08-15T10:00:00Z') + index * 60000).toISOString(),
+    ),
+  );
+  const view = buildRadialCycleViews({
+    careEvents: events,
+    childId,
+    localDate: '2026-08-15',
+    now,
+    nursingSessions: [],
+    sleepSessions: [],
+    timezone,
+  }).day;
+  const groups = clusterRadialTargets(view.records, 24);
+  expect(groups.length).toBe(1);
+  expect(groups[0].map((record) => record.id).sort()).toEqual(
+    events.map((event) => event.id).sort(),
+  );
+  expect(clusterRadialTargets(view.records, 1).length).toBeGreaterThan(1);
+});

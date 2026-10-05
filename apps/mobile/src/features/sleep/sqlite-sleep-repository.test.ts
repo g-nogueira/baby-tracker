@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
+  recordCompletedSleep,
+  recordNightWaking,
+  reopenNap,
   deleteNightSleep,
   deleteNightWaking,
   editNightSleep,
@@ -49,6 +52,120 @@ describe('SQLite sleep repository', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
+  it('records a historical Night and waking with one operation each, retaining phases across restart', async () => {
+    const night = recordCompletedSleep(
+      'night',
+      new Date('2026-08-12T20:00:00Z'),
+      new Date('2026-08-13T06:00:00Z'),
+      context('2026-08-14T12:00:00Z'),
+    );
+    await repository.save(night);
+    if (night.session.kind !== 'night') throw new Error('Expected Night');
+    const waking = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T00:00:00Z'),
+      new Date('2026-08-13T00:10:00Z'),
+      context('2026-08-14T12:01:00Z'),
+    );
+    await repository.save(waking);
+    expect(await repository.active('child-arthur')).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await repository.findById(night.session.id)).toEqual(waking.session);
+    expect(waking.session.phases.map((p) => p.kind)).toEqual(['asleep', 'awake', 'asleep']);
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      night: '2026-08-13T06:00:00.000Z',
+      'night-waking': '2026-08-13T00:10:00.000Z',
+    });
+    const stale = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T01:00:00Z'),
+      new Date('2026-08-13T01:10:00Z'),
+      context('2026-08-14T12:02:00Z'),
+    );
+    await expect(repository.save(stale)).rejects.toThrow();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('continues an accidentally stopped Nap using the same start and phase IDs across restart', async () => {
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T10:00:00Z'),
+      new Date('2026-08-12T10:30:00Z'),
+      context('2026-08-12T10:31:00Z'),
+    );
+    await repository.save(nap);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    const resumed = reopenNap(nap.session, context('2026-08-12T10:32:00Z'));
+    await repository.save(resumed);
+    expect(resumed.session.id).toBe(nap.session.id);
+    expect(resumed.session.startedAt).toBe(nap.session.startedAt);
+    expect(resumed.session.phases[0].id).toBe(nap.session.phases[0].id);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await repository.active('child-arthur')).toEqual(resumed.session);
+    await expect(repository.save(resumed)).rejects.toThrow();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('rejects continuing a Nap after a later completed sleep without changing the stopped record', async () => {
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T10:00:00Z'),
+      new Date('2026-08-12T10:30:00Z'),
+      context('2026-08-12T13:00:00Z'),
+    );
+    await repository.save(nap);
+    const later = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T12:00:00Z'),
+      new Date('2026-08-12T12:30:00Z'),
+      context('2026-08-12T13:00:01Z'),
+    );
+    await repository.save(later);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    await expect(
+      repository.save(reopenNap(nap.session, context('2026-08-12T13:01:00Z'))),
+    ).rejects.toThrow();
+    expect(await repository.findById(nap.session.id)).toEqual(nap.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('rolls back historical phase splitting and Nap recovery if the outbox insert fails', async () => {
+    const night = recordCompletedSleep(
+      'night',
+      new Date('2026-08-12T20:00:00Z'),
+      new Date('2026-08-13T06:00:00Z'),
+      context('2026-08-14T12:00:00Z'),
+    );
+    await repository.save(night);
+    if (night.session.kind !== 'night') throw new Error('Expected Night');
+    const waking = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T00:00:00Z'),
+      new Date('2026-08-13T00:10:00Z'),
+      context('2026-08-14T12:01:00Z'),
+    );
+    waking.operation.operationId = night.operation.operationId;
+    await expect(repository.save(waking)).rejects.toThrow();
+    expect(await repository.findById(night.session.id)).toEqual(night.session);
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-14T10:00:00Z'),
+      new Date('2026-08-14T10:30:00Z'),
+      context('2026-08-14T12:00:01Z'),
+    );
+    await repository.save(nap);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    const resumed = reopenNap(nap.session, context('2026-08-14T12:01:00Z'));
+    resumed.operation.operationId = nap.operation.operationId;
+    await expect(repository.save(resumed)).rejects.toThrow();
+    expect(await repository.findById(nap.session.id)).toEqual(nap.session);
+    expect(await repository.active('child-arthur')).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
   it.each([false, true])(
     'retains removed waking rows across restart and atomically restores IDs (resumed=%s)',
     async (resume) => {

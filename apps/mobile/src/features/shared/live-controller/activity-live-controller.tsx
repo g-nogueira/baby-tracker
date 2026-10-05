@@ -1,9 +1,9 @@
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LIVE_CONTROLLER_MIN_HEIGHT } from './activity-live-controller-layout';
 
 interface ActivityLiveControllerProps {
-  actionIcon?: string;
   accentColor: string;
   accessibilityLabel: string;
   activityLabel: string;
@@ -25,7 +25,6 @@ interface ActivityLiveControllerProps {
  * @returns The rendered activity live controller
  */
 export function ActivityLiveController({
-  actionIcon,
   accentColor,
   accessibilityLabel,
   activityLabel,
@@ -49,7 +48,7 @@ export function ActivityLiveController({
         style={({ pressed }) => [styles.body, pressed && styles.pressed]}
       >
         <View style={[styles.iconCircle, { backgroundColor: accentColor }]}>
-          <Text style={styles.icon}>{icon}</Text>
+          <ActivityIcon name={icon} />
         </View>
         <View style={styles.copy}>
           <Text style={styles.title}>{activityLabel}</Text>
@@ -69,11 +68,7 @@ export function ActivityLiveController({
           pressed && styles.pressed,
         ]}
       >
-        {actionIcon === undefined ? (
-          <View style={styles.stopSquare} />
-        ) : (
-          <Text style={styles.actionIcon}>{actionIcon}</Text>
-        )}
+        <View style={styles.stopSquare} />
       </Pressable>
     </View>
   );

@@ -1,5 +1,6 @@
 import {
   assertValidSleepSession,
+  reopenNap,
   type NapSession,
   type NightSleepSession,
   type SleepMutation,
@@ -141,12 +142,51 @@ export class SQLiteSleepRepository {
     return mapSessions(rows);
   }
 
+  public async latestActivityTimes(childId: string): Promise<Record<string, string>> {
+    const rows = await this.database.getAllAsync<{ kind: string; at: string }>(
+      `SELECT kind, MAX(COALESCE(ended_at, started_at)) AS at FROM sleep_sessions WHERE child_id=? AND deleted_at IS NULL GROUP BY kind
+      UNION ALL SELECT 'night-waking' AS kind, MAX(COALESCE(p.ended_at,p.started_at)) AS at FROM sleep_phases p JOIN sleep_sessions s ON s.id=p.sleep_session_id WHERE s.child_id=? AND s.deleted_at IS NULL AND p.deleted_at IS NULL AND p.retired_at IS NULL AND p.kind='awake' HAVING COUNT(*)>0`,
+      childId,
+      childId,
+    );
+    return Object.fromEntries(rows.map((row) => [row.kind, row.at]));
+  }
+
   public async save(mutation: SleepMutation): Promise<void> {
     assertValidSleepSession(mutation.session);
     assertMutationRootSemantics(mutation);
     assertChangedPhasesMatchAggregate(mutation);
 
     await this.database.withExclusiveTransactionAsync(async (transaction) => {
+      if (mutation.operation.action === 'reopen_nap') {
+        const rows = await transaction.getAllAsync<SleepRow>(
+          `${SELECT_SLEEP} WHERE session.id=? ORDER BY phase.started_at,phase.id`,
+          mutation.session.id,
+        );
+        if (rows.length === 0) throw new SleepWriteConflictError();
+        const stored = mapOneSession(rows);
+        if (stored.kind !== 'nap' || stored.version !== mutation.operation.baseVersion)
+          throw new SleepWriteConflictError();
+        const expected = reopenNap(stored, {
+          childId: stored.childId,
+          caregiverId: mutation.session.updatedBy,
+          timezone: mutation.operation.clientTimezone,
+          now: new Date(mutation.operation.clientOccurredAt),
+          newId: () => mutation.operation.operationId,
+        });
+        if (
+          expected.session.startedAt !== mutation.session.startedAt ||
+          expected.session.endedAt !== mutation.session.endedAt ||
+          expected.session.phases[0].id !== mutation.session.phases[0].id ||
+          expected.session.phases[0].startedAt !== mutation.session.phases[0].startedAt ||
+          mutation.session.status !== 'active' ||
+          mutation.session.deletedAt !== null ||
+          stored.childId !== mutation.session.childId ||
+          stored.timezone !== mutation.session.timezone ||
+          stored.createdBy !== mutation.session.createdBy
+        )
+          throw new Error('Continuing a Nap must preserve its original identity and start time.');
+      }
       await assertPhaseChangesMatchStorage(transaction, mutation);
       await assertNoOtherActiveSession(transaction, mutation.session);
       await assertNoOverlap(transaction, mutation.session);

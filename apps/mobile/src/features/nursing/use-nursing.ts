@@ -3,6 +3,7 @@ import {
   editActiveNursing,
   type CompletedNursingCorrection,
   createUuidV7,
+  recordCompletedNursing,
   deleteNursing,
   editCompletedNursing,
   type NursingMutation,
@@ -26,6 +27,7 @@ import { recoverFromMutationFailure } from '@/features/naps/mutation-recovery';
 import { SQLiteNursingRepository } from './sqlite-nursing-repository';
 
 interface NursingState {
+  latestActivityTimes: Record<string, string>;
   sessions: NursingSession[];
   cycleSessions: NursingSession[];
   activeSession: NursingSession | null;
@@ -45,6 +47,7 @@ export function useNursing(selectedDay: string) {
   selectedDayRef.current = selectedDay;
   const [isMutating, setIsMutating] = useState(false);
   const [state, setState] = useState<NursingState>({
+    latestActivityTimes: {},
     sessions: [],
     cycleSessions: [],
     activeSession: null,
@@ -69,16 +72,24 @@ export function useNursing(selectedDay: string) {
       shiftCalendarDay(selectedDay, 1),
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [sessions, cycleSessions, activeSession, latestCompletedLast, pendingOperationCount] =
-      await Promise.all([
-        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
-        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
-        repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
-        repository.latestCompletedLastBreast(LOCAL_DEVELOPMENT_IDENTITY.childId),
-        repository.pendingOperationCount(),
-      ]);
+    const [
+      latestActivityTimes,
+      sessions,
+      cycleSessions,
+      activeSession,
+      latestCompletedLast,
+      pendingOperationCount,
+    ] = await Promise.all([
+      repository.latestActivityTimes(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
+      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
+      repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.latestCompletedLastBreast(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.pendingOperationCount(),
+    ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
+      latestActivityTimes,
       sessions,
       cycleSessions,
       activeSession,
@@ -142,7 +153,12 @@ export function useNursing(selectedDay: string) {
     ...state,
     isMutating,
     refresh,
-    start: (side: NursingSide) => mutate((now) => startNursing(side, createContext(now))),
+    recordCompleted: (startedAt: Date, endedAt: Date, leftSeconds: number, last: NursingSide) =>
+      mutate((now) =>
+        recordCompletedNursing(startedAt, endedAt, leftSeconds, last, createContext(now)),
+      ),
+    start: (side: NursingSide, startedAt?: Date) =>
+      mutate((now) => startNursing(side, createContext(now), startedAt ?? now)),
     switchSide: (side: NursingSide) => {
       const session = requireActive('There is no active Nursing session to switch.');
       return session === null

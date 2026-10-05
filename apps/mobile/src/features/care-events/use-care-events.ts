@@ -22,6 +22,7 @@ import { careEventErrorMessage } from './care-event-application-state';
 import { SQLiteCareEventRepository } from './sqlite-care-event-repository';
 
 interface CareEventState {
+  latestActivityTimes: Record<string, string>;
   events: CareEvent[];
   cycleEvents: CareEvent[];
   pendingOperationCount: number;
@@ -39,6 +40,7 @@ export function useCareEvents(selectedDay: string) {
   selectedDayRef.current = selectedDay;
   const [isMutating, setIsMutating] = useState(false);
   const [state, setState] = useState<CareEventState>({
+    latestActivityTimes: {},
     events: [],
     cycleEvents: [],
     pendingOperationCount: 0,
@@ -61,13 +63,21 @@ export function useCareEvents(selectedDay: string) {
       shiftCalendarDay(selectedDay, 1),
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [events, cycleEvents, pendingOperationCount] = await Promise.all([
+    const [latestActivityTimes, events, cycleEvents, pendingOperationCount] = await Promise.all([
+      repository.latestActivityTimes(LOCAL_DEVELOPMENT_IDENTITY.childId),
       repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
       repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
       repository.pendingOperationCount(),
     ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
-    setState({ events, cycleEvents, pendingOperationCount, isLoading: false, error: null });
+    setState({
+      latestActivityTimes,
+      events,
+      cycleEvents,
+      pendingOperationCount,
+      isLoading: false,
+      error: null,
+    });
   }, [repository, selectedDay]);
 
   useEffect(() => {

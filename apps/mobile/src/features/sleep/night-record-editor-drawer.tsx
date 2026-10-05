@@ -1,9 +1,9 @@
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { elapsedMilliseconds } from '@baby-tracker/domain';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
 import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
@@ -66,7 +66,7 @@ export function NightRecordEditorDrawer({
   const finishLabel = awake ? 'Fell asleep again' : 'Wake up';
   const endLabel =
     awake && editor.phaseId !== editor.session.phases.at(-1)?.id ? 'Fell asleep again' : 'Wake up';
-  const timezone = LOCAL_DEVELOPMENT_IDENTITY.dayTimezone;
+  const timezone = editor.session.timezone;
 
   const pickerChange = (event: DateTimePickerEvent, selected?: Date) => {
     const currentPicker = picker;
@@ -91,11 +91,11 @@ export function NightRecordEditorDrawer({
       {({ expanded }) => (
         <>
           <View style={styles.hero}>
-            <Text style={styles.icon}>{awake ? '↯' : '☾'}</Text>
+            <ActivityIcon name={awake ? 'night-waking' : 'night'} color="#5B4C94" />
             <Text accessibilityRole="header" style={styles.title}>
               {title}
             </Text>
-            <Text style={styles.duration}>{duration}</Text>
+            {!expanded ? <Text style={styles.duration}>{duration}</Text> : null}
             <Text style={styles.subtitle}>
               {active ? (awake ? 'Awake tonight' : 'Night in progress') : 'Saved record'}
             </Text>
@@ -126,6 +126,16 @@ export function NightRecordEditorDrawer({
                 timezone={timezone}
                 value={editor.startedAt}
               />
+              {active && editor.endedAt === null ? (
+                <Text style={styles.subtitle}>
+                  Now ·{' '}
+                  {new Intl.DateTimeFormat(undefined, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZone: timezone,
+                  }).format(now)}
+                </Text>
+              ) : null}
               {editor.endedAt === null ? null : (
                 <ActivityTimestampField
                   editable={!isMutating}

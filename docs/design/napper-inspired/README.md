@@ -1,5 +1,8 @@
 # Napper-inspired UX design assets
 
+The 2026-10-05 feedback update takes precedence over historical HTML/screenshots: completed Nights fill the actual bedtime-to-wake dial; active Nights use a stepped provisional scale, with a midnight marker. Home uses line icons and last-action recency. Only Nap, Night Waking and Nursing get bottom timers. Crowded markers open exact-record lists, time values are tappable, and past activities/accidental Nap recovery are supported. See the implementation directive and `docs/mvp-status.md` for current behavior and native checks.
+
+
 These files are implementation references for issues #2, #3, and #11–#17. The HTML is the canonical interactive behavior reference; screenshots are frozen visual examples. The implementation directive remains authoritative for domain, persistence, state-transition, testing, and non-goal decisions.
 
 ## Start here
@@ -23,7 +26,7 @@ These files are implementation references for issues #2, #3, and #11–#17. The 
 - Event icons mark start times, never end times.
 - Timed activities extend clockwise from their start icon.
 - Night sleep and internal activities use separate radial lanes.
-- Concurrent timed activities keep separate persistent controllers.
+- Nap or Night Waking and concurrent Nursing keep separate persistent controllers; overall Night Sleep is a phase without a separate timer.
 - Drawers are draggable and dismissible; dismissal does not mutate timer state.
 - First-ever Nursing labels both sides neutrally.
 - Napper branding and artwork are not implementation assets.
