@@ -1,3 +1,9 @@
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Platform } from 'react-native';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
+import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
+import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import type { NursingSession, NursingSide } from '@baby-tracker/domain';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -14,9 +20,10 @@ interface NursingDrawerProps {
   isMutating: boolean;
   mutationError: string | null;
   onDismiss: () => void;
+  onEdit: () => void;
   onPause: () => void;
   onResume: (side: NursingSide) => void;
-  onStart: (side: NursingSide) => void;
+  onStart: (side: NursingSide, startedAt?: Date) => void;
   onStop: () => void;
   onSwitch: (side: NursingSide) => void;
 }
@@ -38,12 +45,32 @@ export function NursingDrawer({
   isMutating,
   mutationError,
   onDismiss,
+  onEdit,
   onPause,
   onResume,
   onStart,
   onStop,
   onSwitch,
 }: NursingDrawerProps) {
+  const [startedAt, setStartedAt] = useState(() => new Date());
+  const [timeAdjusted, setTimeAdjusted] = useState(false);
+  const [picker, setPicker] = useState<'date' | 'time' | null>(null);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+  const pickTime = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android') setPicker(null);
+    if (event.type === 'dismissed' || !selected || !picker) return;
+    try {
+      setStartedAt(
+        picker === 'date'
+          ? mergeDatePart(startedAt, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone)
+          : mergeTimePart(startedAt, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone),
+      );
+      setTimeAdjusted(true);
+      setPickerError(null);
+    } catch (error) {
+      setPickerError(error instanceof Error ? error.message : 'Choose another time.');
+    }
+  };
   const now = useLiveNow(activeSession !== null);
   const model = deriveNursingHomeModel(activeSession, latestCompletedLast, now);
   const controller = model.controller;
@@ -60,7 +87,7 @@ export function NursingDrawer({
         <>
           <View style={styles.hero}>
             <View style={styles.iconCircle}>
-              <Text style={styles.icon}>N</Text>
+              <ActivityIcon name="nursing" color="#B35D7D" />
             </View>
             <Text accessibilityRole="header" style={styles.title}>
               Nursing
@@ -73,9 +100,25 @@ export function NursingDrawer({
               </Text>
             ) : (
               <>
-                <Text style={styles.totalValue}>
-                  {formatSeconds(controller.totalDurationSeconds)}
-                </Text>
+                {!expanded ? (
+                  <Text style={styles.totalValue}>
+                    {formatSeconds(controller.totalDurationSeconds)}
+                  </Text>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit Nursing start time"
+                    onPress={onEdit}
+                  >
+                    <Text style={styles.statusText}>
+                      {formatClock(
+                        activeSession?.startedAt ?? now.toISOString(),
+                        activeSession?.timezone,
+                      )}{' '}
+                      – {formatClock(now.toISOString(), activeSession?.timezone)}
+                    </Text>
+                  </Pressable>
+                )}
                 <Text style={styles.statusText}>
                   {controller.status === 'paused'
                     ? 'Paused'
@@ -85,18 +128,50 @@ export function NursingDrawer({
             )}
           </View>
 
+          {activeSession === null && !expanded ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Set Nursing start time"
+              onPress={() => setPicker('time')}
+            >
+              <Text style={[styles.totalValue, { textAlign: 'center' }]}>
+                {formatClock(startedAt.toISOString())}
+              </Text>
+            </Pressable>
+          ) : null}
+          {!expanded && picker !== null ? (
+            <StableDateTimePicker
+              key={picker}
+              mode={picker}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              value={startedAt}
+              maximumDate={new Date()}
+              timeZoneName={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
+              onChange={pickTime}
+            />
+          ) : null}
+          {!expanded && picker !== null && Platform.OS === 'ios' ? (
+            <Pressable accessibilityRole="button" onPress={() => setPicker(null)}>
+              <Text>Done</Text>
+            </Pressable>
+          ) : null}
+          {pickerError ? (
+            <Text accessibilityRole="alert" style={styles.errorText}>
+              {pickerError}
+            </Text>
+          ) : null}
           {controller === null || controls.mode === 'create' ? (
             <View style={styles.sideRow}>
               <SideButton
                 guidance={model.guidance.left}
                 isMutating={isMutating}
-                onPress={() => onStart('left')}
+                onPress={() => onStart('left', timeAdjusted ? startedAt : undefined)}
                 side="left"
               />
               <SideButton
                 guidance={model.guidance.right}
                 isMutating={isMutating}
-                onPress={() => onStart('right')}
+                onPress={() => onStart('right', timeAdjusted ? startedAt : undefined)}
                 side="right"
               />
             </View>
@@ -156,12 +231,27 @@ export function NursingDrawer({
             <View style={styles.details}>
               <Text style={styles.detailsTitle}>Session details</Text>
               {activeSession === null || controller === null ? (
-                <Text style={styles.detailsText}>
-                  The selected side starts immediately. You can switch, pause, or stop afterward.
-                </Text>
+                <ActivityTimestampField
+                  label="Start"
+                  value={startedAt}
+                  timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
+                  maximumDate={new Date()}
+                  pickerMode={picker}
+                  onPick={setPicker}
+                  onDone={() => setPicker(null)}
+                  onPickerChange={pickTime}
+                />
               ) : (
                 <>
-                  <DetailRow label="Started" value={formatClock(activeSession.startedAt)} />
+                  <DetailRow
+                    label="Started"
+                    value={formatClock(activeSession.startedAt, activeSession.timezone)}
+                  />
+                  <ActionButton
+                    disabled={isMutating}
+                    label="Edit start time and split"
+                    onPress={onEdit}
+                  />
                   <DetailRow
                     label="Pause time"
                     value={formatSeconds(controller.pauseDurationSeconds)}
@@ -250,6 +340,7 @@ function ActionButton({
 }) {
   return (
     <Pressable
+      accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={{ busy: disabled, disabled }}
       disabled={disabled}
@@ -262,15 +353,19 @@ function ActionButton({
         pressed && styles.pressed,
       ]}
     >
-      <Text
-        style={[
-          styles.actionLabel,
-          primary && styles.primaryActionLabel,
-          stop && styles.stopActionLabel,
-        ]}
-      >
-        {label}
-      </Text>
+      {stop ? (
+        <ActivityIcon name="stop" color="#A64444" />
+      ) : (
+        <Text
+          style={[
+            styles.actionLabel,
+            primary && styles.primaryActionLabel,
+            stop && styles.stopActionLabel,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -308,11 +403,14 @@ function formatSeconds(seconds: number): string {
   return formatLiveDuration(seconds * 1_000);
 }
 
-function formatClock(instant: string): string {
+function formatClock(
+  instant: string,
+  timezone: string = LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    timeZone: timezone,
   }).format(new Date(instant));
 }
 

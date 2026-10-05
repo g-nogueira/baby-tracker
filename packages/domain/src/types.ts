@@ -43,6 +43,9 @@ export interface NightSleepSession extends SleepSessionBase {
 export type SleepSession = NapSession | NightSleepSession;
 
 export type SyncAction =
+  | 'record_completed_sleep'
+  | 'reopen_nap'
+  | 'record_night_waking'
   | 'start_nap'
   | 'stop_nap'
   | 'start_night_sleep'
@@ -51,7 +54,9 @@ export type SyncAction =
   | 'end_night_sleep'
   | 'edit_sleep_session'
   | 'delete_sleep_session'
-  | 'restore_sleep_session';
+  | 'restore_sleep_session'
+  | 'delete_night_waking'
+  | 'restore_night_waking';
 
 export type JsonValue =
   | string
@@ -75,6 +80,8 @@ export interface SyncOperation {
 export interface SleepMutation<TSession extends SleepSession = SleepSession> {
   session: TSession;
   changedPhases: readonly SleepPhase[];
+  /** Removed phase rows retained as tombstones, outside the canonical timeline. */
+  retiredPhases?: readonly SleepPhase[];
   operation: SyncOperation;
 }
 

@@ -1,10 +1,20 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   type AccessibilityActionEvent,
   AccessibilityInfo,
   Animated,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +32,7 @@ import {
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
   initialActivityDrawerState,
+  shouldActivityDrawerClaimSurfaceGesture,
 } from './activity-drawer-state';
 
 interface ActivityDrawerRenderState {
@@ -51,6 +62,10 @@ export function ActivityDrawer({
   onDismiss,
   scrollContent = false,
 }: ActivityDrawerProps) {
+  const onDismissRef = useRef(onDismiss);
+  useLayoutEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
   const insets = useSafeAreaInsets();
   const viewport = useWindowDimensions();
   const [drawerState, setDrawerState] = useState(() => initialActivityDrawerState(mode));
@@ -93,15 +108,15 @@ export function ActivityDrawer({
 
   const dismissDrawer = useCallback(() => {
     if (reduceMotion) {
-      onDismiss();
+      onDismissRef.current();
       return;
     }
     Animated.timing(translation, {
       toValue: 700,
       duration: 180,
       useNativeDriver: true,
-    }).start(onDismiss);
-  }, [onDismiss, reduceMotion, translation]);
+    }).start(() => onDismissRef.current());
+  }, [reduceMotion, translation]);
 
   const applyDecision = useCallback(
     (decision: ActivityDrawerDecision) => {
@@ -116,23 +131,64 @@ export function ActivityDrawer({
     [dismissDrawer, settleDrawer],
   );
 
-  const panResponder = useMemo(
+  const scrollOffset = useRef(0);
+  const gestureState = useRef({
+    drawerState,
+    expanded,
+    scrollContent,
+    applyDecision,
+    settleDrawer,
+  });
+  gestureState.current = { drawerState, expanded, scrollContent, applyDecision, settleDrawer };
+  const handlePanResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dy) > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_event, gesture) => {
-          const upwardResistance = expanded ? 0.12 : 0.22;
-          translation.setValue(gesture.dy < 0 ? gesture.dy * upwardResistance : gesture.dy);
+          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.15 : gesture.dy);
         },
         onPanResponderRelease: (_event, gesture) => {
-          applyDecision(
-            decideActivityDrawerGesture(drawerState, { dy: gesture.dy, vy: gesture.vy }),
+          const state = gestureState.current;
+          state.applyDecision(
+            Math.abs(gesture.dy) < 6 && Math.abs(gesture.dx) < 6
+              ? decideActivityDrawerHandlePress(state.drawerState)
+              : decideActivityDrawerGesture(state.drawerState, gesture),
           );
         },
-        onPanResponderTerminate: settleDrawer,
+        onPanResponderTerminate: () => gestureState.current.settleDrawer(),
       }),
-    [applyDecision, drawerState, expanded, settleDrawer, translation],
+    [translation],
+  );
+
+  const surfacePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gesture) => {
+          const state = gestureState.current;
+          return (
+            shouldActivityDrawerClaimSurfaceGesture(
+              state.drawerState,
+              state.scrollContent,
+              gesture,
+            ) ||
+            (state.expanded &&
+              scrollOffset.current <= 0 &&
+              gesture.dy > 8 &&
+              Math.abs(gesture.dy) > Math.abs(gesture.dx))
+          );
+        },
+        onPanResponderMove: (_event, gesture) => {
+          translation.setValue(gesture.dy < 0 ? gesture.dy * 0.15 : gesture.dy);
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const state = gestureState.current;
+          state.applyDecision(decideActivityDrawerGesture(state.drawerState, gesture));
+        },
+        onPanResponderTerminate: () => gestureState.current.settleDrawer(),
+      }),
+    [translation],
   );
 
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
@@ -149,7 +205,10 @@ export function ActivityDrawer({
 
   return (
     <Modal animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onDismiss} transparent>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.overlay}
+      >
         <Pressable
           accessibilityLabel={`Close ${activityLabel.toLocaleLowerCase()} controls`}
           accessibilityRole="button"
@@ -165,8 +224,9 @@ export function ActivityDrawer({
               transform: [{ translateY: translation }],
             },
           ]}
+          {...surfacePanResponder.panHandlers}
         >
-          <Pressable
+          <View
             accessibilityActions={
               expanded
                 ? [{ name: 'decrement', label: `Collapse ${activityLabel} controls` }]
@@ -179,18 +239,22 @@ export function ActivityDrawer({
             accessibilityLabel={handleLabel}
             accessibilityRole="adjustable"
             onAccessibilityAction={handleAccessibilityAction}
-            onPress={() => applyDecision(decideActivityDrawerHandlePress(drawerState))}
+            onAccessibilityTap={() => applyDecision(decideActivityDrawerHandlePress(drawerState))}
             style={styles.handleTarget}
-            {...panResponder.panHandlers}
+            {...handlePanResponder.panHandlers}
           >
-            <View style={styles.handle} />
-          </Pressable>
+            <View pointerEvents="none" style={styles.handle} />
+          </View>
           {scrollContent ? (
             <ScrollView
               alwaysBounceVertical={false}
               contentContainerStyle={styles.scrollContent}
               keyboardShouldPersistTaps="handled"
               key={mode}
+              onScroll={(event) => {
+                scrollOffset.current = event.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
               style={{
@@ -207,7 +271,7 @@ export function ActivityDrawer({
             content
           )}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -215,6 +279,8 @@ export function ActivityDrawer({
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(35, 31, 28, 0.38)' },
   sheet: {
+    flexShrink: 1,
+    maxHeight: '100%',
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 2,

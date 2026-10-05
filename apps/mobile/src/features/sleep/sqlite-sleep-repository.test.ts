@@ -1,22 +1,34 @@
 /// <reference types="node" />
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
+  recordCompletedSleep,
+  recordNightWaking,
+  reopenNap,
+  deleteNightSleep,
+  deleteNightWaking,
+  editNightSleep,
   endNightSleep,
+  type MutationContext,
+  restoreNightSleep,
+  restoreNightWaking,
   resumeNightSleep,
   startNap,
   startNightSleep,
   startNightWaking,
   stopNap,
-  type MutationContext,
 } from '@baby-tracker/domain';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { migrateDatabase } from '../../storage/migrations';
+import {
+  createNightRecordEditorState,
+  nightRecordBoundariesForSave,
+} from './night-record-editor-state';
 import { ActiveSleepSessionError, SQLiteSleepRepository } from './sqlite-sleep-repository';
 
 describe('SQLite sleep repository', () => {
@@ -40,6 +52,220 @@ describe('SQLite sleep repository', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
+  it('records a historical Night and waking with one operation each, retaining phases across restart', async () => {
+    const night = recordCompletedSleep(
+      'night',
+      new Date('2026-08-12T20:00:00Z'),
+      new Date('2026-08-13T06:00:00Z'),
+      context('2026-08-14T12:00:00Z'),
+    );
+    await repository.save(night);
+    if (night.session.kind !== 'night') throw new Error('Expected Night');
+    const waking = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T00:00:00Z'),
+      new Date('2026-08-13T00:10:00Z'),
+      context('2026-08-14T12:01:00Z'),
+    );
+    await repository.save(waking);
+    expect(await repository.active('child-arthur')).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await repository.findById(night.session.id)).toEqual(waking.session);
+    expect(waking.session.phases.map((p) => p.kind)).toEqual(['asleep', 'awake', 'asleep']);
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      night: '2026-08-13T06:00:00.000Z',
+      'night-waking': '2026-08-13T00:10:00.000Z',
+    });
+    const stale = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T01:00:00Z'),
+      new Date('2026-08-13T01:10:00Z'),
+      context('2026-08-14T12:02:00Z'),
+    );
+    await expect(repository.save(stale)).rejects.toThrow();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('continues an accidentally stopped Nap using the same start and phase IDs across restart', async () => {
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T10:00:00Z'),
+      new Date('2026-08-12T10:30:00Z'),
+      context('2026-08-12T10:31:00Z'),
+    );
+    await repository.save(nap);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    const resumed = reopenNap(nap.session, context('2026-08-12T10:32:00Z'));
+    await repository.save(resumed);
+    expect(resumed.session.id).toBe(nap.session.id);
+    expect(resumed.session.startedAt).toBe(nap.session.startedAt);
+    expect(resumed.session.phases[0].id).toBe(nap.session.phases[0].id);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await repository.active('child-arthur')).toEqual(resumed.session);
+    await expect(repository.save(resumed)).rejects.toThrow();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('rejects continuing a Nap after a later completed sleep without changing the stopped record', async () => {
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T10:00:00Z'),
+      new Date('2026-08-12T10:30:00Z'),
+      context('2026-08-12T13:00:00Z'),
+    );
+    await repository.save(nap);
+    const later = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-12T12:00:00Z'),
+      new Date('2026-08-12T12:30:00Z'),
+      context('2026-08-12T13:00:01Z'),
+    );
+    await repository.save(later);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    await expect(
+      repository.save(reopenNap(nap.session, context('2026-08-12T13:01:00Z'))),
+    ).rejects.toThrow();
+    expect(await repository.findById(nap.session.id)).toEqual(nap.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it('rolls back historical phase splitting and Nap recovery if the outbox insert fails', async () => {
+    const night = recordCompletedSleep(
+      'night',
+      new Date('2026-08-12T20:00:00Z'),
+      new Date('2026-08-13T06:00:00Z'),
+      context('2026-08-14T12:00:00Z'),
+    );
+    await repository.save(night);
+    if (night.session.kind !== 'night') throw new Error('Expected Night');
+    const waking = recordNightWaking(
+      night.session,
+      new Date('2026-08-13T00:00:00Z'),
+      new Date('2026-08-13T00:10:00Z'),
+      context('2026-08-14T12:01:00Z'),
+    );
+    waking.operation.operationId = night.operation.operationId;
+    await expect(repository.save(waking)).rejects.toThrow();
+    expect(await repository.findById(night.session.id)).toEqual(night.session);
+    const nap = recordCompletedSleep(
+      'nap',
+      new Date('2026-08-14T10:00:00Z'),
+      new Date('2026-08-14T10:30:00Z'),
+      context('2026-08-14T12:00:01Z'),
+    );
+    await repository.save(nap);
+    if (nap.session.kind !== 'nap') throw new Error('Expected Nap');
+    const resumed = reopenNap(nap.session, context('2026-08-14T12:01:00Z'));
+    resumed.operation.operationId = nap.operation.operationId;
+    await expect(repository.save(resumed)).rejects.toThrow();
+    expect(await repository.findById(nap.session.id)).toEqual(nap.session);
+    expect(await repository.active('child-arthur')).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it.each([false, true])(
+    'retains removed waking rows across restart and atomically restores IDs (resumed=%s)',
+    async (resume) => {
+      const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+      await repository.save(bedtime);
+      const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+      await repository.save(waking);
+      const original = resume
+        ? resumeNightSleep(waking.session, context('2026-08-12T21:10:00Z'))
+        : waking;
+      if (resume) await repository.save(original);
+      const deleted = deleteNightWaking(
+        original.session,
+        waking.session.phases[1]?.id ?? 'missing',
+        context('2026-08-12T21:15:00Z'),
+      );
+      await repository.save(deleted);
+      expect(
+        database
+          .prepare('SELECT COUNT(*) AS count FROM sleep_phases WHERE retired_at IS NOT NULL')
+          .get(),
+      ).toEqual({ count: resume ? 2 : 1 });
+      database.close();
+      database = new DatabaseSync(databasePath);
+      adapter = new NodeSQLiteAdapter(database);
+      await migrateDatabase(adapter.asExpoDatabase());
+      repository = new SQLiteSleepRepository(adapter.asExpoDatabase());
+      expect(await repository.activeNight('child-arthur')).toEqual(deleted.session);
+      const restored = restoreNightWaking(
+        deleted.session,
+        original.session,
+        context('2026-08-12T21:16:00Z'),
+      );
+      await repository.save(restored);
+      expect(await repository.findById(original.session.id)).toEqual(restored.session);
+      expect(
+        database
+          .prepare('SELECT COUNT(*) AS count FROM sleep_phases WHERE retired_at IS NOT NULL')
+          .get(),
+      ).toEqual({ count: 0 });
+      const count = await repository.pendingOperationCount();
+      await expect(repository.save(deleted)).rejects.toThrow();
+      expect(await repository.pendingOperationCount()).toBe(count);
+    },
+  );
+
+  it('keeps retired phases out of whole-Night delete/restore even at the same deletion instant', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+    await repository.save(waking);
+    const ended = endNightSleep(waking.session, context('2026-08-13T06:00:00Z'));
+    await repository.save(ended);
+    const ctx = context('2026-08-13T07:00:00Z');
+    const removed = deleteNightWaking(
+      ended.session,
+      waking.session.phases[1]?.id ?? 'missing',
+      ctx,
+    );
+    await repository.save(removed);
+    const whole = deleteNightSleep(removed.session, ctx);
+    await repository.save(whole);
+    expect(await repository.findById(whole.session.id)).toEqual(whole.session);
+    const restored = restoreNightSleep(whole.session, context('2026-08-13T07:01:00Z'));
+    await repository.save(restored);
+    expect(await repository.findById(restored.session.id)).toEqual(restored.session);
+    expect(restored.session.phases).toHaveLength(1);
+  });
+
+  it('rolls back waking deletion when its outbox insert fails and rejects Undo after a new transition', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:00:00Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-12T21:00:00Z'));
+    await repository.save(waking);
+    const removed = deleteNightWaking(
+      waking.session,
+      waking.session.phases[1]?.id ?? 'missing',
+      context('2026-08-12T21:05:00Z'),
+    );
+    await expect(
+      repository.save({
+        ...removed,
+        operation: { ...removed.operation, operationId: waking.operation.operationId },
+      }),
+    ).rejects.toThrow();
+    expect(await repository.findById(waking.session.id)).toEqual(waking.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+    await repository.save(removed);
+    const next = startNightWaking(removed.session, context('2026-08-12T22:00:00Z'));
+    await repository.save(next);
+    const undo = restoreNightWaking(
+      removed.session,
+      waking.session,
+      context('2026-08-12T22:01:00Z'),
+    );
+    await expect(repository.save(undo)).rejects.toThrow();
+    expect(await repository.findById(next.session.id)).toEqual(next.session);
+    expect(await repository.pendingOperationCount()).toBe(4);
+  });
+
   it('persists every Night transition and ordered phases with one outbox row each', async () => {
     const bedtime = startNightSleep(context('2026-08-12T20:30:00.000Z'));
     await repository.save(bedtime);
@@ -61,6 +287,67 @@ describe('SQLite sleep repository', () => {
       'resume_night_sleep',
       'end_night_sleep',
     ]);
+  });
+
+  it('persists completed Night delete and restore with all phase tombstones atomically', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:30:00.000Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-13T00:15:00.000Z'));
+    await repository.save(waking);
+    const completed = endNightSleep(waking.session, context('2026-08-13T06:00:00.000Z'));
+    await repository.save(completed);
+
+    const deleted = deleteNightSleep(completed.session, context('2026-08-13T07:00:00.000Z'));
+    await repository.save(deleted);
+    expect(await repository.findById(completed.session.id)).toEqual(deleted.session);
+    expect(
+      await repository.listVisible(
+        'child-arthur',
+        '2026-08-12T00:00:00.000Z',
+        '2026-08-14T00:00:00.000Z',
+      ),
+    ).toEqual([]);
+
+    const restored = restoreNightSleep(deleted.session, context('2026-08-13T07:05:00.000Z'));
+    await repository.save(restored);
+    expect(await repository.findById(completed.session.id)).toEqual(restored.session);
+    expect(await repository.pendingOperationCount()).toBe(5);
+  });
+
+  it('persists active Night and awake-time corrections across restart and rejects stale transitions', async () => {
+    const bedtime = startNightSleep(context('2026-08-12T20:30:00.123Z'));
+    await repository.save(bedtime);
+    const waking = startNightWaking(bedtime.session, context('2026-08-13T00:15:00.456Z'));
+    await repository.save(waking);
+    const draft = {
+      ...createNightRecordEditorState(waking.session, waking.session.phases[1]?.id ?? 'missing'),
+      startedAt: new Date('2026-08-13T00:10:00Z'),
+    };
+    const edited = editNightSleep(
+      waking.session,
+      nightRecordBoundariesForSave(draft),
+      context('2026-08-13T00:20:00Z'),
+    );
+    await repository.save(edited);
+    restartDatabase();
+    const afterRestart = new SQLiteSleepRepository(adapter.asExpoDatabase());
+    expect(await afterRestart.active('child-arthur')).toEqual(edited.session);
+    expect(await afterRestart.pendingOperationCount()).toBe(3);
+    const stale = resumeNightSleep(waking.session, context('2026-08-13T00:25:00Z'));
+    await expect(afterRestart.save(stale)).rejects.toThrow('changed');
+    expect(await afterRestart.active('child-arthur')).toEqual(edited.session);
+    expect(await afterRestart.pendingOperationCount()).toBe(3);
+    const outerDraft = {
+      ...createNightRecordEditorState(edited.session),
+      startedAt: new Date('2026-08-12T20:20:00Z'),
+    };
+    const outerEdit = editNightSleep(
+      edited.session,
+      nightRecordBoundariesForSave(outerDraft),
+      context('2026-08-13T00:30:00Z'),
+    );
+    await afterRestart.save(outerEdit);
+    expect(await afterRestart.active('child-arthur')).toEqual(outerEdit.session);
   });
 
   it('recovers the canonical active Night session and final open phase after restart', async () => {

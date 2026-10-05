@@ -8,6 +8,7 @@ import {
   decideActivityDrawerGesture,
   decideActivityDrawerHandlePress,
   initialActivityDrawerState,
+  shouldActivityDrawerClaimSurfaceGesture,
 } from './activity-drawer-state';
 
 describe('activity drawer state', () => {
@@ -26,6 +27,27 @@ describe('activity drawer state', () => {
     expect(initialActivityDrawerState('create')).toBe('collapsed');
     expect(initialActivityDrawerState('active')).toBe('collapsed');
     expect(initialActivityDrawerState('edit')).toBe('expanded');
+  });
+
+  it('claims vertical surface drags without stealing horizontal gestures', () => {
+    expect(shouldActivityDrawerClaimSurfaceGesture('collapsed', true, { dx: 0, dy: -7 })).toBe(
+      true,
+    );
+    expect(shouldActivityDrawerClaimSurfaceGesture('collapsed', true, { dx: 0, dy: 5 })).toBe(
+      false,
+    );
+    expect(shouldActivityDrawerClaimSurfaceGesture('collapsed', true, { dx: 8, dy: 7 })).toBe(
+      false,
+    );
+  });
+
+  it('leaves expanded scrollable content to its ScrollView', () => {
+    expect(shouldActivityDrawerClaimSurfaceGesture('expanded', true, { dx: 0, dy: -40 })).toBe(
+      false,
+    );
+    expect(shouldActivityDrawerClaimSurfaceGesture('expanded', false, { dx: 0, dy: 40 })).toBe(
+      true,
+    );
   });
 
   it('expands a collapsed drawer on an upward drag', () => {

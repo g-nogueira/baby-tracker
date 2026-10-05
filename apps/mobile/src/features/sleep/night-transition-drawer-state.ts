@@ -63,11 +63,26 @@ export function nightTransitionError(
   if (!Number.isFinite(transitionMs)) return 'Enter a valid date and time.';
   if (transitionMs > now.getTime()) return 'Night transition time cannot be in the future.';
 
+  if (draft.kind !== 'start-night-sleep' && draft.session === null) {
+    return 'An active Night session is required for this transition.';
+  }
+  if (draft.kind === 'start-night-sleep' && draft.session !== null) {
+    return 'Night sleep is already active.';
+  }
   if (draft.session !== null) {
     const openPhase = draft.session.phases.at(-1);
-    if (openPhase === undefined || openPhase.endedAt !== null) {
+    if (
+      draft.session.status !== 'active' ||
+      draft.session.deletedAt !== null ||
+      openPhase === undefined ||
+      openPhase.endedAt !== null
+    ) {
       return 'The active Night phase could not be found.';
     }
+    if (draft.kind === 'start-night-waking' && openPhase.kind !== 'asleep')
+      return 'Night waking is already active.';
+    if (draft.kind === 'resume-night-sleep' && openPhase.kind !== 'awake')
+      return 'Night sleep is already running.';
     if (transitionMs <= new Date(openPhase.startedAt).getTime()) {
       return 'Transition time must be after the current phase started.';
     }

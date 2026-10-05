@@ -82,7 +82,7 @@ Gustavo or Paloma can record a normal care activity one-handed in a few seconds,
 
 ### 4.1 Home / Today
 
-The home screen is a 24-hour radial timeline with an original visual design. It is the operational screen, not an analytics dashboard.
+The home screen has separate Day and Night radial views with an original visual design. Day uses 24 real hours; a completed Night fits its actual Bedtime-to-Wake-up span. Active Nights expand their provisional scale in 3-hour steps from 12 to 24 hours, with no predicted Wake-up anchor. All views include timezone-aware midnight markers. It is the operational screen, not an analytics dashboard.
 
 It contains:
 
@@ -93,7 +93,7 @@ It contains:
   - “Awake tonight · 12 min”
   - “Awake · last sleep ended 1 h 14 min ago”
 - Large quick actions for Sleep, Nursing, Diaper, and Medicine.
-- A persistent compact controller for every active timer.
+- Persistent compact controllers for Nap, Night Waking and Nursing. The containing Night Sleep is a phase without a separate bottom timer.
 - A secondary add menu containing all event types, including Bath when enabled.
 - A switch to chronological history for the selected date.
 - A small sync-status indicator only when offline, syncing, or attention is required.

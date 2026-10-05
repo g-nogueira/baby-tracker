@@ -1,5 +1,8 @@
 import {
   assertValidNursingSession,
+  editActiveNursing,
+  correctedNursingLastBreast,
+  type JsonValue,
   type NursingMutation,
   type NursingSession,
   type NursingSide,
@@ -22,16 +25,6 @@ interface NursingRow {
   timezone: string;
   created_by: string;
   updated_by: string;
-  version: number;
-  deleted_at: string | null;
-}
-
-interface StoredNursingRoot {
-  id: string;
-  child_id: string;
-  timezone: string;
-  created_by: string;
-  status: 'active' | 'paused' | 'completed';
   version: number;
   deleted_at: string | null;
 }
@@ -101,6 +94,14 @@ export class SQLiteNursingRepository {
     return row?.last_breast_used ?? null;
   }
 
+  public async latestActivityTimes(childId: string): Promise<Record<string, string>> {
+    const row = await this.database.getFirstAsync<{ at: string | null }>(
+      `SELECT MAX(COALESCE(ended_at,started_at)) AS at FROM nursing_sessions WHERE child_id=? AND deleted_at IS NULL`,
+      childId,
+    );
+    return row?.at ? { nursing: row.at } : {};
+  }
+
   public async save(mutation: NursingMutation): Promise<void> {
     assertValidNursingSession(mutation.session);
     assertOperationSemantics(mutation);
@@ -167,13 +168,25 @@ function assertOperationSemantics(mutation: NursingMutation): void {
 
   const creating = mutation.operation.baseVersion === null;
   if (
-    (creating && mutation.operation.action !== 'start_nursing') ||
-    (!creating && mutation.operation.action === 'start_nursing')
+    (creating &&
+      !['start_nursing', 'record_completed_nursing'].includes(mutation.operation.action)) ||
+    (!creating && ['start_nursing', 'record_completed_nursing'].includes(mutation.operation.action))
   ) {
-    throw new Error('Only a new Nursing aggregate can use the start action.');
+    throw new Error('Only a new Nursing aggregate can use a creation action.');
   }
-  if (creating && (mutation.session.status !== 'active' || mutation.session.deletedAt !== null)) {
-    throw new Error('A new Nursing aggregate must begin as an active, visible session.');
+  if (
+    creating &&
+    (mutation.session.status !==
+      (mutation.operation.action === 'record_completed_nursing' ? 'completed' : 'active') ||
+      mutation.session.deletedAt !== null)
+  ) {
+    throw new Error('A Nursing creation must produce the requested visible lifecycle state.');
+  }
+  if (
+    mutation.operation.action === 'edit_nursing_session' &&
+    (mutation.session.status !== 'completed' || mutation.session.deletedAt !== null)
+  ) {
+    throw new Error('A Nursing edit must keep a completed session visible.');
   }
   if (
     mutation.operation.action === 'delete_nursing_session' &&
@@ -193,38 +206,38 @@ function assertOperationSemantics(mutation: NursingMutation): void {
   ) {
     throw new Error('Only the Nursing delete action can produce a tombstone.');
   }
+  assertOperationPayload(mutation);
 }
 
 async function assertStoredRootSemantics(
   transaction: SQLiteDatabase,
   mutation: NursingMutation,
 ): Promise<void> {
-  const stored = await transaction.getFirstAsync<StoredNursingRoot>(
-    `SELECT id, child_id, timezone, created_by, status, version, deleted_at
-     FROM nursing_sessions
-     WHERE id = ?`,
+  const storedRow = await transaction.getFirstAsync<NursingRow>(
+    `${SELECT_NURSING} WHERE id = ?`,
     mutation.session.id,
   );
   const baseVersion = mutation.operation.baseVersion;
   if (baseVersion === null) {
-    if (stored !== null) throw new NursingWriteConflictError();
+    if (storedRow !== null) throw new NursingWriteConflictError();
     return;
   }
-  if (stored === null || stored.version !== baseVersion) {
+  if (storedRow === null || storedRow.version !== baseVersion) {
     throw new NursingWriteConflictError();
   }
+  const stored = mapSession(storedRow);
   if (
-    stored.child_id !== mutation.session.childId ||
+    stored.childId !== mutation.session.childId ||
     stored.timezone !== mutation.session.timezone ||
-    stored.created_by !== mutation.session.createdBy
+    stored.createdBy !== mutation.session.createdBy
   ) {
     throw new Error('A Nursing update cannot change immutable aggregate ownership fields.');
   }
   assertStoredActionTransition(stored, mutation);
 }
 
-function assertStoredActionTransition(stored: StoredNursingRoot, mutation: NursingMutation): void {
-  const storedIsVisible = stored.deleted_at === null;
+function assertStoredActionTransition(stored: NursingSession, mutation: NursingMutation): void {
+  const storedIsVisible = stored.deletedAt === null;
   const currentIsVisible = mutation.session.deletedAt === null;
   const valid = (() => {
     switch (mutation.operation.action) {
@@ -256,6 +269,20 @@ function assertStoredActionTransition(stored: StoredNursingRoot, mutation: Nursi
           stored.status !== 'completed' &&
           mutation.session.status === 'completed'
         );
+      case 'edit_active_nursing':
+        return (
+          storedIsVisible &&
+          currentIsVisible &&
+          stored.status !== 'completed' &&
+          stored.status === mutation.session.status
+        );
+      case 'edit_nursing_session':
+        return (
+          storedIsVisible &&
+          currentIsVisible &&
+          stored.status === 'completed' &&
+          mutation.session.status === 'completed'
+        );
       case 'delete_nursing_session':
         return (
           storedIsVisible &&
@@ -271,6 +298,7 @@ function assertStoredActionTransition(stored: StoredNursingRoot, mutation: Nursi
           mutation.session.status === 'completed'
         );
       case 'start_nursing':
+      case 'record_completed_nursing':
         return false;
     }
   })();
@@ -278,6 +306,117 @@ function assertStoredActionTransition(stored: StoredNursingRoot, mutation: Nursi
   if (!valid) {
     throw new Error('The Nursing action does not match the stored lifecycle transition.');
   }
+
+  if (mutation.operation.action === 'edit_active_nursing') {
+    const snapshot = mutation.operation.payload.snapshotAt;
+    if (typeof snapshot !== 'string')
+      throw new Error('A live Nursing edit requires its snapshot time.');
+    const expected = editActiveNursing(
+      stored,
+      {
+        startedAt: new Date(mutation.session.startedAt),
+        snapshotAt: new Date(snapshot),
+        leftDurationSeconds: mutation.session.leftDurationSeconds,
+      },
+      {
+        caregiverId: mutation.session.updatedBy,
+        childId: stored.childId,
+        timezone: mutation.operation.clientTimezone,
+        now: new Date(mutation.operation.clientOccurredAt),
+        newId: () => mutation.operation.operationId,
+      },
+    );
+    if (
+      !sameNursingBusinessFields(expected.session, mutation.session) ||
+      !jsonRecordsEqual(expected.operation.payload, mutation.operation.payload)
+    ) {
+      throw new Error('A live Nursing edit must preserve the running side and pause time.');
+    }
+  }
+
+  if (mutation.operation.action === 'edit_nursing_session') {
+    if (mutation.session.totalPauseDurationSeconds !== stored.totalPauseDurationSeconds) {
+      throw new Error('A Nursing edit must preserve the stored pause duration.');
+    }
+    const expectedLastBreast = correctedNursingLastBreast(
+      stored.lastBreastUsed,
+      mutation.session.leftDurationSeconds,
+      mutation.session.rightDurationSeconds,
+    );
+    if (mutation.session.lastBreastUsed !== expectedLastBreast) {
+      throw new Error('A Nursing edit must preserve or deterministically correct Last.');
+    }
+  }
+
+  if (
+    (mutation.operation.action === 'delete_nursing_session' ||
+      mutation.operation.action === 'restore_nursing_session') &&
+    !sameNursingBusinessFields(stored, mutation.session)
+  ) {
+    throw new Error('Nursing delete and restore must preserve the exact completed record.');
+  }
+}
+
+function assertOperationPayload(mutation: NursingMutation): void {
+  let expected: Readonly<Record<string, JsonValue>> | null = null;
+  if (
+    mutation.operation.action === 'edit_nursing_session' ||
+    mutation.operation.action === 'record_completed_nursing'
+  ) {
+    expected = {
+      startedAt: mutation.session.startedAt,
+      endedAt: mutation.session.endedAt,
+      status: mutation.session.status,
+      leftDurationSeconds: mutation.session.leftDurationSeconds,
+      rightDurationSeconds: mutation.session.rightDurationSeconds,
+      totalPauseDurationSeconds: mutation.session.totalPauseDurationSeconds,
+      activeSide: mutation.session.activeSide,
+      activeSideStartedAt: mutation.session.activeSideStartedAt,
+      pauseStartedAt: mutation.session.pauseStartedAt,
+      lastBreastUsed: mutation.session.lastBreastUsed,
+      deletedAt: mutation.session.deletedAt,
+    };
+  } else if (
+    mutation.operation.action === 'delete_nursing_session' ||
+    mutation.operation.action === 'restore_nursing_session'
+  ) {
+    expected = {};
+  }
+
+  if (expected !== null && !jsonRecordsEqual(mutation.operation.payload, expected)) {
+    throw new Error('A Nursing operation payload must exactly match its aggregate mutation.');
+  }
+}
+
+function sameNursingBusinessFields(stored: NursingSession, current: NursingSession): boolean {
+  return (
+    stored.id === current.id &&
+    stored.childId === current.childId &&
+    stored.startedAt === current.startedAt &&
+    stored.endedAt === current.endedAt &&
+    stored.status === current.status &&
+    stored.leftDurationSeconds === current.leftDurationSeconds &&
+    stored.rightDurationSeconds === current.rightDurationSeconds &&
+    stored.totalPauseDurationSeconds === current.totalPauseDurationSeconds &&
+    stored.activeSide === current.activeSide &&
+    stored.activeSideStartedAt === current.activeSideStartedAt &&
+    stored.pauseStartedAt === current.pauseStartedAt &&
+    stored.lastBreastUsed === current.lastBreastUsed &&
+    stored.timezone === current.timezone &&
+    stored.createdBy === current.createdBy
+  );
+}
+
+function jsonRecordsEqual(
+  actual: Readonly<Record<string, JsonValue>>,
+  expected: Readonly<Record<string, JsonValue>>,
+): boolean {
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+  );
 }
 
 async function assertNoOtherOpenNursing(

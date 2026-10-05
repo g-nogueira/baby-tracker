@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import {
+  recordCompletedNursing,
   deleteNursing,
+  editCompletedNursing,
+  editActiveNursing,
+  projectNursingDurations,
   endNightSleep,
   type MutationContext,
   type NursingSide,
@@ -50,6 +54,115 @@ describe('SQLite Nursing repository', () => {
   afterEach(() => {
     database.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it('saves historical Nursing with its split/Last in one transaction while another session runs', async () => {
+    const active = startNursing('left', context('2026-08-15T12:00:00Z'));
+    await repository.save(active);
+    const historical = recordCompletedNursing(
+      new Date('2026-08-14T22:00:00.125Z'),
+      new Date('2026-08-14T22:20:00.125Z'),
+      420,
+      'right',
+      context('2026-08-15T12:01:00Z'),
+    );
+    await repository.save(historical);
+    expect(historical.session).toMatchObject({
+      status: 'completed',
+      version: 1,
+      leftDurationSeconds: 420,
+      rightDurationSeconds: 780,
+      lastBreastUsed: 'right',
+      totalPauseDurationSeconds: 0,
+    });
+    expect(await repository.active('child-arthur')).toEqual(active.session);
+    expect(await repository.pendingOperationCount()).toBe(2);
+    database.close();
+    database = new DatabaseSync(databasePath);
+    adapter = new NodeSQLiteAdapter(database);
+    repository = new SQLiteNursingRepository(adapter.asExpoDatabase());
+    expect(await repository.findById(historical.session.id)).toEqual(historical.session);
+    expect(await repository.latestActivityTimes('child-arthur')).toEqual({
+      nursing: active.session.startedAt,
+    });
+    const failed = recordCompletedNursing(
+      new Date('2026-08-14T21:00:00Z'),
+      new Date('2026-08-14T21:10:00Z'),
+      0,
+      'right',
+      context('2026-08-15T12:02:00Z'),
+    );
+    failed.operation.operationId = historical.operation.operationId;
+    await expect(repository.save(failed)).rejects.toThrow();
+    expect(await repository.findById(failed.session.id)).toBeNull();
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+  it.each([false, true])(
+    'persists live corrections across restart without changing pause state (%s)',
+    async (pause) => {
+      const started = startNursing('left', context('2026-08-15T10:00:00Z'));
+      await repository.save(started);
+      const original = pause
+        ? pauseNursing(started.session, context('2026-08-15T10:01:00Z'))
+        : started;
+      if (pause) await repository.save(original);
+      const corrected = editActiveNursing(
+        original.session,
+        {
+          startedAt: new Date('2026-08-15T09:59:00Z'),
+          snapshotAt: new Date('2026-08-15T10:02:00Z'),
+          leftDurationSeconds: 100,
+        },
+        context('2026-08-15T10:03:00Z'),
+      );
+      await repository.save(corrected);
+      database.close();
+      database = new DatabaseSync(databasePath);
+      adapter = new NodeSQLiteAdapter(database);
+      await migrateDatabase(adapter.asExpoDatabase());
+      repository = new SQLiteNursingRepository(adapter.asExpoDatabase());
+      expect(await repository.findById(started.session.id)).toEqual(corrected.session);
+      expect(
+        projectNursingDurations(corrected.session, new Date('2026-08-15T10:03:00Z'))
+          .totalDurationSeconds,
+      ).toBe(pause ? 120 : 240);
+      const count = await repository.pendingOperationCount();
+      await expect(
+        repository.save(stopNursing(original.session, context('2026-08-15T10:04:00Z'))),
+      ).rejects.toThrow(NursingWriteConflictError);
+      expect(await repository.pendingOperationCount()).toBe(count);
+      const stopped = stopNursing(corrected.session, context('2026-08-15T10:05:00Z'));
+      await repository.save(stopped);
+      expect(await repository.findById(stopped.session.id)).toEqual(stopped.session);
+    },
+  );
+
+  it('rolls back live correction on outbox failure and rejects forged pause totals', async () => {
+    const started = startNursing('left', context('2026-08-15T10:00:00Z'));
+    await repository.save(started);
+    const corrected = editActiveNursing(
+      started.session,
+      {
+        startedAt: new Date('2026-08-15T09:59:00Z'),
+        snapshotAt: new Date('2026-08-15T10:02:00Z'),
+        leftDurationSeconds: 100,
+      },
+      context('2026-08-15T10:03:00Z'),
+    );
+    await expect(
+      repository.save({
+        ...corrected,
+        operation: { ...corrected.operation, operationId: started.operation.operationId },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      repository.save({
+        ...corrected,
+        session: { ...corrected.session, totalPauseDurationSeconds: 1, rightDurationSeconds: 79 },
+      }),
+    ).rejects.toThrow('pause time');
+    expect(await repository.findById(started.session.id)).toEqual(started.session);
+    expect(await repository.pendingOperationCount()).toBe(1);
   });
 
   it('atomically persists switch, pause, resume, stop, and privacy-minimal outbox payloads', async () => {
@@ -131,6 +244,222 @@ describe('SQLite Nursing repository', () => {
     expect(operations.some(({ payload_json }) => /note|raw|medicine/i.test(payload_json))).toBe(
       false,
     );
+  });
+
+  it('atomically edits, deletes, and restores the exact completed Nursing record', async () => {
+    const started = startNursing('left', context('2026-08-15T23:59:00.000Z'));
+    await repository.save(started);
+    const paused = pauseNursing(started.session, context('2026-08-15T23:59:30.000Z'));
+    await repository.save(paused);
+    const completed = stopNursing(paused.session, context('2026-08-16T00:00:00.000Z'));
+    await repository.save(completed);
+    const edited = editCompletedNursing(
+      completed.session,
+      {
+        startedAt: new Date('2026-08-15T23:58:30.000Z'),
+        endedAt: new Date('2026-08-16T00:00:30.000Z'),
+        leftDurationSeconds: 50,
+      },
+      context('2026-08-16T00:01:00.000Z'),
+    );
+    await repository.save(edited);
+
+    expect(await repository.findById(started.session.id)).toEqual(edited.session);
+    expect(edited.session).toMatchObject({
+      id: started.session.id,
+      version: 4,
+      leftDurationSeconds: 50,
+      rightDurationSeconds: 40,
+      totalPauseDurationSeconds: 30,
+      lastBreastUsed: 'left',
+    });
+    const editOperation = database
+      .prepare(
+        `SELECT entity_id, action, base_version, payload_json
+         FROM outbox_operations ORDER BY local_sequence DESC LIMIT 1`,
+      )
+      .get() as {
+      entity_id: string;
+      action: string;
+      base_version: number;
+      payload_json: string;
+    };
+    expect(editOperation).toMatchObject({
+      entity_id: started.session.id,
+      action: 'edit_nursing_session',
+      base_version: 3,
+    });
+    expect(JSON.parse(editOperation.payload_json)).toEqual({
+      startedAt: '2026-08-15T23:58:30.000Z',
+      endedAt: '2026-08-16T00:00:30.000Z',
+      status: 'completed',
+      leftDurationSeconds: 50,
+      rightDurationSeconds: 40,
+      totalPauseDurationSeconds: 30,
+      activeSide: null,
+      activeSideStartedAt: null,
+      pauseStartedAt: null,
+      lastBreastUsed: 'left',
+      deletedAt: null,
+    });
+
+    const deleted = deleteNursing(edited.session, context('2026-08-16T00:01:10.000Z'));
+    await repository.save(deleted);
+    expect(await repository.findById(started.session.id)).toEqual(deleted.session);
+    expect(
+      await repository.listVisible(
+        'child-arthur',
+        '2026-08-15T00:00:00.000Z',
+        '2026-08-17T00:00:00.000Z',
+      ),
+    ).toEqual([]);
+
+    const restored = restoreNursing(deleted.session, context('2026-08-16T00:01:20.000Z'));
+    await repository.save(restored);
+    expect(await repository.findById(started.session.id)).toEqual(restored.session);
+    expect(restored.session).toMatchObject({ id: started.session.id, version: 6, deletedAt: null });
+    expect(
+      database
+        .prepare('SELECT action, base_version FROM outbox_operations ORDER BY local_sequence')
+        .all()
+        .slice(-3),
+    ).toEqual([
+      { action: 'edit_nursing_session', base_version: 3 },
+      { action: 'delete_nursing_session', base_version: 4 },
+      { action: 'restore_nursing_session', base_version: 5 },
+    ]);
+  });
+
+  it('rolls back a stale completed edit without mutating its correction proposal', async () => {
+    const completed = await completeSession(
+      'left',
+      '2026-08-15T10:00:00.000Z',
+      '2026-08-15T10:01:00.000Z',
+    );
+    const first = editCompletedNursing(
+      completed,
+      {
+        startedAt: new Date('2026-08-15T10:00:00.000Z'),
+        endedAt: new Date('2026-08-15T10:01:10.000Z'),
+        leftDurationSeconds: 65,
+      },
+      context('2026-08-15T10:02:00.000Z'),
+    );
+    await repository.save(first);
+    const stale = editCompletedNursing(
+      completed,
+      {
+        startedAt: new Date('2026-08-15T09:59:50.000Z'),
+        endedAt: new Date('2026-08-15T10:01:00.000Z'),
+        leftDurationSeconds: 20,
+      },
+      context('2026-08-15T10:02:10.000Z'),
+    );
+    const proposal = structuredClone(stale.session);
+
+    await expect(repository.save(stale)).rejects.toBeInstanceOf(NursingWriteConflictError);
+    expect(stale.session).toEqual(proposal);
+    expect(await repository.findById(completed.id)).toEqual(first.session);
+    expect(await repository.pendingOperationCount()).toBe(3);
+  });
+
+  it('rejects a tampered edit payload without changing the record or outbox', async () => {
+    const completed = await completeSession(
+      'left',
+      '2026-08-15T10:00:00.000Z',
+      '2026-08-15T10:01:00.000Z',
+    );
+    const edited = editCompletedNursing(
+      completed,
+      {
+        startedAt: new Date(completed.startedAt),
+        endedAt: new Date(completed.endedAt ?? ''),
+        leftDurationSeconds: 20,
+      },
+      context('2026-08-15T10:02:00.000Z'),
+    );
+    Object.assign(edited.operation.payload, { leftDurationSeconds: 21 });
+
+    await expect(repository.save(edited)).rejects.toThrow(
+      'A Nursing operation payload must exactly match its aggregate mutation.',
+    );
+    expect(await repository.findById(completed.id)).toEqual(completed);
+    expect(await repository.pendingOperationCount()).toBe(2);
+  });
+
+  it('rejects edits that change stored pause or corrupt explicit Last', async () => {
+    const started = startNursing('left', context('2026-08-15T10:00:00.000Z'));
+    await repository.save(started);
+    const paused = pauseNursing(started.session, context('2026-08-15T10:00:30.000Z'));
+    await repository.save(paused);
+    const resumed = resumeNursing(paused.session, 'right', context('2026-08-15T10:00:40.000Z'));
+    await repository.save(resumed);
+    const completed = stopNursing(resumed.session, context('2026-08-15T10:01:00.000Z'));
+    await repository.save(completed);
+
+    const changedPause = editCompletedNursing(
+      completed.session,
+      {
+        startedAt: new Date(completed.session.startedAt),
+        endedAt: new Date(completed.session.endedAt ?? ''),
+        leftDurationSeconds: 20,
+      },
+      context('2026-08-15T10:02:00.000Z'),
+    );
+    changedPause.session.totalPauseDurationSeconds += 1;
+    changedPause.session.rightDurationSeconds -= 1;
+    Object.assign(changedPause.operation.payload, {
+      totalPauseDurationSeconds: changedPause.session.totalPauseDurationSeconds,
+      rightDurationSeconds: changedPause.session.rightDurationSeconds,
+    });
+    await expect(repository.save(changedPause)).rejects.toThrow(
+      'A Nursing edit must preserve the stored pause duration.',
+    );
+
+    const changedLast = editCompletedNursing(
+      completed.session,
+      {
+        startedAt: new Date(completed.session.startedAt),
+        endedAt: new Date(completed.session.endedAt ?? ''),
+        leftDurationSeconds: 20,
+      },
+      context('2026-08-15T10:02:10.000Z'),
+    );
+    changedLast.session.lastBreastUsed = 'left';
+    Object.assign(changedLast.operation.payload, { lastBreastUsed: 'left' });
+    await expect(repository.save(changedLast)).rejects.toThrow(
+      'A Nursing edit must preserve or deterministically correct Last.',
+    );
+
+    expect(await repository.findById(completed.session.id)).toEqual(completed.session);
+    expect(await repository.pendingOperationCount()).toBe(4);
+  });
+
+  it('rejects delete and restore mutations that alter the completed business record', async () => {
+    const completed = await completeSession(
+      'right',
+      '2026-08-15T10:00:00.000Z',
+      '2026-08-15T10:01:00.000Z',
+    );
+    const tamperedDelete = deleteNursing(completed, context('2026-08-15T10:02:00.000Z'));
+    tamperedDelete.session.startedAt = '2026-08-15T09:59:59.000Z';
+    tamperedDelete.session.endedAt = '2026-08-15T10:00:59.000Z';
+    await expect(repository.save(tamperedDelete)).rejects.toThrow(
+      'Nursing delete and restore must preserve the exact completed record.',
+    );
+    expect(await repository.findById(completed.id)).toEqual(completed);
+    expect(await repository.pendingOperationCount()).toBe(2);
+
+    const deleted = deleteNursing(completed, context('2026-08-15T10:02:10.000Z'));
+    await repository.save(deleted);
+    const tamperedRestore = restoreNursing(deleted.session, context('2026-08-15T10:02:20.000Z'));
+    tamperedRestore.session.startedAt = '2026-08-15T09:59:59.000Z';
+    tamperedRestore.session.endedAt = '2026-08-15T10:00:59.000Z';
+    await expect(repository.save(tamperedRestore)).rejects.toThrow(
+      'Nursing delete and restore must preserve the exact completed record.',
+    );
+    expect(await repository.findById(completed.id)).toEqual(deleted.session);
+    expect(await repository.pendingOperationCount()).toBe(3);
   });
 
   it.each([
@@ -336,7 +665,7 @@ describe('SQLite Nursing repository', () => {
     );
     invalidAction.operation.action = 'start_nursing';
     await expect(repository.save(invalidAction)).rejects.toThrow(
-      'Only a new Nursing aggregate can use the start action.',
+      'Only a new Nursing aggregate can use a creation action.',
     );
 
     const invalidTransition = pauseNursing(started.session, context('2026-08-15T10:00:25.000Z'));

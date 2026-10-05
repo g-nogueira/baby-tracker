@@ -1,3 +1,4 @@
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -57,11 +58,9 @@ export function HomeQuickActions({ actions }: { actions: readonly HomeQuickActio
               },
             ]}
           >
-            <Text style={styles.icon}>{action.icon}</Text>
+            <ActivityIcon name={action.icon} />
           </View>
-          <Text numberOfLines={2} style={styles.label}>
-            {action.label}
-          </Text>
+
           <Text style={styles.meta}>{action.meta}</Text>
         </Pressable>
       ))}
@@ -73,6 +72,7 @@ const styles = StyleSheet.create({
   row: {
     minHeight: 102,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'flex-start',
   },

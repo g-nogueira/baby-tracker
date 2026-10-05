@@ -1,5 +1,7 @@
-import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
 import { elapsedMilliseconds } from '@baby-tracker/domain';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -23,6 +25,7 @@ interface NapEditorSheetProps {
   onCancel: () => void;
   onChange: (editor: NapEditorState) => void;
   onDelete: (() => void) | null;
+  onContinue?: (() => void) | null;
   onSave: (editor: NapEditorState) => void;
 }
 
@@ -52,6 +55,7 @@ export function NapEditorSheet({
   onCancel,
   onChange,
   onDelete,
+  onContinue,
   onSave,
 }: NapEditorSheetProps) {
   const [picker, setPicker] = useState<PickerState>(null);
@@ -73,7 +77,9 @@ export function NapEditorSheet({
       : editor.mode === 'edit'
         ? editor.endedAt
         : null;
-  const canEditStart = editor.mode !== 'stop';
+  const timezone =
+    editor.mode === 'start' ? LOCAL_DEVELOPMENT_IDENTITY.dayTimezone : editor.nap.timezone;
+  const canEditStart = !isMutating;
   const canEditEnd = editor.mode !== 'start' && endedAt !== null;
   const actionTime = editor.mode === 'stop' ? (endedAt ?? editor.endedAt) : startedAt;
   const canSave = !isMutating && error === null && pickerError === null;
@@ -87,8 +93,8 @@ export function NapEditorSheet({
     try {
       const next =
         activePicker.mode === 'date'
-          ? mergeDatePart(current, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone)
-          : mergeTimePart(current, selected, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone);
+          ? mergeDatePart(current, selected, timezone)
+          : mergeTimePart(current, selected, timezone);
       setPickerError(null);
       if (editor.mode === 'stop' && activePicker.field === 'endedAt') {
         setActionTimeWasAdjusted(true);
@@ -115,22 +121,37 @@ export function NapEditorSheet({
       activityLabel="Nap"
       mode={editor.mode === 'start' ? 'create' : editor.mode === 'stop' ? 'active' : 'edit'}
       onDismiss={onCancel}
+      scrollContent
     >
       {({ expanded }) => (
         <>
           <View style={styles.hero}>
             <View style={styles.napIconCircle}>
-              <Text style={styles.napIcon}>z</Text>
+              <ActivityIcon name="nap" color="#7367B9" />
             </View>
             <Text accessibilityRole="header" style={styles.title}>
-              {editor.mode === 'stop' ? 'Stop nap' : editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
+              {editor.mode === 'edit' ? 'Edit nap' : 'Nap'}
             </Text>
-            {editor.mode !== 'edit' ? (
-              <Text style={styles.actionTime}>
-                {editor.mode === 'stop'
-                  ? formatLiveDuration(elapsedMilliseconds(editor.nap.startedAt, endedAt ?? now))
-                  : timeFormatter.format(actionTime)}
-              </Text>
+            {editor.mode !== 'edit' && !expanded ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  editor.mode === 'start' ? 'Set nap start time' : 'Set nap end time'
+                }
+                disabled={isMutating}
+                onPress={() =>
+                  setPicker({
+                    field: editor.mode === 'start' ? 'startedAt' : 'endedAt',
+                    mode: 'time',
+                  })
+                }
+              >
+                <Text style={styles.actionTime}>
+                  {editor.mode === 'stop'
+                    ? formatLiveDuration(elapsedMilliseconds(editor.nap.startedAt, endedAt ?? now))
+                    : timeFormatter.format(actionTime)}
+                </Text>
+              </Pressable>
             ) : null}
           </View>
 
@@ -151,7 +172,7 @@ export function NapEditorSheet({
                   pressed && styles.pressed,
                 ]}
               >
-                <Text style={styles.primaryActionIcon}>{editor.mode === 'start' ? '▶' : '■'}</Text>
+                <ActivityIcon name={editor.mode === 'start' ? 'play' : 'stop'} />
                 <Text style={styles.primaryActionLabel}>
                   {editor.mode === 'start' ? 'Start' : 'Stop'}
                 </Text>
@@ -160,6 +181,22 @@ export function NapEditorSheet({
             </View>
           )}
 
+          {!expanded && picker !== null ? (
+            <StableDateTimePicker
+              key={picker.mode}
+              mode={picker.mode}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              value={picker.field === 'startedAt' ? startedAt : (endedAt ?? startedAt)}
+              maximumDate={new Date()}
+              timeZoneName={timezone}
+              onChange={handlePickerChange}
+            />
+          ) : null}
+          {!expanded && picker !== null && Platform.OS === 'ios' ? (
+            <Pressable accessibilityRole="button" onPress={() => setPicker(null)}>
+              <Text>Done</Text>
+            </Pressable>
+          ) : null}
           {!expanded ? <Text style={styles.swipeHint}>Swipe up for date and time</Text> : null}
 
           {expanded ? (
@@ -170,10 +207,20 @@ export function NapEditorSheet({
                 label="Start"
                 maximumDate={new Date()}
                 onDone={() => setPicker(null)}
-                onPick={(mode) => setPicker({ field: 'startedAt', mode })}
+                onPick={(mode) => {
+                  if (editor.mode === 'stop') {
+                    onChange({
+                      mode: 'edit',
+                      nap: editor.nap,
+                      startedAt: new Date(editor.nap.startedAt),
+                      endedAt: null,
+                    });
+                  }
+                  setPicker({ field: 'startedAt', mode });
+                }}
                 onPickerChange={handlePickerChange}
                 pickerMode={picker?.field === 'startedAt' ? picker.mode : null}
-                timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
+                timezone={timezone}
                 value={startedAt}
               />
               {endedAt !== null ? (
@@ -185,7 +232,7 @@ export function NapEditorSheet({
                   onPick={(mode) => setPicker({ field: 'endedAt', mode })}
                   onPickerChange={handlePickerChange}
                   pickerMode={picker?.field === 'endedAt' ? picker.mode : null}
-                  timezone={LOCAL_DEVELOPMENT_IDENTITY.dayTimezone}
+                  timezone={timezone}
                   value={endedAt}
                 />
               ) : null}
@@ -206,6 +253,16 @@ export function NapEditorSheet({
                 </Pressable>
               ) : null}
 
+              {onContinue ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isMutating}
+                  onPress={onContinue}
+                  style={styles.saveEditButton}
+                >
+                  <Text style={styles.saveEditText}>Continue this nap</Text>
+                </Pressable>
+              ) : null}
               {onDelete !== null ? (
                 <Pressable
                   accessibilityRole="button"

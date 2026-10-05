@@ -1,5 +1,8 @@
 # Baby Tracker — Napper-inspired UX implementation directive
 
+**2026-10-05 user feedback supersedes the original display examples:** use the original line icons and icon-only Home action labels, with elapsed time since the last saved action underneath. Night Sleep is the containing phase, so it has no separate bottom timer. Nap, Night Waking and Nursing keep their controllers. Completed Night dials fit Bedtime → Wake up; active Nights use a provisional stepped scale without predicting Wake up. Dense markers open a list of exact records. All proposed start times are tappable. Historical entries and continuing an accidentally stopped Nap are supported locally, with atomic outbox writes and overlap/stale-version checks. Screenshot/HTML examples below remain design provenance where they differ from these updates.
+
+
 Status: GitHub task update applied; ready for implementation  
 Prepared: 2026-08-14, Europe/Lisbon  
 Implementation branch parent: `Napper-inspired Baby Tracker - Dev`  
@@ -231,7 +234,7 @@ Home derives actions from canonical local state. It does not keep a parallel scr
 | --- | --- | --- | --- | --- |
 | Awake, no sleep active | Night sleep | Nap | `Awake for …` or `Awake` | None |
 | Nap active | Night sleep disabled | Current Nap | `Asleep for …` | `Nap · elapsed` |
-| Night session, asleep phase | Wake up | Night waking | `Asleep for …` | `Night sleep · session elapsed` |
+| Night session, asleep phase | Wake up | Night waking | `Asleep for …` | None; containing Night remains on the dial |
 | Night session, awake phase | Wake up | Fell asleep again | `Awake tonight · …` | `Night waking · phase elapsed` |
 
 Nursing, Medicine, and Diaper remain in slots 3–5 in every state.
@@ -286,10 +289,10 @@ Exact date/time correction belongs in expanded content. The existing ±1 minute 
 
 ### 7.3 Persistent live controllers
 
-The app can have one active sleep aggregate and one concurrent Nursing session. Render one controller per active user-manageable activity, stacked above bottom navigation/content with safe-area spacing.
+The app can have one active sleep aggregate and one concurrent Nursing session. Render controllers for Nap, Night Waking and Nursing, stacked above bottom navigation/content with safe-area spacing. The containing Night Sleep has no separate timer.
 
 - Nap: `Nap · 00:12:31`, Stop.
-- Night asleep: `Night sleep · 04:14:08`, action opens session controls.
+- Night asleep: no separate controller; Bedtime anchor opens session controls.
 - Night awake: `Night waking · 00:08:22`, action opens resume/wake controls.
 - Nursing: `Nursing · 00:16:03`, subtitle `L 08:51 · R 07:12`, Stop.
 
@@ -321,29 +324,15 @@ A timed record is owned by the cycle in which it starts. If it continues across 
 
 ### 8.2 Stable display scale
 
-Use a fixed 24-hour horizon relative to the real cycle start, drawn over the design's 270-degree radial track:
+Canonical cycle ownership remains half-open and uses real instants. The domain projection retains its 24-hour cap and overflow semantics. Display angles use a separate UI scale:
 
 ```ts
-elapsedMs = eventStartedAt - cycleStartedAt;
-clampedMs = clamp(elapsedMs, 0, 24h);
-angle = startAngle + (clampedMs / 24h) * sweepAngle;
+// Day: 24 real hours. Completed Night: actual Bedtime → Wake up, capped at 24h.
+// Active Night: at least 12h, expanding in 3h steps up to 24h; no predicted end anchor.
+angle = 225 + clamp(elapsedMs, 0, displayHorizonMs) / displayHorizonMs * 270;
 ```
 
-Recommended constants from the design:
-
-```ts
-startAngle = 225 degrees;
-sweepAngle = 270 degrees;
-outerLaneRadius = 130;
-innerLaneRadius = 108;
-```
-
-Why this differs from the HTML's hard-coded sample windows:
-
-- It keeps the Wake up/Bedtime anchor at a stable visual start.
-- It does not invent a predicted bedtime or wake time.
-- Existing icons never drift as an active cycle grows.
-- Cross-midnight arithmetic uses real instants and remains positive.
+Both interval ends, record markers, anchors and helper ticks use the same scale. An active Night's existing markers stay fixed between scale steps. Midnight is resolved in the originating timezone, including clock changes, and receives its own marker. Completed records retain their exact timestamps and IDs.
 
 Tick labels show actual local clock times derived from `cycleStartedAt + offset`, not generic `+3h` text.
 
@@ -620,7 +609,7 @@ At minimum, each task must add tests at the lowest deterministic layer plus targ
 | Nursing split rounding/Last | ✓ | — | ✓ | ✓ | ✓ |
 | Diaper type edit | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Medicine privacy | ✓ | — | ✓ | ✓ | ✓ |
-| Concurrent Night + Nursing controllers | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Night Waking + Nursing controllers | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Required quality gates remain:
 
@@ -769,13 +758,13 @@ changes:
       statement: Issue #3 and PR #10 currently disagree about whether radial work is in scope.
   decisions:
     - id: DEC-BT-CYCLE-PROJECTION
-      statement: Use a fixed 24-hour cycle-relative horizon anchored at real Wake up/Bedtime over the design's radial sweep.
+      statement: Preserve canonical ownership and overflow; fit completed Nights to real Bedtime/Wake up and use a stepped provisional active Night display scale.
     - id: DEC-BT-SLEEP-AGGREGATE
       statement: Night waking persists as an awake phase within a Night SleepSession aggregate.
     - id: DEC-BT-NURSING-P0-MODEL
       statement: P0 Nursing persists side totals, active-side timing, and explicit lastBreastUsed.
     - id: DEC-BT-LIVE-CONTROLLERS
-      statement: Support one sleep controller plus one concurrent Nursing controller.
+      statement: Support Nap or Night Waking plus concurrent Nursing controllers; no separate timer for the containing Night Sleep.
   implementations:
     - id: IMP-BT-TASK-DIRECTIVE
       statement: Task-ready acceptance criteria were applied to issues #2/#3 and new M2–M4 issues #11–#17.

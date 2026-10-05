@@ -1,9 +1,16 @@
 import {
+  type ActiveNursingCorrection,
+  editActiveNursing,
+  type CompletedNursingCorrection,
   createUuidV7,
+  recordCompletedNursing,
+  deleteNursing,
+  editCompletedNursing,
   type NursingMutation,
   type NursingSession,
   type NursingSide,
   pauseNursing,
+  restoreNursing,
   resumeNursing,
   startNursing,
   stopNursing,
@@ -15,12 +22,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import { LOCAL_DEVELOPMENT_IDENTITY } from '@/constants/identity';
-import { zonedDayBounds } from '@/features/naps/calendar-day';
+import { shiftCalendarDay, zonedDayBounds } from '@/features/naps/calendar-day';
 import { recoverFromMutationFailure } from '@/features/naps/mutation-recovery';
 import { SQLiteNursingRepository } from './sqlite-nursing-repository';
 
 interface NursingState {
+  latestActivityTimes: Record<string, string>;
   sessions: NursingSession[];
+  cycleSessions: NursingSession[];
   activeSession: NursingSession | null;
   latestCompletedLast: NursingSide | null;
   pendingOperationCount: number;
@@ -38,7 +47,9 @@ export function useNursing(selectedDay: string) {
   selectedDayRef.current = selectedDay;
   const [isMutating, setIsMutating] = useState(false);
   const [state, setState] = useState<NursingState>({
+    latestActivityTimes: {},
     sessions: [],
+    cycleSessions: [],
     activeSession: null,
     latestCompletedLast: null,
     pendingOperationCount: 0,
@@ -53,17 +64,34 @@ export function useNursing(selectedDay: string) {
       selectedDay,
       LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
-    const [sessions, activeSession, latestCompletedLast, pendingOperationCount] = await Promise.all(
-      [
-        repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
-        repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
-        repository.latestCompletedLastBreast(LOCAL_DEVELOPMENT_IDENTITY.childId),
-        repository.pendingOperationCount(),
-      ],
+    const [cycleStartedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, -1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
     );
+    const [, cycleEndedAt] = zonedDayBounds(
+      shiftCalendarDay(selectedDay, 1),
+      LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+    );
+    const [
+      latestActivityTimes,
+      sessions,
+      cycleSessions,
+      activeSession,
+      latestCompletedLast,
+      pendingOperationCount,
+    ] = await Promise.all([
+      repository.latestActivityTimes(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, dayStartedAt, nextDayStartedAt),
+      repository.listVisible(LOCAL_DEVELOPMENT_IDENTITY.childId, cycleStartedAt, cycleEndedAt),
+      repository.active(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.latestCompletedLastBreast(LOCAL_DEVELOPMENT_IDENTITY.childId),
+      repository.pendingOperationCount(),
+    ]);
     if (generation !== refreshGeneration.current || requestedDay !== selectedDayRef.current) return;
     setState({
+      latestActivityTimes,
       sessions,
+      cycleSessions,
       activeSession,
       latestCompletedLast,
       pendingOperationCount,
@@ -125,7 +153,12 @@ export function useNursing(selectedDay: string) {
     ...state,
     isMutating,
     refresh,
-    start: (side: NursingSide) => mutate((now) => startNursing(side, createContext(now))),
+    recordCompleted: (startedAt: Date, endedAt: Date, leftSeconds: number, last: NursingSide) =>
+      mutate((now) =>
+        recordCompletedNursing(startedAt, endedAt, leftSeconds, last, createContext(now)),
+      ),
+    start: (side: NursingSide, startedAt?: Date) =>
+      mutate((now) => startNursing(side, createContext(now), startedAt ?? now)),
     switchSide: (side: NursingSide) => {
       const session = requireActive('There is no active Nursing session to switch.');
       return session === null
@@ -150,6 +183,14 @@ export function useNursing(selectedDay: string) {
         ? Promise.resolve(null)
         : mutate((now) => stopNursing(session, createContext(now)));
     },
+    editActive: (session: NursingSession, correction: ActiveNursingCorrection) =>
+      mutate((now) => editActiveNursing(session, correction, createContext(now))),
+    editCompleted: (session: Readonly<NursingSession>, correction: CompletedNursingCorrection) =>
+      mutate((now) => editCompletedNursing({ ...session }, correction, createContext(now))),
+    removeCompleted: (session: Readonly<NursingSession>) =>
+      mutate((now) => deleteNursing({ ...session }, createContext(now))),
+    restoreCompleted: (session: Readonly<NursingSession>) =>
+      mutate((now) => restoreNursing({ ...session }, createContext(now))),
     clearError: () => setState((current) => ({ ...current, error: null })),
   };
 }

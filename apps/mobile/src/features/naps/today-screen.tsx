@@ -1,8 +1,14 @@
+import { zonedDayBounds } from './calendar-day';
+import {
+  HistoricalActivityDrawer,
+  type HistoricalActivityDraft,
+} from '@/features/shared/activity-drawer/historical-activity-drawer';
 import {
   type CareEvent,
   elapsedMilliseconds,
   formatDuration,
   type NapSession,
+  type NightSleepSession,
   type NursingSession,
 } from '@baby-tracker/domain';
 import { useEffect, useRef, useState } from 'react';
@@ -25,12 +31,17 @@ import {
   createCareEventDraft,
   editCareEventDraft,
 } from '@/features/care-events/care-event-drawer-state';
-import {
-  appendCareEventHomeActions,
-  homeChronology,
-} from '@/features/care-events/care-event-home-state';
+import { appendCareEventHomeActions } from '@/features/care-events/care-event-home-state';
 import { useCareEvents } from '@/features/care-events/use-care-events';
+import { CompletedNursingEditorDrawer } from '@/features/nursing/completed-nursing-editor-drawer';
+import {
+  type CompletedNursingEditorState,
+  completedNursingCorrectionForSave,
+  createCompletedNursingEditorState,
+  createActiveNursingEditorState,
+} from '@/features/nursing/completed-nursing-editor-state';
 import { NursingDrawer } from '@/features/nursing/nursing-drawer';
+import { completedNursingRecordById } from '@/features/nursing/nursing-history-state';
 import {
   combinedPendingOperationCount,
   decideNursingDrawerCommand,
@@ -50,6 +61,12 @@ import { ActivityLiveController } from '@/features/shared/live-controller/activi
 import { minimumLiveControllerStackHeight } from '@/features/shared/live-controller/activity-live-controller-layout';
 import { ActivityLiveControllerStack } from '@/features/shared/live-controller/activity-live-controller-stack';
 import { liveControllerReservedSpace } from '@/features/shared/live-controller/activity-live-controller-stack-state';
+import { NightRecordEditorDrawer } from '@/features/sleep/night-record-editor-drawer';
+import {
+  createNightRecordEditorState,
+  type NightRecordEditorState,
+  nightRecordBoundariesForSave,
+} from '@/features/sleep/night-record-editor-state';
 import { NightTransitionDrawer } from '@/features/sleep/night-transition-drawer';
 import {
   createNightTransitionDraft,
@@ -60,11 +77,19 @@ import {
   type SleepHomeActionKind,
   type SleepHomeControllerModel,
 } from '@/features/sleep/sleep-home-state';
-import { calendarDayForInstant } from './calendar-day';
+import {
+  RadialCycle,
+  type RadialCycleSelection,
+  RadialCycleSelector,
+  radialActivityColor,
+} from '@/features/timeline/radial-cycle';
+import {
+  buildRadialCycleViews,
+  type ProjectedRadialActivity,
+} from '@/features/timeline/radial-cycle-state';
 import { formatLiveDuration } from './nap-clock';
 import { NapEditorSheet } from './nap-editor-sheet';
 import type { NapEditorState } from './nap-editor-state';
-import { NapRadialTimeline } from './nap-radial-timeline';
 import { useNaps } from './use-naps';
 
 const clockFormatter = new Intl.DateTimeFormat(undefined, {
@@ -77,11 +102,6 @@ const dayFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   year: 'numeric',
   timeZone: 'UTC',
-});
-const shortDayFormatter = new Intl.DateTimeFormat(undefined, {
-  day: 'numeric',
-  month: 'short',
-  timeZone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
 });
 
 const palette = {
@@ -97,7 +117,10 @@ const palette = {
 
 type UndoState =
   | { kind: 'nap'; deletedNap: NapSession }
-  | { kind: 'care-event'; deletedEvent: CareEvent };
+  | { kind: 'night'; deletedSession: NightSleepSession }
+  | { kind: 'night-waking'; deletedSession: NightSleepSession; previousSession: NightSleepSession }
+  | { kind: 'care-event'; deletedEvent: CareEvent }
+  | { kind: 'nursing'; deletedSession: NursingSession };
 
 /**
  * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
@@ -105,63 +128,88 @@ type UndoState =
 export function TodayScreen() {
   const insets = useSafeAreaInsets();
   const {
+    recordCompleted: recordCompletedSleep,
+    recordWaking,
+    reopen,
+    latestActivityTimes: sleepActivityTimes,
     activeNap,
     activeSleep,
     clearError: clearSleepError,
     edit,
+    editNight,
     endNight,
     error: sleepError,
     isLoading: isSleepLoading,
     isMutating: isSleepMutating,
     isToday,
     latestCompletedEnd,
-    naps,
     nextDay,
     pendingOperationCount: sleepPendingOperationCount,
     previousDay,
     goToToday,
     remove,
+    removeNight,
+    removeNightWaking,
     restore,
+    restoreNight,
+    restoreNightWaking,
     resumeNight,
     selectedDay,
+    sleepSessions,
     start,
     startNight,
     startNightWaking,
     stop,
   } = useNaps();
   const {
+    recordCompleted: recordCompletedNursing,
+    latestActivityTimes: nursingActivityTimes,
     activeSession: activeNursing,
     clearError: clearNursingError,
+    cycleSessions: cycleNursingSessions,
     error: nursingError,
+    editCompleted: editCompletedNursing,
+    editActive: editActiveNursing,
     isLoading: isNursingLoading,
     isMutating: isNursingMutating,
     latestCompletedLast,
     pause: pauseNursing,
     pendingOperationCount: nursingPendingOperationCount,
+    removeCompleted: removeCompletedNursing,
     resume: resumeNursing,
+    restoreCompleted: restoreCompletedNursing,
     start: startNursing,
     stop: stopNursing,
     switchSide: switchNursing,
   } = useNursing(selectedDay);
   const {
     clearError: clearCareEventError,
+    latestActivityTimes: careActivityTimes,
+    cycleEvents,
     createDiaper,
     createMedicine,
     editDiaper,
     editMedicine,
     error: careEventError,
-    events: careEvents,
     isLoading: isCareEventLoading,
     isMutating: isCareEventMutating,
     pendingOperationCount: careEventPendingOperationCount,
     remove: removeCareEvent,
     restore: restoreCareEvent,
   } = useCareEvents(selectedDay);
-  const now = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
+  const clock = useAdaptiveClock(activeSleep !== null || activeNursing !== null);
+  // A committed mutation can arrive between ticks; project against this render’s wall clock.
+  const now = new Date(Math.max(clock.getTime(), Date.now()));
   const [editor, setEditor] = useState<NapEditorState | null>(null);
   const [nightDraft, setNightDraft] = useState<NightTransitionDraft | null>(null);
+  const [nightEditor, setNightEditor] = useState<NightRecordEditorState | null>(null);
+  const [chosenCycle, setCycleSelection] = useState<RadialCycleSelection | null>(null);
+  const cycleSelection =
+    chosenCycle ?? (isToday && activeSleep?.kind === 'night' ? 'night' : 'day');
   const [nursingDrawerOpen, setNursingDrawerOpen] = useState(false);
+  const [nursingEditor, setNursingEditor] = useState<CompletedNursingEditorState | null>(null);
   const [careEventDrawer, setCareEventDrawer] = useState<CareEventDrawerState | null>(null);
+  const [addingHistory, setAddingHistory] = useState(false);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [controllerReservedSpace, setControllerReservedSpace] = useState(0);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,9 +217,7 @@ export function TodayScreen() {
   useEffect(() => {
     if (undo === null) return;
     let cancelled = false;
-    AccessibilityInfo.announceForAccessibility(
-      `${undo.kind === 'nap' ? 'Nap' : undo.deletedEvent.kind === 'diaper' ? 'Diaper event' : 'Medicine event'} deleted. Undo available.`,
-    );
+    AccessibilityInfo.announceForAccessibility(`${undoRecordLabel(undo)} deleted. Undo available.`);
     AccessibilityInfo.getRecommendedTimeoutMillis(5_000)
       .catch(() => 5_000)
       .then((timeout) => {
@@ -195,9 +241,23 @@ export function TodayScreen() {
   const homeModel = deriveSleepHomeModel(activeSleep, latestCompletedEnd);
   const nursingModel = deriveNursingHomeModel(activeNursing, latestCompletedLast, now);
   const nursingController = nursingModel.controller;
+  const cycleViews = buildRadialCycleViews({
+    showActiveNight: isToday,
+    careEvents: cycleEvents,
+    childId: LOCAL_DEVELOPMENT_IDENTITY.childId,
+    localDate: selectedDay,
+    now,
+    nursingSessions: cycleNursingSessions,
+    sleepSessions,
+    timezone: LOCAL_DEVELOPMENT_IDENTITY.dayTimezone,
+  });
+  const selectedCycle = cycleViews[cycleSelection];
+  const cycleRecordCount = selectedCycle.records.length;
   const activeController = homeModel.controller;
   const liveControllers = liveControllerIdentities(
-    activeSleep?.id ?? null,
+    activeSleep?.kind === 'nap' || activeController?.kind === 'night-awake'
+      ? (activeSleep?.id ?? null)
+      : null,
     nursingController?.sessionId ?? null,
   );
   const hasLiveController = liveControllers.length > 0;
@@ -205,7 +265,6 @@ export function TodayScreen() {
     combinedPendingOperationCount(sleepPendingOperationCount, nursingPendingOperationCount),
     careEventPendingOperationCount,
   );
-  const chronology = homeChronology(naps, careEvents);
   const controllerFallbackSpace = liveControllerReservedSpace(
     insets.bottom,
     undo !== null,
@@ -233,6 +292,7 @@ export function TodayScreen() {
       return;
     }
     const session = activeSleep?.kind === 'night' ? activeSleep : null;
+    setNightEditor(null);
     setNightDraft(createNightTransitionDraft(kind, session, new Date()));
   };
 
@@ -241,15 +301,20 @@ export function TodayScreen() {
       draft.kind === 'start-night-sleep'
         ? await startNight(draft.effectiveAt)
         : draft.kind === 'start-night-waking'
-          ? await startNightWaking(draft.effectiveAt)
+          ? await startNightWaking(draft.effectiveAt, draft.session)
           : draft.kind === 'resume-night-sleep'
-            ? await resumeNight(draft.effectiveAt)
-            : await endNight(draft.effectiveAt);
-    if (saved !== null) setNightDraft(null);
+            ? await resumeNight(draft.effectiveAt, draft.session)
+            : await endNight(draft.effectiveAt, draft.session);
+    if (saved !== null) {
+      setNightDraft(null);
+      setCycleSelection(saved.status === 'active' ? 'night' : 'day');
+    }
   };
 
   const openNapRecord = (napId: string) => {
-    const nap = naps.find((candidate) => candidate.id === napId);
+    const nap = sleepSessions.find(
+      (candidate): candidate is NapSession => candidate.kind === 'nap' && candidate.id === napId,
+    );
     if (nap === undefined) return;
     clearSleepError();
     setEditor({
@@ -280,11 +345,74 @@ export function TodayScreen() {
 
   const undoDelete = async () => {
     if (undo === null) return;
-    const restored =
-      undo.kind === 'nap'
-        ? await restore(undo.deletedNap)
-        : await restoreCareEvent(undo.deletedEvent);
+    const restored = await (undo.kind === 'nap'
+      ? restore(undo.deletedNap)
+      : undo.kind === 'night'
+        ? restoreNight(undo.deletedSession)
+        : undo.kind === 'night-waking'
+          ? restoreNightWaking(undo.deletedSession, undo.previousSession)
+          : undo.kind === 'nursing'
+            ? restoreCompletedNursing(undo.deletedSession)
+            : restoreCareEvent(undo.deletedEvent));
     if (restored !== null) setUndo(null);
+  };
+
+  const openNursingRecord = (sessionId: string) => {
+    const session = completedNursingRecordById(cycleNursingSessions, sessionId);
+    if (session === null) return;
+    clearNursingError();
+    setNursingDrawerOpen(false);
+    setNursingEditor(createCompletedNursingEditorState(session));
+  };
+
+  const openNightRecord = (
+    session: NightSleepSession,
+    phaseId: string | null = null,
+    mode: 'active' | 'edit' = 'edit',
+  ) => {
+    clearSleepError();
+    setNightDraft(null);
+    setNightEditor(createNightRecordEditorState(session, phaseId, mode));
+  };
+
+  const saveNightEditor = async (candidate: NightRecordEditorState) => {
+    const saved = await editNight(candidate.session, nightRecordBoundariesForSave(candidate));
+    if (saved !== null) setNightEditor(null);
+  };
+
+  const deleteNightEditor = async () => {
+    if (nightEditor === null) return;
+    const previousSession = nightEditor.session;
+    const deletedSession = await (nightEditor.phaseId === null
+      ? removeNight(previousSession)
+      : removeNightWaking(previousSession, nightEditor.phaseId));
+    if (deletedSession === null) return;
+    setNightEditor(null);
+    setUndo(
+      nightEditor.phaseId === null
+        ? { kind: 'night', deletedSession }
+        : { kind: 'night-waking', deletedSession, previousSession },
+    );
+  };
+
+  const saveNursingEditor = async (candidate: CompletedNursingEditorState) => {
+    const correction = completedNursingCorrectionForSave(candidate);
+    const saved = await (candidate.activeSession === undefined
+      ? editCompletedNursing(candidate.session, correction)
+      : editActiveNursing(candidate.activeSession, {
+          startedAt: correction.startedAt,
+          snapshotAt: candidate.endedAt,
+          leftDurationSeconds: correction.leftDurationSeconds,
+        }));
+    if (saved !== null) setNursingEditor(null);
+  };
+
+  const deleteNursingEditor = async () => {
+    if (nursingEditor === null) return;
+    const deletedSession = await removeCompletedNursing(nursingEditor.session);
+    if (deletedSession === null) return;
+    setNursingEditor(null);
+    setUndo({ kind: 'nursing', deletedSession });
   };
 
   const openCareEventCreate = (kind: 'diaper' | 'medicine') => {
@@ -293,7 +421,7 @@ export function TodayScreen() {
   };
 
   const openCareEventRecord = (eventId: string) => {
-    const event = careEvents.find((candidate) => candidate.id === eventId);
+    const event = cycleEvents.find((candidate) => candidate.id === eventId);
     if (event === undefined) return;
     clearCareEventError();
     setCareEventDrawer(editCareEventDraft(event));
@@ -328,7 +456,27 @@ export function TodayScreen() {
     );
     if (!decision.drawerOpen) return;
     if (decision.clearError) clearNursingError();
+    setNursingEditor(null);
     setNursingDrawerOpen(decision.drawerOpen);
+  };
+
+  const openRadialRecord = (record: ProjectedRadialActivity) => {
+    if (record.kind === 'nap') {
+      openNapRecord(record.editorRecordId);
+      return;
+    }
+    if (record.kind === 'nursing') {
+      if (activeNursing?.id === record.editorRecordId) openNursingControls(record.editorRecordId);
+      else openNursingRecord(record.editorRecordId);
+      return;
+    }
+    if (record.kind === 'diaper' || record.kind === 'medicine') {
+      openCareEventRecord(record.editorRecordId);
+      return;
+    }
+    const night = sleepSessions.find((session) => session.id === record.editorRecordId);
+    if (night?.kind !== 'night') return;
+    openNightRecord(night, record.kind === 'night-waking' ? record.id : null);
   };
 
   const runNursingTransition = async (
@@ -352,10 +500,61 @@ export function TodayScreen() {
         hint: homeModel.center.hint,
       }
     : {
-        label: `${chronology.length} ${chronology.length === 1 ? 'record' : 'records'}`,
+        label: `${cycleRecordCount} ${cycleRecordCount === 1 ? 'record' : 'records'}`,
         value: null,
         hint: 'Recorded on this day',
       };
+  const historyNight =
+    selectedCycle.projection?.cycle.kind === 'night'
+      ? (sleepSessions.find(
+          (session): session is NightSleepSession =>
+            session.kind === 'night' &&
+            session.id === selectedCycle.projection?.cycle.startAnchor?.recordId,
+        ) ?? null)
+      : null;
+  const historyStart = new Date(
+    selectedCycle.projection?.cycle.startedAt ??
+      zonedDayBounds(selectedDay, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone)[0],
+  );
+  const asleepPhase = historyNight?.phases.find(
+    (phase) =>
+      phase.kind === 'asleep' &&
+      new Date(phase.endedAt ?? now).getTime() - new Date(phase.startedAt).getTime() > 120000,
+  );
+  const suggestedHistoryStart = asleepPhase
+    ? new Date(new Date(asleepPhase.startedAt).getTime() + 60000)
+    : historyStart;
+  const suggestedHistoryEnd = new Date(
+    Math.min(
+      suggestedHistoryStart.getTime() + 300000,
+      asleepPhase ? new Date(asleepPhase.endedAt ?? now).getTime() - 60000 : Date.now(),
+      Date.now(),
+    ),
+  );
+  const saveHistory = async (draft: HistoricalActivityDraft) => {
+    const saved =
+      draft.kind === 'nursing'
+        ? await recordCompletedNursing(
+            draft.startedAt,
+            draft.endedAt,
+            draft.leftDurationSeconds,
+            draft.last,
+          )
+        : draft.kind === 'night-waking'
+          ? historyNight
+            ? await recordWaking(historyNight, draft.startedAt, draft.endedAt)
+            : null
+          : await recordCompletedSleep(draft.kind, draft.startedAt, draft.endedAt);
+    if (saved !== null) {
+      setAddingHistory(false);
+      if (draft.kind === 'night') setCycleSelection('night');
+    }
+  };
+  const activityTimes = { ...sleepActivityTimes, ...nursingActivityTimes, ...careActivityTimes };
+  const recency = (kind: string) => {
+    const at = activityTimes[kind];
+    return at ? `${formatDuration(Math.max(0, now.getTime() - new Date(at).getTime()))} ago` : '—';
+  };
   const quickActions: HomeQuickAction[] = appendCareEventHomeActions(
     appendNursingHomeAction(homeModel.actions, nursingModel.action),
   ).map((action) => {
@@ -363,7 +562,7 @@ export function TodayScreen() {
       return {
         id: action.kind,
         label: action.label,
-        meta: action.meta,
+        meta: recency(action.kind),
         icon: 'N',
         color: '#B35D7D',
         disabled: isNursingMutating,
@@ -376,7 +575,7 @@ export function TodayScreen() {
       return {
         id: action.kind,
         label: action.label,
-        meta: action.meta,
+        meta: recency(action.kind),
         icon: action.kind === 'medicine' ? '+' : 'D',
         color: action.kind === 'medicine' ? '#A65F35' : '#47735A',
         disabled: isCareEventMutating,
@@ -388,7 +587,13 @@ export function TodayScreen() {
     return {
       id: action.kind,
       label: action.label,
-      meta: actionMeta(action.kind),
+      meta: recency(
+        action.kind === 'start-nap' || action.kind === 'open-current-nap'
+          ? 'nap'
+          : action.kind === 'start-night-waking' || action.kind === 'resume-night-sleep'
+            ? 'night-waking'
+            : 'night',
+      ),
       icon: actionIcon(action.kind),
       color: actionColor(action.kind),
       disabled: isSleepMutating || activeUndoPending || action.disabledReason !== null,
@@ -459,16 +664,32 @@ export function TodayScreen() {
           </View>
         ) : null}
 
-        <NapRadialTimeline
-          calendarDay={selectedDay}
+        <RadialCycleSelector onChange={setCycleSelection} selection={cycleSelection} />
+        <RadialCycle
           centerStatus={centerStatus}
-          disabled={isSleepMutating || activeUndoPending}
-          naps={naps}
-          now={now}
-          onPressNapRecord={openNapRecord}
+          disabled={isSleepMutating || isNursingMutating || isCareEventMutating}
+          onPressAnchor={(recordId) => {
+            const night = sleepSessions.find((session) => session.id === recordId);
+            if (night?.kind === 'night')
+              openNightRecord(night, null, night.status === 'active' ? 'active' : 'edit');
+          }}
+          onPressRecord={openRadialRecord}
+          view={selectedCycle}
         />
 
         {isToday ? <HomeQuickActions actions={quickActions} /> : null}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            clearSleepError();
+            clearNursingError();
+            clearCareEventError();
+            setAddingHistory(true);
+          }}
+          style={styles.todayButton}
+        >
+          <Text style={styles.todayButtonText}>Add past activity</Text>
+        </Pressable>
 
         {!isToday ? (
           <Pressable accessibilityRole="button" onPress={goToToday} style={styles.todayButton}>
@@ -486,11 +707,13 @@ export function TodayScreen() {
             <Text style={styles.dateButtonText}>‹</Text>
           </Pressable>
           <View style={styles.dateLabel}>
-            <Text style={styles.sectionTitle}>{isToday ? 'Today’s activity' : 'Activity'}</Text>
+            <Text style={styles.sectionTitle}>
+              {cycleSelection === 'day' ? 'Day log' : 'Night log'}
+            </Text>
             <Text style={styles.sectionMeta}>
               {isToday ? 'Today' : dayFormatter.format(new Date(`${selectedDay}T12:00:00.000Z`))}
               {' · '}
-              {chronology.length} {chronology.length === 1 ? 'record' : 'records'}
+              {cycleRecordCount} {cycleRecordCount === 1 ? 'record' : 'records'}
             </Text>
           </View>
           <Pressable
@@ -506,9 +729,11 @@ export function TodayScreen() {
         </View>
 
         <View style={styles.timeline}>
-          {chronology.length === 0 ? (
+          {selectedCycle.records.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No activity on this day</Text>
+              <Text style={styles.emptyTitle}>
+                No {cycleSelection === 'day' ? 'Day' : 'Night'} activity in this cycle
+              </Text>
               <Text style={styles.emptyText}>
                 {isToday
                   ? `Use an action above when ${LOCAL_DEVELOPMENT_IDENTITY.childDisplayName} sleeps or needs care.`
@@ -516,27 +741,18 @@ export function TodayScreen() {
               </Text>
             </View>
           ) : (
-            chronology.map((item) =>
-              item.kind === 'nap' ? (
-                <NapRow
-                  key={`nap:${item.id}`}
-                  nap={item.nap}
-                  now={now}
-                  onEdit={() => openNapRecord(item.id)}
-                />
-              ) : (
-                <CareEventRow
-                  event={item.event}
-                  key={`care:${item.id}`}
-                  onEdit={() => openCareEventRecord(item.id)}
-                />
-              ),
-            )
+            selectedCycle.records.map((record) => (
+              <CycleLogRow
+                key={`${record.kind}:${record.id}`}
+                onEdit={() => openRadialRecord(record)}
+                record={record}
+              />
+            ))
           )}
         </View>
       </ScrollView>
 
-      {hasLiveController && isToday ? (
+      {hasLiveController ? (
         <ActivityLiveControllerStack
           onReservedSpaceChange={setControllerReservedSpace}
           raised={undo !== null}
@@ -551,13 +767,25 @@ export function TodayScreen() {
             />
           ) : activeSleep?.kind === 'night' &&
             activeController !== null &&
-            activeController.kind !== 'nap' ? (
+            activeController.kind === 'night-awake' ? (
             <ActiveNightTimer
               controller={activeController}
               isMutating={isSleepMutating}
               now={now}
-              onEnd={() => void endNight()}
-              onOpen={() => openSleepAction(activeController.primaryAction)}
+              onEnd={() => {
+                void endNight().then((saved) => {
+                  if (saved !== null) setCycleSelection('day');
+                });
+              }}
+              onOpen={() =>
+                openNightRecord(
+                  activeSleep,
+                  activeController.kind === 'night-awake'
+                    ? (activeSleep.phases.at(-1)?.id ?? null)
+                    : null,
+                  'active',
+                )
+              }
               onResume={() => void resumeNight()}
             />
           ) : null}
@@ -574,15 +802,16 @@ export function TodayScreen() {
 
       {undo !== null ? (
         <View accessibilityLiveRegion="polite" style={styles.undoBanner}>
-          <Text style={styles.undoText}>
-            {undo.kind === 'nap'
-              ? 'Nap deleted'
-              : `${undo.deletedEvent.kind === 'diaper' ? 'Diaper' : 'Medicine'} deleted`}
-          </Text>
+          <Text style={styles.undoText}>{undoRecordLabel(undo)} deleted</Text>
           <Pressable
-            accessibilityHint="Restores the deleted record with the same identifier"
+            accessibilityHint={`Restores the deleted ${undoRecordLabel(undo).toLocaleLowerCase()} with the same identifier`}
             accessibilityRole="button"
-            disabled={undo.kind === 'nap' ? isSleepMutating : isCareEventMutating}
+            disabled={undoMutationPending(
+              undo,
+              isSleepMutating,
+              isNursingMutating,
+              isCareEventMutating,
+            )}
             onPress={() => void undoDelete()}
             style={styles.undoButton}
           >
@@ -591,6 +820,24 @@ export function TodayScreen() {
         </View>
       ) : null}
 
+      {addingHistory ? (
+        <HistoricalActivityDrawer
+          startedAt={suggestedHistoryStart}
+          endedAt={suggestedHistoryEnd}
+          timezone={
+            selectedCycle.projection?.cycle.timezone ?? LOCAL_DEVELOPMENT_IDENTITY.dayTimezone
+          }
+          hasNight={historyNight !== null}
+          busy={isSleepMutating || isNursingMutating}
+          error={sleepError ?? nursingError}
+          onDismiss={() => setAddingHistory(false)}
+          onSave={(draft) => void saveHistory(draft)}
+          onCare={(kind, at) => {
+            setAddingHistory(false);
+            setCareEventDrawer(createCareEventDraft(kind, at));
+          }}
+        />
+      ) : null}
       {editor !== null ? (
         <NapEditorSheet
           editor={editor}
@@ -601,6 +848,16 @@ export function TodayScreen() {
             clearSleepError();
             setEditor(nextEditor);
           }}
+          onContinue={
+            editor.mode === 'edit' && editor.nap.status === 'completed' && activeSleep === null
+              ? () => {
+                  void reopen(editor.nap).then((saved) => {
+                    if (saved?.kind === 'nap')
+                      setEditor({ mode: 'stop', nap: saved, endedAt: new Date() });
+                  });
+                }
+              : null
+          }
           onDelete={editor.mode === 'start' ? null : () => void deleteFromEditor()}
           onSave={(candidate) => void saveEditor(candidate)}
         />
@@ -620,8 +877,63 @@ export function TodayScreen() {
         />
       ) : null}
 
+      {nightEditor !== null ? (
+        <NightRecordEditorDrawer
+          editor={nightEditor}
+          isMutating={isSleepMutating}
+          mutationError={sleepError}
+          onCancel={() => setNightEditor(null)}
+          onChange={(candidate) => {
+            clearSleepError();
+            setNightEditor(candidate);
+          }}
+          onDelete={
+            nightEditor.phaseId !== null || nightEditor.session.status === 'completed'
+              ? () => void deleteNightEditor()
+              : null
+          }
+          now={now}
+          onFinish={() => {
+            const result =
+              nightEditor.phaseId === null
+                ? endNight(undefined, nightEditor.session)
+                : resumeNight(undefined, nightEditor.session);
+            void result.then((saved) => {
+              if (saved !== null) {
+                setNightEditor(null);
+                setCycleSelection(saved.status === 'active' ? 'night' : 'day');
+              }
+            });
+          }}
+          onSave={(candidate) => void saveNightEditor(candidate)}
+        />
+      ) : null}
+
+      {nursingEditor !== null ? (
+        <CompletedNursingEditorDrawer
+          editor={nursingEditor}
+          isMutating={isNursingMutating}
+          mutationError={nursingError}
+          onCancel={() => setNursingEditor(null)}
+          onChange={(candidate) => {
+            clearNursingError();
+            setNursingEditor(candidate);
+          }}
+          onDelete={
+            nursingEditor.activeSession === undefined ? () => void deleteNursingEditor() : null
+          }
+          onSave={(candidate) => void saveNursingEditor(candidate)}
+        />
+      ) : null}
+
       {nursingDrawerOpen ? (
         <NursingDrawer
+          onEdit={() => {
+            if (activeNursing === null) return;
+            clearNursingError();
+            setNursingEditor(createActiveNursingEditorState(activeNursing, new Date()));
+            setNursingDrawerOpen(false);
+          }}
           activeSession={activeNursing}
           isMutating={isNursingMutating}
           latestCompletedLast={latestCompletedLast}
@@ -638,9 +950,9 @@ export function TodayScreen() {
               `Nursing resumed on ${side === 'left' ? 'Left' : 'Right'} breast`,
             )
           }
-          onStart={(side) =>
+          onStart={(side, startedAt) =>
             void runNursingTransition(
-              startNursing(side),
+              startNursing(side, startedAt),
               `Nursing started on ${side === 'left' ? 'Left' : 'Right'} breast`,
             )
           }
@@ -736,7 +1048,6 @@ function ActiveNightTimer({
     <ActivityLiveController
       accentColor={awake ? '#52728A' : '#5B4C94'}
       accessibilityLabel={`${awake ? 'Night waking' : 'Night sleep'} running for ${liveDuration}`}
-      actionIcon={awake ? '↻' : undefined}
       activityLabel={awake ? 'Night waking' : 'Night sleep'}
       disabled={isMutating}
       elapsedLabel={liveDuration}
@@ -784,21 +1095,6 @@ function ActiveNursingTimer({
   );
 }
 
-function actionMeta(kind: SleepHomeActionKind): string {
-  switch (kind) {
-    case 'open-current-nap':
-      return 'Running';
-    case 'end-night-sleep':
-      return 'End Night';
-    case 'start-night-waking':
-      return 'Awake phase';
-    case 'resume-night-sleep':
-      return 'Resume sleep';
-    default:
-      return 'Start';
-  }
-}
-
 function actionIcon(kind: SleepHomeActionKind): string {
   switch (kind) {
     case 'start-night-sleep':
@@ -826,69 +1122,69 @@ function actionColor(kind: SleepHomeActionKind): string {
   }
 }
 
-/**
- * Renders an editable timeline row for a nap session.
- *
- * @param nap - The nap session to display
- * @param now - The current time used to calculate the duration of an active nap
- * @param onEdit - Callback invoked when the row is pressed
- */
-function NapRow({ nap, now, onEdit }: { nap: NapSession; now: Date; onEdit: () => void }) {
-  const end = nap.endedAt ? new Date(nap.endedAt) : now;
-  const duration = elapsedMilliseconds(nap.startedAt, end);
-  const timeRange = formatTimeRange(nap);
-
+/** Precision and screen-reader equivalent of one selected radial record. */
+function CycleLogRow({ onEdit, record }: { onEdit: () => void; record: ProjectedRadialActivity }) {
+  const title = cycleRecordTitle(record);
+  const detail = cycleRecordDetail(record);
   return (
     <Pressable
-      accessibilityLabel={`Edit ${nap.status === 'active' ? 'active ' : ''}nap, ${timeRange}, ${formatDuration(duration)}`}
-      accessibilityRole="button"
-      onPress={onEdit}
-      style={({ pressed }) => [styles.timelineRow, pressed && styles.rowPressed]}
-    >
-      <View style={styles.timelineMarker} />
-      <View style={styles.timelineBody}>
-        <View style={styles.rowCopy}>
-          <Text style={styles.rowTitle}>{nap.status === 'active' ? 'Nap · active' : 'Nap'}</Text>
-          <Text style={styles.rowTime}>
-            {timeRange} · {formatDuration(duration)}
-          </Text>
-        </View>
-        <Text style={styles.editText}>Edit</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-/** Displays one exact Diaper or Medicine point event without exposing Medicine text in diagnostics. */
-function CareEventRow({ event, onEdit }: { event: CareEvent; onEdit: () => void }) {
-  const localTime = clockFormatter.format(new Date(event.occurredAt));
-  const title =
-    event.kind === 'diaper' ? `Diaper · ${capitalize(event.data.diaperType)}` : 'Medicine';
-  const detail = event.kind === 'medicine' ? event.data.note : 'Logged';
-  return (
-    <Pressable
-      accessibilityLabel={`Edit ${event.kind === 'diaper' ? `${event.data.diaperType} diaper` : 'Medicine event'} at ${localTime}`}
+      accessibilityLabel={`Edit ${title}, ${detail}`}
       accessibilityRole="button"
       onPress={onEdit}
       style={({ pressed }) => [styles.timelineRow, pressed && styles.rowPressed]}
     >
       <View
-        style={[
-          styles.timelineMarker,
-          event.kind === 'medicine' ? styles.medicineMarker : styles.diaperMarker,
-        ]}
+        style={[styles.timelineMarker, { backgroundColor: radialActivityColor(record.kind) }]}
       />
       <View style={styles.timelineBody}>
         <View style={styles.rowCopy}>
           <Text style={styles.rowTitle}>{title}</Text>
-          <Text numberOfLines={2} style={styles.rowTime}>
-            {localTime} · {detail}
-          </Text>
+          <Text style={styles.rowTime}>{detail}</Text>
         </View>
-        <Text style={styles.editText}>Edit</Text>
+        <Text style={[styles.editText, { color: radialActivityColor(record.kind) }]}>Edit</Text>
       </View>
     </Pressable>
   );
+}
+
+function cycleRecordTitle(record: ProjectedRadialActivity): string {
+  if (record.kind === 'night') return 'Night sleep';
+  if (record.kind === 'night-waking') return 'Night waking';
+  if (record.kind === 'nursing') return `Nursing${record.status === 'paused' ? ' · paused' : ''}`;
+  if (record.kind === 'diaper') return `Diaper · ${capitalize(record.diaperType ?? 'unknown')}`;
+  return capitalize(record.kind);
+}
+
+function cycleRecordDetail(record: ProjectedRadialActivity): string {
+  const start = clockFormatter.format(new Date(record.occurredAt));
+  if (record.projection.type === 'point') {
+    return record.kind === 'medicine' && record.medicineNote !== undefined
+      ? `${start} · ${record.medicineNote}`
+      : start;
+  }
+  const end = record.endedAt === null ? 'now' : clockFormatter.format(new Date(record.endedAt));
+  const duration = formatDuration(record.projection.arc?.actualDurationMs ?? 0);
+  return `${start} – ${end} · ${duration}`;
+}
+
+function undoRecordLabel(undo: UndoState): string {
+  if (undo.kind === 'nap') return 'Nap';
+  if (undo.kind === 'night') return 'Night sleep';
+  if (undo.kind === 'night-waking') return 'Night waking';
+  if (undo.kind === 'nursing') return 'Nursing session';
+  return undo.deletedEvent.kind === 'diaper' ? 'Diaper' : 'Medicine';
+}
+
+function undoMutationPending(
+  undo: UndoState,
+  sleepPending: boolean,
+  nursingPending: boolean,
+  careEventPending: boolean,
+): boolean {
+  if (undo.kind === 'nap') return sleepPending;
+  if (undo.kind === 'night' || undo.kind === 'night-waking') return sleepPending;
+  if (undo.kind === 'nursing') return nursingPending;
+  return careEventPending;
 }
 
 function capitalize(value: string): string {
@@ -918,24 +1214,6 @@ function useAdaptiveClock(showSeconds: boolean): Date {
   }, [showSeconds]);
 
   return now;
-}
-
-/**
- * Formats a nap's start and end times, including calendar dates when they occur on different local days.
- *
- * @param nap - The nap session to format
- * @returns The formatted time range, using “now” for an active nap
- */
-function formatTimeRange(nap: NapSession): string {
-  const start = new Date(nap.startedAt);
-  if (nap.endedAt === null) return `${clockFormatter.format(start)} – now`;
-
-  const end = new Date(nap.endedAt);
-  const startDay = calendarDayForInstant(start, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone);
-  const endDay = calendarDayForInstant(end, LOCAL_DEVELOPMENT_IDENTITY.dayTimezone);
-  if (startDay === endDay) return `${clockFormatter.format(start)} – ${clockFormatter.format(end)}`;
-
-  return `${shortDayFormatter.format(start)}, ${clockFormatter.format(start)} – ${shortDayFormatter.format(end)}, ${clockFormatter.format(end)}`;
 }
 
 const styles = StyleSheet.create({
@@ -1034,8 +1312,6 @@ const styles = StyleSheet.create({
   timelineRow: { minHeight: 76, flexDirection: 'row', alignItems: 'stretch', paddingLeft: 18 },
   rowPressed: { backgroundColor: '#FAF8F5' },
   timelineMarker: { width: 4, borderRadius: 2, backgroundColor: palette.nap, marginVertical: 16 },
-  diaperMarker: { backgroundColor: '#47735A' },
-  medicineMarker: { backgroundColor: '#A65F35' },
   timelineBody: {
     flex: 1,
     minHeight: 76,

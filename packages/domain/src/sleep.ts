@@ -1,7 +1,7 @@
 import { toUtcInstant } from './time';
 import type {
-  MutationContext,
   JsonValue,
+  MutationContext,
   NightSleepMutation,
   NightSleepSession,
   SleepMutation,
@@ -179,6 +179,212 @@ export function editNightSleep(
   return mutation(edited, phases, context, occurredAt, 'edit_sleep_session', session.version, {
     phases: phases.map(({ id, startedAt, endedAt }) => ({ id, startedAt, endedAt })),
   });
+}
+
+/** Removes one waking and joins the sleep on either side, preserving Night bounds. */
+export function deleteNightWaking(
+  session: NightSleepSession,
+  phaseId: string,
+  context: MutationContext,
+): NightSleepMutation {
+  assertValidSleepSession(session);
+  assertNotDeleted(session);
+  const index = session.phases.findIndex((phase) => phase.id === phaseId);
+  const awake = session.phases[index];
+  const previous = session.phases[index - 1];
+  if (awake?.kind !== 'awake' || previous?.kind !== 'asleep') {
+    throw invalidAggregate('Choose an existing Night waking to delete.');
+  }
+  const following = session.phases[index + 1];
+  const occurredAt = toUtcInstant(context.now);
+  for (const phase of session.phases) {
+    transitionInstant(new Date(phase.startedAt), occurredAt);
+    if (phase.endedAt !== null) transitionInstant(new Date(phase.endedAt), occurredAt);
+  }
+  const retiredIds = new Set([awake.id, ...(following === undefined ? [] : [following.id])]);
+  const changedPhases = session.phases.map(
+    (phase): SleepPhase => ({
+      ...phase,
+      endedAt: phase.id === previous.id ? (following ?? awake).endedAt : phase.endedAt,
+      updatedBy: context.caregiverId,
+      version: phase.version + 1,
+      deletedAt: retiredIds.has(phase.id) ? occurredAt : null,
+    }),
+  );
+  const edited: NightSleepSession = {
+    ...session,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+    phases: changedPhases.filter((phase) => !retiredIds.has(phase.id)),
+  };
+  assertValidSleepSession(edited);
+  return {
+    ...mutation(
+      edited,
+      changedPhases,
+      context,
+      occurredAt,
+      'delete_night_waking',
+      session.version,
+      {
+        phaseId,
+        phases: changedPhases.map(({ id, startedAt, endedAt, deletedAt }) => ({
+          id,
+          startedAt,
+          endedAt,
+          deletedAt,
+        })),
+      },
+    ),
+    retiredPhases: changedPhases.filter((phase) => retiredIds.has(phase.id)),
+  };
+}
+
+/** Versioned Undo: a later Night change makes this snapshot stale, never overwritten. */
+export function restoreNightWaking(
+  session: NightSleepSession,
+  previous: NightSleepSession,
+  context: MutationContext,
+): NightSleepMutation {
+  assertValidSleepSession(session);
+  assertValidSleepSession(previous);
+  assertNotDeleted(session);
+  assertNotDeleted(previous);
+  const removed = previous.phases.find(
+    (phase) => phase.kind === 'awake' && !session.phases.some(({ id }) => id === phase.id),
+  );
+  if (
+    session.id !== previous.id ||
+    session.version !== previous.version + 1 ||
+    removed === undefined
+  ) {
+    throw invalidAggregate('This Night changed. Undo is no longer available.');
+  }
+  const projected = deleteNightWaking(previous, removed.id, context).session;
+  // Audit metadata may differ from the caregiver and instant that performed the deletion.
+  const timeline = (value: NightSleepSession) =>
+    JSON.stringify({
+      id: value.id,
+      childId: value.childId,
+      status: value.status,
+      startedAt: value.startedAt,
+      endedAt: value.endedAt,
+      phases: value.phases.map(({ id, kind, startedAt, endedAt, version }) => ({
+        id,
+        kind,
+        startedAt,
+        endedAt,
+        version,
+      })),
+    });
+  if (timeline(projected) !== timeline(session)) {
+    throw invalidAggregate('This Night changed. Undo is no longer available.');
+  }
+  const phases = previous.phases.map((phase) => ({
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 2,
+  }));
+  const restored: NightSleepSession = {
+    ...session,
+    phases,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+  };
+  assertValidSleepSession(restored);
+  return mutation(
+    restored,
+    phases,
+    context,
+    toUtcInstant(context.now),
+    'restore_night_waking',
+    session.version,
+    {
+      phaseId: removed.id,
+      phases: phases.map(({ id, startedAt, endedAt, deletedAt }) => ({
+        id,
+        startedAt,
+        endedAt,
+        deletedAt,
+      })),
+    },
+  );
+}
+
+/** Tombstones one completed Night aggregate and every phase in the same mutation. */
+export function deleteNightSleep(
+  session: NightSleepSession,
+  context: MutationContext,
+): NightSleepMutation {
+  assertNotDeleted(session);
+  if (session.status !== 'completed') {
+    throw new SleepTransitionError(
+      'invalid_transition',
+      'Only completed Night sleep can be deleted.',
+    );
+  }
+  const occurredAt = toUtcInstant(context.now);
+  const phases = session.phases.map((phase) => ({
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: occurredAt,
+  }));
+  const deleted: NightSleepSession = {
+    ...session,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+    deletedAt: occurredAt,
+    phases,
+  };
+  assertValidSleepSession(deleted);
+  return mutation(
+    deleted,
+    phases,
+    context,
+    occurredAt,
+    'delete_sleep_session',
+    session.version,
+    {},
+  );
+}
+
+/** Restores one deleted completed Night aggregate and all of its canonical phases. */
+export function restoreNightSleep(
+  session: NightSleepSession,
+  context: MutationContext,
+): NightSleepMutation {
+  assertValidSleepSession(session);
+  if (session.deletedAt === null || session.status !== 'completed') {
+    throw new SleepTransitionError(
+      'invalid_transition',
+      'Only deleted completed Night sleep can be restored.',
+    );
+  }
+  const occurredAt = toUtcInstant(context.now);
+  const phases = session.phases.map((phase) => ({
+    ...phase,
+    updatedBy: context.caregiverId,
+    version: phase.version + 1,
+    deletedAt: null,
+  }));
+  const restored: NightSleepSession = {
+    ...session,
+    updatedBy: context.caregiverId,
+    version: session.version + 1,
+    deletedAt: null,
+    phases,
+  };
+  assertValidSleepSession(restored);
+  return mutation(
+    restored,
+    phases,
+    context,
+    occurredAt,
+    'restore_sleep_session',
+    session.version,
+    {},
+  );
 }
 
 /** Validates the persisted Sleep aggregate independently of UI or storage frameworks. */
