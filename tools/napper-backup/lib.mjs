@@ -210,9 +210,7 @@ export function resolveBabyId(babiesResponse, { babyId, babyName } = {}) {
 
   if (candidates.length === 1) return candidates[0].id;
 
-  throw new Error(
-    'Could not uniquely resolve the baby. Set --baby-id or NAPPER_BABY_ID.',
-  );
+  throw new Error('Could not uniquely resolve the baby. Set --baby-id or NAPPER_BABY_ID.');
 }
 
 export async function writeJson(filePath, value) {
@@ -317,11 +315,7 @@ export class NapperClient {
     try {
       return await this.rawRequest(pathname, init, true);
     } catch (error) {
-      if (
-        error instanceof NapperHttpError &&
-        error.status === 401 &&
-        this.refreshToken
-      ) {
+      if (error instanceof NapperHttpError && error.status === 401 && this.refreshToken) {
         await this.refresh();
         return this.rawRequest(pathname, init, true);
       }
@@ -393,10 +387,7 @@ export async function discoverLogDates(client, babyId, from, to, outputDirectory
 
     try {
       const response = await client.get(pathname);
-      await writeJson(
-        path.join(outputDirectory, `${rangeFrom}_${rangeTo}.json`),
-        response,
-      );
+      await writeJson(path.join(outputDirectory, `${rangeFrom}_${rangeTo}.json`), response);
       for (const date of collectIsoDates(response)) {
         if (date >= rangeFrom && date <= rangeTo) discovered.add(date);
       }
