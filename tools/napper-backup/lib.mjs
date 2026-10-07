@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
-export const API_BASE = "https://api.napper.app";
-export const DEFAULT_FROM = "2000-01-01";
+export const API_BASE = 'https://api.napper.app';
+export const DEFAULT_FROM = '2000-01-01';
 
 const RANGE_SPLIT_STATUSES = new Set([400, 413, 414, 422]);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -12,7 +12,7 @@ const DATE_IN_TEXT_PATTERN = /\d{4}-\d{2}-\d{2}/g;
 export class NapperHttpError extends Error {
   constructor(status, method, pathname, body) {
     super(`${method} ${pathname} failed with HTTP ${status}`);
-    this.name = "NapperHttpError";
+    this.name = 'NapperHttpError';
     this.status = status;
     this.method = method;
     this.pathname = pathname;
@@ -20,7 +20,7 @@ export class NapperHttpError extends Error {
   }
 }
 
-export function normalizeDate(value, name = "date") {
+export function normalizeDate(value, name = 'date') {
   if (!DATE_PATTERN.test(value)) {
     throw new Error(`${name} must use YYYY-MM-DD`);
   }
@@ -44,8 +44,8 @@ export function addDays(date, amount) {
 }
 
 export function daysBetweenInclusive(from, to) {
-  const start = new Date(`${normalizeDate(from, "from")}T00:00:00Z`);
-  const end = new Date(`${normalizeDate(to, "to")}T00:00:00Z`);
+  const start = new Date(`${normalizeDate(from, 'from')}T00:00:00Z`);
+  const end = new Date(`${normalizeDate(to, 'to')}T00:00:00Z`);
   return Math.floor((end.valueOf() - start.valueOf()) / 86_400_000) + 1;
 }
 
@@ -55,7 +55,7 @@ export function midpointDate(from, to) {
 }
 
 export function collectIsoDates(value, result = new Set()) {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     for (const match of value.matchAll(DATE_IN_TEXT_PATTERN)) {
       try {
         result.add(normalizeDate(match[0]));
@@ -73,7 +73,7 @@ export function collectIsoDates(value, result = new Set()) {
     return result;
   }
 
-  if (value && typeof value === "object") {
+  if (value && typeof value === 'object') {
     for (const [key, entry] of Object.entries(value)) {
       collectIsoDates(key, result);
       collectIsoDates(entry, result);
@@ -87,7 +87,7 @@ export function extractLogs(value) {
   const arrays = [];
 
   function visit(node) {
-    if (!node || typeof node !== "object") return;
+    if (!node || typeof node !== 'object') return;
 
     if (Array.isArray(node)) {
       for (const entry of node) visit(entry);
@@ -95,7 +95,7 @@ export function extractLogs(value) {
     }
 
     for (const [key, entry] of Object.entries(node)) {
-      if (key.toLowerCase() === "logs" && Array.isArray(entry)) {
+      if (key.toLowerCase() === 'logs' && Array.isArray(entry)) {
         arrays.push(entry);
       } else {
         visit(entry);
@@ -115,9 +115,9 @@ export function extractLogs(value) {
 export function extractLogIds(value) {
   const ids = new Set();
   for (const log of extractLogs(value)) {
-    if (!log || typeof log !== "object") continue;
+    if (!log || typeof log !== 'object') continue;
     const candidate = log.id ?? log.logId ?? log.uuid;
-    if (typeof candidate === "string" || typeof candidate === "number") {
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
       ids.add(String(candidate));
     }
   }
@@ -129,15 +129,15 @@ export function extractAuthTokens(value) {
   const rawIdToken = root?.idToken;
   const rawRefreshToken = root?.refreshToken;
   const idToken =
-    typeof rawIdToken === "string"
+    typeof rawIdToken === 'string'
       ? rawIdToken
-      : typeof rawIdToken?.token === "string"
+      : typeof rawIdToken?.token === 'string'
         ? rawIdToken.token
         : null;
   const refreshToken =
-    typeof rawRefreshToken === "string"
+    typeof rawRefreshToken === 'string'
       ? rawRefreshToken
-      : typeof rawRefreshToken?.token === "string"
+      : typeof rawRefreshToken?.token === 'string'
         ? rawRefreshToken.token
         : null;
 
@@ -149,7 +149,7 @@ export function findBabyCandidates(value) {
   const seen = new Set();
 
   function visit(node) {
-    if (!node || typeof node !== "object") return;
+    if (!node || typeof node !== 'object') return;
 
     if (Array.isArray(node)) {
       for (const entry of node) visit(entry);
@@ -158,11 +158,11 @@ export function findBabyCandidates(value) {
 
     const id = node.id ?? node.babyId;
     const name = node.name ?? node.firstName ?? node.displayName;
-    if (typeof id === "string" && (typeof name === "string" || "birthDate" in node)) {
-      const key = `${id}:${String(name ?? "")}`;
+    if (typeof id === 'string' && (typeof name === 'string' || 'birthDate' in node)) {
+      const key = `${id}:${String(name ?? '')}`;
       if (!seen.has(key)) {
         seen.add(key);
-        candidates.push({ id, name: typeof name === "string" ? name : null });
+        candidates.push({ id, name: typeof name === 'string' ? name : null });
       }
     }
 
@@ -204,34 +204,34 @@ export function resolveBabyId(babiesResponse, { babyId, babyName } = {}) {
     if (partial.length === 1) return partial[0].id;
 
     throw new Error(
-      `Could not uniquely resolve baby name "${babyName}". Set --baby-id or NAPPER_BABY_ID.`,
+      `Could not uniquely resolve baby name '${babyName}'. Set --baby-id or NAPPER_BABY_ID.`,
     );
   }
 
   if (candidates.length === 1) return candidates[0].id;
 
   throw new Error(
-    "Could not uniquely resolve the baby. Set --baby-id or NAPPER_BABY_ID.",
+    'Could not uniquely resolve the baby. Set --baby-id or NAPPER_BABY_ID.',
   );
 }
 
 export async function writeJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
 export async function loadAuthFile(filePath) {
   try {
-    const content = await readFile(filePath, "utf8");
+    const content = await readFile(filePath, 'utf8');
     return extractAuthTokens(JSON.parse(content));
   } catch (error) {
-    if (error?.code === "ENOENT") return { idToken: null, refreshToken: null };
+    if (error?.code === 'ENOENT') return { idToken: null, refreshToken: null };
     throw error;
   }
 }
 
 export async function saveAuthFile(filePath, tokens) {
-  if (!tokens.idToken) throw new Error("Refusing to save auth without an ID token");
+  if (!tokens.idToken) throw new Error('Refusing to save auth without an ID token');
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeJson(filePath, {
     idToken: tokens.idToken,
@@ -247,15 +247,15 @@ export class NapperClient {
     authFile,
     apiBase = API_BASE,
     fetchImpl = fetch,
-    device = process.env.NAPPER_DEVICE ?? "NapperBackup",
-    version = process.env.NAPPER_VERSION ?? "6.71.0",
-    language = process.env.NAPPER_LANGUAGE ?? "en",
-    locale = process.env.NAPPER_LOCALE ?? "en-GB",
+    device = process.env.NAPPER_DEVICE ?? 'NapperBackup',
+    version = process.env.NAPPER_VERSION ?? '6.71.0',
+    language = process.env.NAPPER_LANGUAGE ?? 'en',
+    locale = process.env.NAPPER_LOCALE ?? 'en-GB',
   } = {}) {
     this.idToken = idToken ?? null;
     this.refreshToken = refreshToken ?? null;
     this.authFile = authFile ?? null;
-    this.apiBase = apiBase.replace(/\/$/, "");
+    this.apiBase = apiBase.replace(/\/$/, '');
     this.fetchImpl = fetchImpl;
     this.device = device;
     this.version = version;
@@ -265,18 +265,18 @@ export class NapperClient {
 
   headers({ authenticated = true, json = false } = {}) {
     const headers = {
-      Accept: "application/json",
-      Source: "APP",
+      Accept: 'application/json',
+      Source: 'APP',
       Version: this.version,
       Device: this.device,
       Language: this.language,
       Locale: this.locale,
-      "Local-Timestamp": new Date().toISOString(),
+      'Local-Timestamp': new Date().toISOString(),
     };
 
-    if (json) headers["Content-Type"] = "application/json";
+    if (json) headers['Content-Type'] = 'application/json';
     if (authenticated) {
-      if (!this.idToken) throw new Error("No Napper ID token is available");
+      if (!this.idToken) throw new Error('No Napper ID token is available');
       headers.Authorization = `Bearer ${this.idToken}`;
     }
 
@@ -284,13 +284,13 @@ export class NapperClient {
   }
 
   async rawRequest(pathname, init = {}, authenticated = true) {
-    const method = init.method ?? "GET";
+    const method = init.method ?? 'GET';
     const response = await this.fetchImpl(`${this.apiBase}${pathname}`, {
       ...init,
       headers: {
         ...this.headers({
           authenticated,
-          json: typeof init.body === "string",
+          json: typeof init.body === 'string',
         }),
         ...(init.headers ?? {}),
       },
@@ -335,9 +335,9 @@ export class NapperClient {
 
   async login(email, otp) {
     const response = await this.rawRequest(
-      "/auth/email-login",
+      '/auth/email-login',
       {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify({ email, otp, useDeviceId: false }),
       },
       false,
@@ -348,11 +348,11 @@ export class NapperClient {
 
   async refresh() {
     if (!this.idToken || !this.refreshToken) {
-      throw new Error("Both ID token and refresh token are required to refresh");
+      throw new Error('Both ID token and refresh token are required to refresh');
     }
 
-    const response = await this.rawRequest("/auth/refresh-token", {
-      method: "POST",
+    const response = await this.rawRequest('/auth/refresh-token', {
+      method: 'POST',
       body: JSON.stringify({
         idToken: this.idToken,
         refreshToken: this.refreshToken,
@@ -365,7 +365,7 @@ export class NapperClient {
   async acceptAuthResponse(response) {
     const tokens = extractAuthTokens(response);
     if (!tokens.idToken) {
-      throw new Error("Napper auth response did not contain item.idToken.token");
+      throw new Error('Napper auth response did not contain item.idToken.token');
     }
 
     this.idToken = tokens.idToken;
@@ -381,9 +381,9 @@ export class NapperClient {
 }
 
 export async function discoverLogDates(client, babyId, from, to, outputDirectory) {
-  normalizeDate(from, "from");
-  normalizeDate(to, "to");
-  if (from > to) throw new Error("from must not be later than to");
+  normalizeDate(from, 'from');
+  normalizeDate(to, 'to');
+  if (from > to) throw new Error('from must not be later than to');
 
   const discovered = new Set();
 
@@ -420,7 +420,7 @@ export async function discoverLogDates(client, babyId, from, to, outputDirectory
 }
 
 export async function mapLimit(values, limit, action) {
-  if (!Number.isInteger(limit) || limit < 1) throw new Error("limit must be >= 1");
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be >= 1');
 
   const result = new Array(values.length);
   let cursor = 0;
@@ -438,7 +438,7 @@ export async function mapLimit(values, limit, action) {
   return result;
 }
 
-export async function fileInventory(rootDirectory, excludedBasenames = new Set(["manifest.json"])) {
+export async function fileInventory(rootDirectory, excludedBasenames = new Set(['manifest.json'])) {
   const files = [];
 
   async function visit(directory) {
@@ -450,9 +450,9 @@ export async function fileInventory(rootDirectory, excludedBasenames = new Set([
       } else if (!excludedBasenames.has(name)) {
         const bytes = await readFile(fullPath);
         files.push({
-          path: path.relative(rootDirectory, fullPath).split(path.sep).join("/"),
+          path: path.relative(rootDirectory, fullPath).split(path.sep).join('/'),
           bytes: bytes.byteLength,
-          sha256: createHash("sha256").update(bytes).digest("hex"),
+          sha256: createHash('sha256').update(bytes).digest('hex'),
         });
       }
     }
