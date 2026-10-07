@@ -61,8 +61,7 @@ function parseArgs(argv) {
     from: DEFAULT_FROM,
     to: todayDate(),
     output: null,
-    authFile:
-      process.env.NAPPER_AUTH_FILE ?? path.join(toolDirectory, '.napper-auth.json'),
+    authFile: process.env.NAPPER_AUTH_FILE ?? path.join(toolDirectory, '.napper-auth.json'),
     concurrency: 4,
     includeSleepStats: true,
     verifyRanges: true,
@@ -130,7 +129,10 @@ function parseArgs(argv) {
   }
 
   if (!options.output) {
-    const timestamp = new Date().toISOString().replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z');
+    const timestamp = new Date()
+      .toISOString()
+      .replaceAll(':', '-')
+      .replace(/\.\d{3}Z$/, 'Z');
     options.output = path.join(toolDirectory, 'backup-output', timestamp);
   }
 
