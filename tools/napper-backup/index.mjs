@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_FROM,
   NapperClient,
@@ -17,7 +17,7 @@ import {
   resolveBabyId,
   todayDate,
   writeJson,
-} from "./lib.mjs";
+} from './lib.mjs';
 
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -62,7 +62,7 @@ function parseArgs(argv) {
     to: todayDate(),
     output: null,
     authFile:
-      process.env.NAPPER_AUTH_FILE ?? path.join(toolDirectory, ".napper-auth.json"),
+      process.env.NAPPER_AUTH_FILE ?? path.join(toolDirectory, '.napper-auth.json'),
     concurrency: 4,
     includeSleepStats: true,
     verifyRanges: true,
@@ -71,46 +71,46 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
 
-    if (argument === "--help" || argument === "-h") {
+    if (argument === '--help' || argument === '-h') {
       options.help = true;
       continue;
     }
 
-    if (argument === "--no-sleep-stats") {
+    if (argument === '--no-sleep-stats') {
       options.includeSleepStats = false;
       continue;
     }
 
-    if (argument === "--no-range-verification") {
+    if (argument === '--no-range-verification') {
       options.verifyRanges = false;
       continue;
     }
 
     const next = argv[index + 1];
-    if (!next || next.startsWith("--")) {
+    if (!next || next.startsWith('--')) {
       throw new Error(`Missing value after ${argument}`);
     }
 
     switch (argument) {
-      case "--baby-id":
+      case '--baby-id':
         options.babyId = next;
         break;
-      case "--baby-name":
+      case '--baby-name':
         options.babyName = next;
         break;
-      case "--from":
+      case '--from':
         options.from = next;
         break;
-      case "--to":
+      case '--to':
         options.to = next;
         break;
-      case "--output":
+      case '--output':
         options.output = path.resolve(next);
         break;
-      case "--auth-file":
+      case '--auth-file':
         options.authFile = path.resolve(next);
         break;
-      case "--concurrency":
+      case '--concurrency':
         options.concurrency = Number(next);
         break;
       default:
@@ -120,18 +120,18 @@ function parseArgs(argv) {
     index += 1;
   }
 
-  normalizeDate(options.from, "from");
-  normalizeDate(options.to, "to");
+  normalizeDate(options.from, 'from');
+  normalizeDate(options.to, 'to');
   if (options.from > options.to) {
-    throw new Error("--from must not be later than --to");
+    throw new Error('--from must not be later than --to');
   }
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
-    throw new Error("--concurrency must be a positive integer");
+    throw new Error('--concurrency must be a positive integer');
   }
 
   if (!options.output) {
-    const timestamp = new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z");
-    options.output = path.join(toolDirectory, "backup-output", timestamp);
+    const timestamp = new Date().toISOString().replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z');
+    options.output = path.join(toolDirectory, 'backup-output', timestamp);
   }
 
   return options;
@@ -159,7 +159,7 @@ async function safeMetadataGet(client, pathname, filePath, warnings, label) {
     return response;
   } catch (error) {
     warnings.push({
-      kind: "metadata-request-failed",
+      kind: 'metadata-request-failed',
       label,
       ...errorSummary(error),
     });
@@ -207,7 +207,7 @@ async function verifyMonthlyRanges({
         const onlyInRange = difference(rangeIds, dailyIds);
         if (missingFromRange.length > 0 || onlyInRange.length > 0) {
           warnings.push({
-            kind: "range-id-mismatch",
+            kind: 'range-id-mismatch',
             month,
             dailyIds: dailyIds.size,
             rangeIds: rangeIds.size,
@@ -219,7 +219,7 @@ async function verifyMonthlyRanges({
         const rangeLogCount = extractLogs(response).length;
         if (rangeLogCount > 0 && dailyLogCount > 0 && rangeLogCount !== dailyLogCount) {
           warnings.push({
-            kind: "range-count-mismatch",
+            kind: 'range-count-mismatch',
             month,
             dailyLogCount,
             rangeLogCount,
@@ -228,7 +228,7 @@ async function verifyMonthlyRanges({
       }
     } catch (error) {
       warnings.push({
-        kind: "range-verification-failed",
+        kind: 'range-verification-failed',
         month,
         ...errorSummary(error),
       });
@@ -260,8 +260,8 @@ async function main() {
     const otp = process.env.NAPPER_OTP;
     if (!email || !otp) {
       throw new Error(
-        "No Napper credentials found. Set NAPPER_ID_TOKEN (and preferably NAPPER_REFRESH_TOKEN), " +
-          "or set NAPPER_EMAIL and NAPPER_OTP for a one-time login.",
+        'No Napper credentials found. Set NAPPER_ID_TOKEN (and preferably NAPPER_REFRESH_TOKEN), ' +
+          'or set NAPPER_EMAIL and NAPPER_OTP for a one-time login.',
       );
     }
 
@@ -272,14 +272,14 @@ async function main() {
   const errors = [];
   const createdAt = new Date().toISOString();
 
-  const metadataDirectory = path.join(options.output, "metadata");
-  const discoveryDirectory = path.join(metadataDirectory, "days-with-logs");
-  const logsDirectory = path.join(options.output, "logs");
-  const sleepStatsDirectory = path.join(options.output, "sleep-stats");
-  const rangesDirectory = path.join(options.output, "ranges");
+  const metadataDirectory = path.join(options.output, 'metadata');
+  const discoveryDirectory = path.join(metadataDirectory, 'days-with-logs');
+  const logsDirectory = path.join(options.output, 'logs');
+  const sleepStatsDirectory = path.join(options.output, 'sleep-stats');
+  const rangesDirectory = path.join(options.output, 'ranges');
 
-  const babies = await client.get("/babies");
-  await writeJson(path.join(metadataDirectory, "babies.json"), babies);
+  const babies = await client.get('/babies');
+  await writeJson(path.join(metadataDirectory, 'babies.json'), babies);
 
   const babyId = resolveBabyId(babies, {
     babyId: options.babyId,
@@ -289,17 +289,17 @@ async function main() {
   const logsSummary = await safeMetadataGet(
     client,
     `/logs-summary/${encodeURIComponent(babyId)}`,
-    path.join(metadataDirectory, "logs-summary.json"),
+    path.join(metadataDirectory, 'logs-summary.json'),
     warnings,
-    "logs-summary",
+    'logs-summary',
   );
 
   await safeMetadataGet(
     client,
     `/babies/${encodeURIComponent(babyId)}/routines`,
-    path.join(metadataDirectory, "routines.json"),
+    path.join(metadataDirectory, 'routines.json'),
     warnings,
-    "routines",
+    'routines',
   );
 
   const dates = await discoverLogDates(
@@ -312,9 +312,9 @@ async function main() {
 
   if (dates.length === 0) {
     errors.push({
-      kind: "no-log-dates-discovered",
+      kind: 'no-log-dates-discovered',
       message:
-        "days-with-logs returned no usable YYYY-MM-DD dates, so completeness cannot be proven.",
+        'days-with-logs returned no usable YYYY-MM-DD dates, so completeness cannot be proven.',
     });
   }
 
@@ -330,15 +330,15 @@ async function main() {
 
       if (extractLogs(response).length === 0) {
         warnings.push({
-          kind: "discovered-day-without-extracted-logs",
+          kind: 'discovered-day-without-extracted-logs',
           date,
           message:
-            "The raw response was saved, but the generic validator did not find a `logs` array.",
+            'The raw response was saved, but the generic validator did not find a `logs` array.',
         });
       }
     } catch (error) {
       errors.push({
-        kind: "daily-log-request-failed",
+        kind: 'daily-log-request-failed',
         date,
         ...errorSummary(error),
       });
@@ -354,7 +354,7 @@ async function main() {
       sleepStatsFiles += 1;
     } catch (error) {
       warnings.push({
-        kind: "sleep-stats-request-failed",
+        kind: 'sleep-stats-request-failed',
         date,
         ...errorSummary(error),
       });
@@ -376,7 +376,7 @@ async function main() {
   const missingDailyFiles = dates.filter((date) => !dailyResponses.has(date));
   if (missingDailyFiles.length > 0) {
     errors.push({
-      kind: "missing-daily-files",
+      kind: 'missing-daily-files',
       count: missingDailyFiles.length,
       dates: missingDailyFiles,
     });
@@ -393,11 +393,11 @@ async function main() {
   }
 
   const manifest = {
-    format: "napper-raw-backup",
+    format: 'napper-raw-backup',
     formatVersion: 1,
     createdAt,
     completedAt: new Date().toISOString(),
-    apiBase: "https://api.napper.app",
+    apiBase: 'https://api.napper.app',
     babyId,
     requestedRange: {
       from: options.from,
@@ -426,7 +426,7 @@ async function main() {
     files,
   };
 
-  await writeJson(path.join(options.output, "manifest.json"), manifest);
+  await writeJson(path.join(options.output, 'manifest.json'), manifest);
 
   process.stdout.write(
     [
@@ -434,11 +434,11 @@ async function main() {
       `Baby: ${babyId}`,
       `Days: ${dates.length}`,
       `Extracted logs: ${extractedLogCount}`,
-      `Validation: ${manifest.validation.ok ? "OK" : "FAILED"}`,
+      `Validation: ${manifest.validation.ok ? 'OK' : 'FAILED'}`,
       `Warnings: ${warnings.length}`,
       `Errors: ${errors.length}`,
-      "",
-    ].join("\n"),
+      '',
+    ].join('\n'),
   );
 
   if (!manifest.validation.ok) {
