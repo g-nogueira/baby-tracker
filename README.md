@@ -1,10 +1,13 @@
 # Baby Tracker
 
-A private, local-first baby-care tracker for Android and iPhone, with shared synchronization
-and downstream Home Assistant automation.
+A private baby-care tracker for Android and iPhone. Phase one now uses Napper as the
+authoritative store through a thin mobile client. The first slice covers account login,
+shared Nursing history, live Nursing controls, and completed-feed edits.
 
-The repository is under active development. The first vertical slice records naps locally and
-persists an outbox operation in the same SQLite transaction.
+The original local-first tracker remains accessible under **On-device records** (`/local`).
+Its SQLite database and outbox are isolated from Napper; existing records are not uploaded.
+See [ADR 0004](docs/adr/0004-napper-client-phase-one.md) for scope, observed API contracts,
+limitations, and the required live/phone acceptance checks.
 
 ## Stack
 
@@ -35,6 +38,9 @@ pnpm mobile
 ```
 
 Use an Expo development build for real-device work. Expo Go is not a release target.
+Rebuild native development clients after installing the new SecureStore, Gesture Handler,
+Reanimated, bottom-sheet, and slider dependencies. Android/iOS JavaScript export validation
+does not prove native installation, API compatibility, or gesture behavior on a phone.
 
 ## API development
 
