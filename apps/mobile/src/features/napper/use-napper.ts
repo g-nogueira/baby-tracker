@@ -193,6 +193,11 @@ export function useNapper() {
     timezone,
     needsRefresh: tracker.current?.writeNeedsRefresh ?? false,
     refresh: () => refresh(true),
+    enterExistingCode: () => {
+      if (busy.current || stateRef.current.stage !== 'email') return;
+      generation.current++;
+      setState((s) => ({ ...s, stage: 'otp', error: null }));
+    },
     sendOtp: (email: string) =>
       run(async () => {
         const service = tracker.current;

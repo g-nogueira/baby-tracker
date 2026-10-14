@@ -59,7 +59,7 @@ afterEach(async () => {
 it('logs in, chooses a real profile, restores it after restart and reads again on foreground', async () => {
   const fetcher = vi.fn(async (url: string | URL | Request) => {
     const path = new URL(String(url)).pathname;
-    if (path === '/auth/send-otp') return json({});
+    if (path === '/auth/send-otp') return new Response('OK', { status: 200 });
     if (path === '/auth/email-login') return json(auth);
     if (path === '/babies')
       return json({ items: [{ type: 'BABY', id: 'synthetic-baby', name: 'Test baby' }] });
@@ -159,5 +159,50 @@ it('discards an old history response after navigating back to today and clears d
   expect(model.stage).toBe('email');
   expect(model.baby).toBeNull();
   expect(model.current).toEqual([]);
+  expect(boundary.saved).toBeNull();
+});
+it('lets an already-delivered code reach verification after a failed send acknowledgment, without resending', async () => {
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/auth/send-otp') throw new Error('connection lost after email delivery');
+    if (path === '/auth/email-login') return json(auth);
+    if (path === '/babies')
+      return json({ items: [{ type: 'BABY', id: 'synthetic-baby', name: 'Test baby' }] });
+    return json({ item: { logs: [] } });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  await ready();
+  await act(async () => {
+    await model.sendOtp('test@example.invalid');
+  });
+  expect(model.stage).toBe('email');
+  expect(model.error).toBeTruthy();
+  await act(async () => {
+    model.enterExistingCode();
+  });
+  expect(model.stage).toBe('otp');
+  expect(model.error).toBeNull();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/auth/send-otp'))).toHaveLength(
+    1,
+  );
+  expect(boundary.saved).toBeNull();
+  await act(async () => {
+    await model.login('test@example.invalid', '123456');
+  });
+  expect(model.stage).toBe('ready');
+});
+it('keeps credentials unset when an existing code is rejected by verification', async () => {
+  const fetcher = vi.fn(async () => new Response(null, { status: 401 }));
+  vi.stubGlobal('fetch', fetcher);
+  await ready();
+  await act(async () => {
+    model.enterExistingCode();
+  });
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => {
+    await model.login('test@example.invalid', '123456');
+  });
+  expect(model.stage).toBe('email');
+  expect(model.baby).toBeNull();
   expect(boundary.saved).toBeNull();
 });

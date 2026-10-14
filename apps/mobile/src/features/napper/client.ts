@@ -200,11 +200,31 @@ export class NapperClient {
           'invalid',
           'Napper could not complete the request. Refresh and try again.',
         );
+      if (path === '/auth/send-otp') {
+        // Sending a code is an acknowledgment, not a token/data response. A 2xx
+        // may have plain text, a JSON scalar, or no body. Still honor explicit
+        // JSON rejection envelopes without exposing their private error text.
+        const text = await response.text();
+        let acknowledgment: unknown;
+        try {
+          acknowledgment = JSON.parse(text);
+        } catch {
+          return null;
+        }
+        if (
+          acknowledgment !== null &&
+          typeof acknowledgment === 'object' &&
+          !Array.isArray(acknowledgment) &&
+          object(acknowledgment).success === false
+        )
+          throw new NapperError('invalid', 'Napper could not complete the request.');
+        return null;
+      }
       let result: unknown;
       try {
         const bodyText = await response.text();
         // Empty acknowledged writes are confirmed by the application's subsequent reread.
-        if (!bodyText && (method === 'PUT' || path === '/auth/send-otp')) return null;
+        if (!bodyText && method === 'PUT') return null;
         result = JSON.parse(bodyText);
         object(result);
       } catch {

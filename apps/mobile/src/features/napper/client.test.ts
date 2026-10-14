@@ -195,3 +195,31 @@ it('treats an unreadable write acknowledgment as uncertain rather than allowing 
     code: 'uncertain',
   });
 });
+
+it.each([
+  ['plain text', 'OK'],
+  ['JSON string', '"OK"'],
+  ['JSON boolean', 'true'],
+  ['empty body', ''],
+  ['whitespace', ' \n '],
+  ['JSON object', '{"success":true}'],
+])('accepts a successful send-code acknowledgment with %s', async (_label, body) => {
+  const mem = memory(null);
+  const fetcher = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+  const client = new NapperClient(mem.store, 'synthetic', fetcher, now);
+  await expect(client.sendOtp('test@example.invalid')).resolves.toBeUndefined();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(mem.get()).toBeNull();
+  expect(client.accountId).toBeNull();
+});
+it.each([
+  [400, 'invalid'],
+  [429, 'rate-limit'],
+  [503, 'invalid'],
+])('still rejects send-code HTTP %s without retrying', async (status, code) => {
+  const { store } = memory(null);
+  const fetcher = vi.fn<typeof fetch>(async () => new Response('private detail', { status }));
+  const client = new NapperClient(store, 'synthetic', fetcher, now);
+  await expect(client.sendOtp('test@example.invalid')).rejects.toMatchObject({ code });
+  expect(fetcher).toHaveBeenCalledOnce();
+});

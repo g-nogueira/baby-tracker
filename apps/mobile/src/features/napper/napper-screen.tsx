@@ -101,6 +101,7 @@ export function NapperScreen() {
               autoComplete="email"
               textContentType="emailAddress"
               value={email}
+              editable={!model.busy}
               onChangeText={setEmail}
               style={styles.input}
             />
@@ -110,6 +111,14 @@ export function NapperScreen() {
               disabled={!email.trim().includes('@')}
               onPress={() => void model.sendOtp(email.trim())}
             />
+            <Pressable
+              accessibilityRole="button"
+              disabled={model.busy || !email.trim().includes('@')}
+              onPress={() => model.enterExistingCode()}
+              style={[styles.link, (model.busy || !email.trim().includes('@')) && styles.disabled]}
+            >
+              <Text>Enter a code I already have</Text>
+            </Pressable>
           </>
         ) : (
           <>
@@ -121,6 +130,7 @@ export function NapperScreen() {
               autoComplete="one-time-code"
               textContentType="oneTimeCode"
               value={otp}
+              editable={!model.busy}
               onChangeText={setOtp}
               style={styles.input}
             />
