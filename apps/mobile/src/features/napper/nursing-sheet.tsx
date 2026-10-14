@@ -1,8 +1,16 @@
-import { BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import Slider from '@react-native-community/slider';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
 import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
@@ -22,7 +30,7 @@ interface Props {
   onChange: (command: NursingCommand) => void;
   onCorrect: (start: Date, end: Date, left: number, last: Breast) => void;
 }
-/** Familiar breast-first controls; Gorhom owns native drag/scroll arbitration. */
+/** TrueSheet v3 owns native drag, nested-scroll and dismissal behavior on both platforms. */
 export function NapperNursingSheet({
   log,
   last,
@@ -52,12 +60,24 @@ export function NapperNursingSheet({
     null,
   );
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const sheet = useRef<BottomSheetModal>(null);
+  const sheet = useRef<TrueSheet>(null);
+  const openingPicker = useRef(false);
   const { height } = useWindowDimensions();
   const [expanded, setExpanded] = useState(completed);
-  useEffect(() => {
-    sheet.current?.present();
-  }, []);
+  const expandStartPicker = async () => {
+    if (openingPicker.current) return;
+    openingPicker.current = true;
+    try {
+      // Wait for native expansion before showing a platform time picker over the sheet.
+      await sheet.current?.resize(1);
+      setExpanded(true);
+      setPicker({ field: 'start', mode: 'time' });
+    } catch {
+      setPickerError('The time editor could not be opened. Close and reopen Nursing.');
+    } finally {
+      openingPicker.current = false;
+    }
+  };
   const totals = nursing ? nursingTotals(nursing, now) : null;
   const paused = totals?.paused ?? false;
   const pauseSeconds =
@@ -106,18 +126,23 @@ export function NapperNursingSheet({
     }).format(date);
   const time = (seconds: number) => formatLiveDuration(seconds * 1000);
   return (
-    <BottomSheetModal
+    <TrueSheet
       ref={sheet}
-      index={completed ? 1 : 0}
-      snapPoints={[330, Math.max(360, Math.min(height * 0.84, 650))]}
-      enableDynamicSizing={false}
-      enablePanDownToClose
-      onDismiss={onClose}
-      onChange={(index) => setExpanded(index === 1)}
-      backgroundStyle={styles.background}
-      handleIndicatorStyle={styles.handle}
+      initialDetentIndex={completed ? 1 : 0}
+      detents={[Math.min(0.5, 330 / height), Math.min(0.84, 650 / height)]}
+      scrollable
+      draggable
+      dismissible
+      backgroundColor="#FFFFFF"
+      grabberOptions={{ color: '#C5BBB3', width: 42, adaptive: false }}
+      accessibilityOptions={{ paneTitle: 'Nursing', grabberLabel: 'Nursing drawer' }}
+      onDidDismiss={onClose}
+      onDidPresent={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
+      onDetentChange={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
     >
-      <BottomSheetScrollView
+      <ScrollView
+        style={styles.scroll}
+        nestedScrollEnabled
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
@@ -133,10 +158,7 @@ export function NapperNursingSheet({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Set Nursing start time"
-                onPress={() => {
-                  sheet.current?.snapToIndex(1);
-                  setPicker({ field: 'start', mode: 'time' });
-                }}
+                onPress={() => void expandStartPicker()}
               >
                 <Text style={styles.time}>{format(start)}</Text>
               </Pressable>
@@ -287,13 +309,12 @@ export function NapperNursingSheet({
             {pickerError ?? error}
           </Text>
         ) : null}
-      </BottomSheetScrollView>
-    </BottomSheetModal>
+      </ScrollView>
+    </TrueSheet>
   );
 }
 const styles = StyleSheet.create({
-  background: { backgroundColor: '#FFFFFF' },
-  handle: { backgroundColor: '#C5BBB3', width: 42 },
+  scroll: { flex: 1 },
   content: { padding: 20, paddingBottom: 38, gap: 14 },
   hero: { alignItems: 'center', gap: 6 },
   title: { fontSize: 18, fontWeight: '700', color: '#292724' },

@@ -39,7 +39,7 @@ pnpm mobile
 
 Use an Expo development build for real-device work. Expo Go is not a release target.
 Rebuild native development clients after installing the new SecureStore, Gesture Handler,
-Reanimated, bottom-sheet, and slider dependencies. Android/iOS JavaScript export validation
+Reanimated, TrueSheet 3.11.12, and slider dependencies. Android/iOS JavaScript export validation
 does not prove native installation, API compatibility, or gesture behavior on a phone.
 
 ## API development

@@ -25,6 +25,16 @@ use Expo SecureStore; the token pair is stored together. Sign-out clears credent
 - Native bottom sheet and slider; stable native picker draft; elapsed time in collapsed controls,
   timestamps when expanded. Persistent running-feed controls remain available in history.
 
+The Nursing drawer uses stock `@lodev09/react-native-true-sheet` 3.11.12 (updated 2026-10-14),
+replacing Gorhom. Napper's captured dependency manifest names this version with a Yarn patch.
+The supplied Android Smali archive was compared with the published npm source: the inspected
+direction locking, nested scrolling, grabber and touch dispatch paths match upstream behavior.
+No Android-specific patch was identified in those paths; this is not proof of complete binary
+equivalence and says nothing about an iOS patch. Do not copy the supplied native binary or
+decompiled files into the app. Initial presentation, resizing, scrolling and dismissal use the
+library's native lifecycle; the proposed-time picker waits for expansion to finish. Heights
+remain app-specific, pending phone comparison with Napper.
+
 This is a Nursing-only slice, not the complete Napper UI or phase-one MVP. Day/Night sleep
 transitions, wake-up edits, nap continuation, past activity creation, diaper/medicine writes,
 weekly history, and full dial parity remain future slices. Original local features are accessible

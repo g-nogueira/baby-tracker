@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "dependencies": {
     "@baby-tracker/domain": "workspace:*",
-    "@gorhom/bottom-sheet": "5.2.14",
+    "@lodev09/react-native-true-sheet": "3.11.12",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/slider": "5.2.0",
     "expo": "~57.0.11",
