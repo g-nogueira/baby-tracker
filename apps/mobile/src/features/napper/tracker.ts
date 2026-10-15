@@ -13,7 +13,12 @@ import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calenda
 /** Application boundary: remote truth is reread before/after every mutation; no local outbox. */
 export class NapperTracker {
   private mutationInFlight = false;
-  private uncertain: { babyId: string; accountId: string | null; request: WireLog } | null = null;
+  private uncertain: {
+    babyId: string;
+    accountId: string | null;
+    request: WireLog;
+    batch?: WireLog[];
+  } | null = null;
   constructor(
     public readonly client: NapperClient,
     private readonly newId: () => string,
@@ -37,19 +42,100 @@ export class NapperTracker {
   async history(babyId: string, date: string) {
     return this.client.day(babyId, date);
   }
+  /** Bedtime's storage date can precede its real evening; include complete adjacent cycles. */
+  async window(babyId: string, date: string): Promise<WireLog[]> {
+    return this.windows(babyId, [date]);
+  }
+  private async windows(babyId: string, dates: readonly string[]): Promise<WireLog[]> {
+    const today = calendarDayForInstant(this.now(), this.timezone);
+    const days = new Set(
+      dates
+        .flatMap((date) => [-2, -1, 0, 1].map((offset) => shiftCalendarDay(date, offset)))
+        .filter((day) => day <= today),
+    );
+    const reads = [...days].map((day) => this.history(babyId, day));
+    if (dates.includes(today)) reads.push(this.client.today(babyId));
+    const rows = await Promise.all(reads);
+    return rows.reduce((all, logs) => mergeLogs(all, logs), []);
+  }
   async reconcile(babyId: string) {
     const logs = await this.current(babyId);
     if (this.uncertain?.babyId === babyId && this.uncertain.accountId === this.client.accountId) {
-      await this.history(
-        babyId,
-        calendarDayForInstant(new Date(String(this.uncertain.request.start)), this.timezone),
-      );
+      for (const request of this.uncertain.batch ?? [this.uncertain.request])
+        await this.history(
+          babyId,
+          calendarDayForInstant(new Date(String(request.start)), this.timezone),
+        );
       this.uncertain = null;
     }
     return logs;
   }
+  /** Ordered provider writes share the Nursing lock. No batch/atomic API contract was observed. */
+  async apply(
+    babyId: string,
+    date: string,
+    prepare: (logs: WireLog[]) => WireLog[],
+    additionalDates: string[] = [],
+  ) {
+    if (this.mutationInFlight)
+      throw new NapperError('conflict', 'A change is already being saved.');
+    if (this.writeNeedsRefresh)
+      throw new NapperError(
+        'uncertain',
+        'Refresh to check the previous save before making another change.',
+      );
+    this.mutationInFlight = true;
+    let requests: WireLog[] = [];
+    let accepted = 0;
+    try {
+      const before = await this.windows(babyId, [date, ...additionalDates]);
+      requests = prepare(before).map(nursingRequest);
+      if (requests.length === 0)
+        throw new NapperError('invalid', 'No activity change was prepared.');
+      for (const request of requests) {
+        await this.client.put(babyId, request);
+        accepted++;
+      }
+      const days = new Set([
+        date,
+        ...requests.map((r) => calendarDayForInstant(new Date(String(r.start)), this.timezone)),
+      ]);
+      const saved = await this.windows(babyId, [...days]);
+      for (const request of requests) {
+        const actual = saved.find((log) => log.id === request.id);
+        if (!actual || !matchesCareWrite(actual, request))
+          throw new NapperError('uncertain', 'The saved activity could not be confirmed.');
+      }
+    } catch (error) {
+      if (
+        requests.length &&
+        (accepted > 0 || (error instanceof NapperError && error.code === 'uncertain'))
+      ) {
+        this.uncertain = {
+          babyId,
+          accountId: this.client.accountId,
+          request: requests[0],
+          batch: requests,
+        };
+        throw new NapperError(
+          'uncertain',
+          accepted > 0 && accepted < requests.length
+            ? 'Only part of this transition was saved. Refresh and review the shared activities before continuing.'
+            : 'The saved activity could not be confirmed. Refresh before making another change.',
+        );
+      }
+      throw error;
+    } finally {
+      this.mutationInFlight = false;
+    }
+  }
   async start(babyId: string, side: Breast, at: Date = this.now()) {
     return this.mutate(babyId, async (logs) => {
+      if (logs.some((log) => log.category === 'NURSING' && typeof log.isOpen !== 'boolean'))
+        throw new NapperError(
+          'conflict',
+          'A feed has an unknown running state. Review it before starting another.',
+        );
       if (logs.some((log) => log.category === 'NURSING' && log.isOpen === true))
         throw new NapperError('conflict', 'A feed is already running. Open it instead.');
       const earliest = shiftCalendarDay(calendarDayForInstant(this.now(), this.timezone), -1);
@@ -177,4 +263,13 @@ export function matchesNursingWrite(actual: WireLog, request: WireLog): boolean 
   } catch {
     return false;
   }
+}
+/** Verify requested writable fields, allowing the server to add unrelated read metadata. */
+export function matchesCareWrite(actual: WireLog, request: WireLog): boolean {
+  if (request.category === 'NURSING') return matchesNursingWrite(actual, request);
+  return Object.keys(request).every((key) => {
+    if (key === 'start' || key === 'end')
+      return Date.parse(String(actual[key])) === Date.parse(String(request[key]));
+    return fingerprint(actual[key] ?? null) === fingerprint(request[key] ?? null);
+  });
 }

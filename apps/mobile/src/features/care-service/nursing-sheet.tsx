@@ -1,7 +1,7 @@
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import Slider from '@react-native-community/slider';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -15,11 +15,11 @@ import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
 import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
-import type { Breast, WireLog } from './contracts';
-import { type NursingCommand, nursingTotals, readNursing } from './nursing';
+import type { ActivityReference, Breast, NursingActivity, NursingCommand } from './contracts';
+import { nursingTimes } from './nursing';
 
 interface Props {
-  log: WireLog | null;
+  log: NursingActivity | null;
   last: Breast | null;
   timezone: string;
   now: Date;
@@ -29,9 +29,10 @@ interface Props {
   onStart: (side: Breast, start: Date) => void;
   onChange: (command: NursingCommand) => void;
   onCorrect: (start: Date, end: Date, left: number, last: Breast) => void;
+  onAdjustStart?: (start: Date, expected: ActivityReference) => void;
 }
 /** TrueSheet v3 owns native drag, nested-scroll and dismissal behavior on both platforms. */
-export function NapperNursingSheet({
+export function NursingSheet({
   log,
   last,
   timezone,
@@ -42,15 +43,16 @@ export function NapperNursingSheet({
   onStart,
   onChange,
   onCorrect,
+  onAdjustStart,
 }: Props) {
-  const nursing = log ? readNursing(log) : null;
-  const completed = nursing !== null && !nursing.open;
+  const nursing = log;
+  const completed = nursing !== null && nursing.status === 'completed';
   const initial = useRef({
-    start: new Date(nursing?.start ?? now),
-    end: new Date(nursing?.end ?? now),
+    start: new Date(nursing?.startedAt ?? now),
+    end: new Date(nursing?.endedAt ?? nursing?.startedAt ?? now),
     // The completed editor's slider edits whole seconds; round only its draft.
-    left: Math.round(nursing?.left ?? 0),
-    last: nursing?.last ?? null,
+    left: Math.round(nursing?.leftSeconds ?? 0),
+    last: nursing?.lastBreast ?? null,
   }).current;
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
@@ -61,6 +63,11 @@ export function NapperNursingSheet({
     null,
   );
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const startRevision = useRef<ActivityReference | null>(null);
+  const runningStartedAt = nursing && nursing.status !== 'completed' ? nursing.startedAt : null;
+  useEffect(() => {
+    if (runningStartedAt && !adjusted && !picker) setStart(new Date(runningStartedAt));
+  }, [runningStartedAt, adjusted, picker]);
   const sheet = useRef<TrueSheet>(null);
   const openingPicker = useRef(false);
   const { height } = useWindowDimensions();
@@ -79,10 +86,9 @@ export function NapperNursingSheet({
       openingPicker.current = false;
     }
   };
-  const totals = nursing ? nursingTotals(nursing, now) : null;
+  const totals = nursing ? nursingTimes(nursing, now) : null;
   const paused = totals?.paused ?? false;
-  const pauseSeconds =
-    nursing?.pauses.reduce((sum, p) => sum + ((p.end ?? p.start) - p.start) / 1000, 0) ?? 0;
+  const pauseSeconds = nursing?.pauseSeconds ?? 0;
   const total = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000 - pauseSeconds));
   const canSave =
     !busy &&
@@ -165,9 +171,11 @@ export function NapperNursingSheet({
               </Pressable>
             )
           ) : null}
-          {nursing?.open ? (
+          {nursing && nursing.status !== 'completed' ? (
             <Text style={styles.muted}>
-              {paused ? 'Paused' : `${nursing.last === 'LEFT' ? 'Left' : 'Right'} breast active`}
+              {paused
+                ? 'Paused'
+                : `${nursing.lastBreast === 'LEFT' ? 'Left' : 'Right'} breast active`}
             </Text>
           ) : null}
         </View>
@@ -179,7 +187,7 @@ export function NapperNursingSheet({
                 accessibilityRole="button"
                 accessibilityLabel={
                   nursing
-                    ? `${paused ? 'Resume' : nursing.last === side ? 'Pause' : 'Switch to'} ${side === 'LEFT' ? 'Left' : 'Right'} breast`
+                    ? `${paused ? 'Resume' : nursing.lastBreast === side ? 'Pause' : 'Switch to'} ${side === 'LEFT' ? 'Left' : 'Right'} breast`
                     : `Start Nursing on ${side === 'LEFT' ? 'Left' : 'Right'} breast`
                 }
                 disabled={busy || pickerError !== null}
@@ -188,7 +196,7 @@ export function NapperNursingSheet({
                     ? onChange(
                         paused
                           ? { kind: 'resume', side }
-                          : nursing.last === side
+                          : nursing.lastBreast === side
                             ? { kind: 'pause' }
                             : { kind: 'switch', side },
                       )
@@ -198,7 +206,7 @@ export function NapperNursingSheet({
               >
                 <Text style={styles.sideLabel}>{side === 'LEFT' ? 'L' : 'R'}</Text>
                 <ActivityIcon
-                  name={nursing && !paused && nursing.last === side ? 'pause' : 'play'}
+                  name={nursing && !paused && nursing.lastBreast === side ? 'pause' : 'play'}
                 />
                 <Text style={styles.sideMeta}>
                   {totals
@@ -213,7 +221,7 @@ export function NapperNursingSheet({
             ))}
           </View>
         ) : null}
-        {nursing?.open ? (
+        {nursing && nursing.status !== 'completed' ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Stop Nursing"
@@ -228,12 +236,16 @@ export function NapperNursingSheet({
           <>
             <ActivityTimestampField
               label="Start"
-              value={nursing?.open ? new Date(nursing.start) : start}
+              value={start}
               timezone={timezone}
               maximumDate={now}
-              editable={!busy && !nursing?.open}
+              editable={!busy && (!nursing || completed || Boolean(onAdjustStart))}
               pickerMode={picker?.field === 'start' ? picker.mode : null}
-              onPick={(mode) => setPicker({ field: 'start', mode })}
+              onPick={(mode) => {
+                if (!adjusted && nursing)
+                  startRevision.current = { id: nursing.id, revision: nursing.revision };
+                setPicker({ field: 'start', mode });
+              }}
               onDone={() => setPicker(null)}
               onPickerChange={pick}
             />
@@ -299,7 +311,22 @@ export function NapperNursingSheet({
                 </Pressable>
               </>
             ) : nursing ? (
-              <Text style={styles.muted}>Now · {format(now)}</Text>
+              <>
+                <Text style={styles.muted}>End · Running · {format(now)}</Text>
+                {adjusted && onAdjustStart ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Save Nursing start time"
+                    disabled={busy || pickerError !== null || start > now}
+                    onPress={() => {
+                      if (startRevision.current) onAdjustStart(start, startRevision.current);
+                    }}
+                    style={styles.save}
+                  >
+                    <Text style={styles.white}>Save start time</Text>
+                  </Pressable>
+                ) : null}
+              </>
             ) : null}
           </>
         ) : (

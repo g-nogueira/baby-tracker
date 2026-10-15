@@ -107,7 +107,7 @@ export function buildRadialCycleViews(input: BuildRadialCycleViewsInput): Radial
   };
 }
 
-function projectedView(
+export function projectedView(
   kind: RadialCycleView['kind'],
   projection: CycleProjection,
   metadata: ReadonlyMap<string, RadialActivityRecord>,
