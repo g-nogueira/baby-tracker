@@ -308,7 +308,7 @@ export function NapperScreen() {
               : unknownRunningState
                 ? 'A Nursing record has an unknown running state. Review it in Napper before making changes.'
                 : invalid
-                  ? 'This running feed could not be read. Refresh or review it in Napper before changing it.'
+                  ? `This running feed could not be read. ${currentNursing.issues.find((issue) => issue.id === active?.id)?.reason ?? ''} Refresh or review it in Napper before changing it.`
                   : 'Some Nursing records could not be read and are read-only here. Other feed controls remain available.'}
           </Text>
         ) : null}

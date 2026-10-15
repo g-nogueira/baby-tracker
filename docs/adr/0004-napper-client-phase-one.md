@@ -58,10 +58,19 @@ real credentials, and private account data are not committed. Tests use syntheti
 
 Headers include the observed APP source, version 6.71.0, device installation ID, language,
 locale, offset-bearing Local-Timestamp, and bearer ID token. New IDs use `LOG_{uuid}_NURSING`.
-The fields named `breastLeftMinutes` and `breastRightMinutes` contain integer **seconds**.
+The fields named `breastLeftMinutes` and `breastRightMinutes` contain **seconds**. The pause
+editor's `updatePause`/`removePause` arithmetic divides millisecond intervals by 1000, so these
+fields can contain fractional seconds. Retain the inactive side's exact stored value; match
+the SDK by rounding the active side only after subtracting pauses and the inactive duration.
 `activeBreast` is the last breast used and is preserved on stop; it is not inferred from totals.
 Pauses are `{breast, start:epochMilliseconds, end:epochMilliseconds|null}`. Stopping while paused
 ends at the open pause's start and removes that trailing pause, matching the captured SDK.
+Resuming a completed feed in Napper reopens the same ID, resets End to Start, and appends a
+closed pause from the former End to the resume instant. Refresh must replace the stopped
+read model and restore live controls without counting that gap. Synthetic HTTP and screen
+regressions cover this transition and subsequent pause/resume/stop writes. A user's generic
+read-failure screenshot does not establish which field failed; unsupported running records
+now show a fixed validation explanation without including wire values or response bodies.
 Existing writable metadata is retained; no comment decoding/re-encoding or editing is introduced.
 Today returns `item.logs`; the SDK's day-history reader uses `item.allLogs`. The parser accepts
 these observed envelopes and rejects missing/unsupported arrays and `success:false` responses.

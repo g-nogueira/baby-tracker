@@ -48,7 +48,8 @@ export function NapperNursingSheet({
   const initial = useRef({
     start: new Date(nursing?.start ?? now),
     end: new Date(nursing?.end ?? now),
-    left: nursing?.left ?? 0,
+    // The completed editor's slider edits whole seconds; round only its draft.
+    left: Math.round(nursing?.left ?? 0),
     last: nursing?.last ?? null,
   }).current;
   const [start, setStart] = useState(initial.start);

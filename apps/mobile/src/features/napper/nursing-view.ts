@@ -5,23 +5,25 @@ import {
   type RadialCycleView,
 } from '@/features/timeline/radial-cycle-state';
 import type { WireLog } from './contracts';
-import { type NursingLog, nursingTotals, readNursing } from './nursing';
+import { type NursingLog, nursingReadReason, nursingTotals, readNursing } from './nursing';
 
 /** A malformed historical feed stays read-only without disabling an unrelated valid feed. */
 export function inspectNursingLogs(logs: WireLog[], now: Date) {
   const valid: NursingLog[] = [];
   const unsupportedIds: string[] = [];
+  const issues: { id: string; reason: string }[] = [];
   for (const log of logs) {
     if (log.category !== 'NURSING') continue;
     try {
       const feed = readNursing(log);
       nursingTotals(feed, now);
       valid.push(feed);
-    } catch {
+    } catch (error) {
       unsupportedIds.push(String(log.id));
+      issues.push({ id: String(log.id), reason: nursingReadReason(error) });
     }
   }
-  return { valid, unsupportedIds };
+  return { valid, unsupportedIds, issues };
 }
 
 /** Read projection only; Napper records never become local SQLite aggregates. */

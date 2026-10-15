@@ -39,33 +39,48 @@ const writableFields = [
   'babyMoodOnSleep',
   'timeToFallAsleep',
 ];
-const invalid = () =>
-  new NapperError('invalid', 'This Nursing record has unsupported times or totals.');
+class NursingReadError extends NapperError {
+  constructor(public readonly reason: string) {
+    super('invalid', `This Nursing record could not be read. ${reason}`);
+  }
+}
+// Only fixed explanations cross the UI boundary, never wire values or response bodies.
+export const nursingReadReason = (error: unknown): string =>
+  error instanceof NursingReadError ? error.reason : 'The record format is unsupported.';
+const invalid = (reason = 'The record format is unsupported.') => new NursingReadError(reason);
 function timestamp(value: unknown): number {
   const time =
     typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
-  if (!Number.isFinite(time)) throw invalid();
+  if (!Number.isFinite(time)) throw invalid('A timestamp is missing or invalid.');
   return time;
 }
 function seconds(value: Json | undefined): number {
   if (value === null || value === undefined) return 0;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw invalid();
+  // Napper's pause editor adds/subtracts millisecond intervals divided by 1000,
+  // so these seconds-valued fields can contain fractional seconds.
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value > Number.MAX_SAFE_INTEGER ||
+    value < 0
+  )
+    throw invalid('A breast duration is invalid.');
   return value;
 }
 export function readNursing(wire: WireLog): NursingLog {
   if (
     wire.category !== 'NURSING' ||
     typeof wire.id !== 'string' ||
-    typeof wire.start !== 'string' ||
-    typeof wire.end !== 'string' ||
     typeof wire.isOpen !== 'boolean'
   )
     throw invalid();
+  if (typeof wire.start !== 'string') throw invalid('Start is missing or invalid.');
+  if (typeof wire.end !== 'string') throw invalid('End is missing or invalid.');
   const start = timestamp(wire.start);
   const end = timestamp(wire.end);
-  if (wire.isOpen !== true && end < start) throw invalid();
+  if (wire.isOpen !== true && end < start) throw invalid('End is earlier than Start.');
   const raw = wire.pauses ?? [];
-  if (!Array.isArray(raw)) throw invalid();
+  if (!Array.isArray(raw)) throw invalid('The pause list has an unsupported format.');
   let previous = start;
   const pauses = raw.map((entry, index) => {
     const row = object(entry) as WireLog;
@@ -76,7 +91,7 @@ export function readNursing(wire: WireLog): NursingLog {
       (until !== null && until < at) ||
       (until === null && (!wire.isOpen || index !== raw.length - 1))
     )
-      throw invalid();
+      throw invalid('Pauses overlap, are out of order, or contain an invalid open pause.');
     previous = until ?? at;
     return { start: at, end: until, wire: row };
   });
@@ -86,11 +101,12 @@ export function readNursing(wire: WireLog): NursingLog {
     wire.activeBreast !== 'LEFT' &&
     wire.activeBreast !== 'RIGHT'
   )
-    throw invalid();
+    throw invalid('The active breast is unsupported.');
   const last =
     wire.activeBreast === 'LEFT' || wire.activeBreast === 'RIGHT' ? wire.activeBreast : null;
-  if (wire.isOpen && last === null) throw invalid();
-  if (!wire.isOpen && pauses.some((p) => p.start > end || (p.end ?? end) > end)) throw invalid();
+  if (wire.isOpen && last === null) throw invalid('The running feed has no active breast.');
+  if (!wire.isOpen && pauses.some((p) => p.start > end || (p.end ?? end) > end))
+    throw invalid('A pause extends beyond the completed feed.');
   return {
     wire,
     id: wire.id,
@@ -106,22 +122,25 @@ export function readNursing(wire: WireLog): NursingLog {
 export function nursingTotals(log: NursingLog, now: Date) {
   const through = log.open ? now.getTime() : timestamp(log.end);
   const start = timestamp(log.start);
-  if (through < start) throw invalid();
+  if (through < start) throw invalid('Start is later than the current time.');
   const pauseMs = log.pauses.reduce(
     (sum, pause) => sum + Math.max(0, Math.min(through, pause.end ?? through) - pause.start),
     0,
   );
   const pause = Math.round(pauseMs / 1000);
   const total = Math.round((through - start - pauseMs) / 1000);
-  if (total < 0) throw invalid();
+  if (total < 0) throw invalid('Pause time exceeds the feed duration.');
   if (!log.open)
     return { left: log.left, right: log.right, total: log.left + log.right, pause, paused: false };
   const other = log.last === 'LEFT' ? log.right : log.left;
-  if (other > total) throw invalid();
+  // Match Napper: round after subtracting the inactive side, retaining its exact
+  // stored value. Rounding the elapsed time first can add a second after reopening.
+  const current = Math.round((through - start - pauseMs) / 1000 - other);
+  if (current < 0) throw invalid('A breast duration exceeds the available active time.');
   return {
-    left: log.last === 'LEFT' ? total - other : log.left,
-    right: log.last === 'RIGHT' ? total - other : log.right,
-    total,
+    left: log.last === 'LEFT' ? current : log.left,
+    right: log.last === 'RIGHT' ? current : log.right,
+    total: current + other,
     pause,
     paused: log.pauses.some((p) => p.end === null),
   };

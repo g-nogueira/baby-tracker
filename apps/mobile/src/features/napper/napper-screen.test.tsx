@@ -126,8 +126,45 @@ it('blocks writes when the running feed itself is unsupported', async () => {
   hooks.model.current = [{ ...active, breastRightMinutes: -1 }];
   await render();
   expect(text()).toContain('This running feed could not be read');
+  expect(text()).toContain('A breast duration is invalid.');
   expect(press('Open Nursing controls')?.props.disabled).toBe(true);
   expect(press('Stop running Nursing')).toBeUndefined();
+});
+it('replaces a stopped record with its externally reopened feed and exposes live controls', async () => {
+  const stopped = {
+    ...active,
+    isOpen: false,
+    end: '2026-10-15T02:23:00+01:00',
+    breastLeftMinutes: 12.75,
+    breastRightMinutes: 47.25,
+  };
+  hooks.model.current = [previous, stopped];
+  hooks.model.history = [stopped];
+  await render();
+  expect(press('Stop running Nursing')).toBeUndefined();
+  const reopened = {
+    ...stopped,
+    isOpen: true,
+    end: active.start,
+    pauses: [
+      {
+        start: Date.parse(String(stopped.end)),
+        end: Date.parse('2026-10-15T02:25:00+01:00'),
+        breast: 'RIGHT',
+      },
+    ],
+  };
+  hooks.model.current = [previous, reopened];
+  hooks.model.history = [reopened];
+  await act(async () => renderer.update(<NapperScreen />));
+  expect(text()).not.toContain('could not be read');
+  expect(text()).toContain('01:22');
+  expect(press('Stop running Nursing')?.props.disabled).toBe(false);
+  expect(renderer.root.findByType(RadialCycle).props.view.records).toHaveLength(1);
+  await act(async () => press('Open Nursing controls')?.props.onPress());
+  expect(renderer.root.findByType(NapperNursingSheet).props.log).toEqual(reopened);
+  await act(async () => press('Stop running Nursing')?.props.onPress());
+  expect(hooks.model.change).toHaveBeenCalledWith(reopened, { kind: 'stop' });
 });
 it('blocks writes when Napper reports multiple running feeds', async () => {
   hooks.model.current = [active, { ...active, id: 'another-active' }];

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { WireLog } from './contracts';
-import { nursingCycle } from './nursing-view';
+import { inspectNursingLogs, nursingCycle } from './nursing-view';
 const log: WireLog = {
   id: 'synthetic-feed',
   category: 'NURSING',
@@ -12,6 +12,12 @@ const log: WireLog = {
   breastRightMinutes: 0,
 };
 const now = new Date('2026-10-15T01:25:23.000Z');
+it('provides a fixed read failure reason without leaking response contents', () => {
+  const malformed = { ...log, breastLeftMinutes: 'private-response-marker' };
+  const result = inspectNursingLogs([malformed], now);
+  expect(result.issues).toEqual([{ id: log.id, reason: 'A breast duration is invalid.' }]);
+  expect(JSON.stringify(result)).not.toContain('private-response-marker');
+});
 it('projects Napper offset-bearing timestamps without mutating the shared record', () => {
   const original = structuredClone(log);
   const view = nursingCycle([log], 'synthetic-baby', '2026-10-15', 'Europe/Lisbon', now);

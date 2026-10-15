@@ -116,6 +116,32 @@ it('updates the split before finger release and preserves an edit through remote
     'RIGHT',
   );
 });
+it('opens a fractional completed split as a whole-second edit draft without changing the source', async () => {
+  const log: WireLog = {
+    id: 'synthetic-fractional',
+    category: 'NURSING',
+    start: '2026-10-13T10:00:00Z',
+    end: '2026-10-13T10:01:00Z',
+    isOpen: false,
+    breastLeftMinutes: 12.75,
+    breastRightMinutes: 47.25,
+    activeBreast: 'RIGHT',
+  };
+  const onCorrect = vi.fn();
+  await act(async () => {
+    renderer = create(<NapperNursingSheet {...base} log={log} onCorrect={onCorrect} />);
+  });
+  expect(renderer.root.findByType('Slider' as never).props.value).toBe(13);
+  expect(onCorrect).not.toHaveBeenCalled();
+  expect(log.breastLeftMinutes).toBe(12.75);
+  await act(async () => press('Save Nursing changes')?.props.onPress());
+  expect(onCorrect).toHaveBeenCalledWith(
+    new Date(String(log.start)),
+    new Date(String(log.end)),
+    13,
+    'RIGHT',
+  );
+});
 it('routes breast controls to pause, resume, switch and the single stop action', async () => {
   const log: WireLog = {
     id: 'synthetic',

@@ -66,6 +66,69 @@ describe('Napper Nursing wire semantics', () => {
       paused: false,
     });
   });
+  it.each(['LEFT', 'RIGHT'] as const)(
+    'reads a stopped feed reopened in Napper on %s, retaining fractional seconds and excluding the gap',
+    (side) => {
+      const oldPause = {
+        start: at('10:00:05.250').getTime(),
+        end: at('10:00:06.500').getTime(),
+        breast: 'LEFT',
+      };
+      const gap = {
+        start: at('10:00:21.500').getTime(),
+        end: at('10:03:00.250').getTime(),
+        breast: side,
+      };
+      // SDK resume: same id/start/totals, end reset to start, gap appended as a pause.
+      const reopened: WireLog = {
+        ...started(),
+        activeBreast: side,
+        breastLeftMinutes: side === 'RIGHT' ? 5.75 : 14.5,
+        breastRightMinutes: side === 'LEFT' ? 5.75 : 14.5,
+        pauses: [oldPause, gap],
+        comment: 'synthetic%20note',
+      };
+      const original = structuredClone(reopened);
+      const totals = nursingTotals(readNursing(reopened), at('10:03:10.500'));
+      expect(totals).toMatchObject({
+        left: side === 'LEFT' ? 25 : 5.75,
+        right: side === 'RIGHT' ? 25 : 5.75,
+        total: 30.75,
+        pause: 160,
+        paused: false,
+      });
+      const paused = changeNapperNursing(
+        readNursing(reopened),
+        { kind: 'pause' },
+        at('10:03:10.500'),
+      );
+      expect(nursingTotals(readNursing(paused), at('10:04:00')).total).toBe(30.75);
+      const resumed = changeNapperNursing(
+        readNursing(paused),
+        { kind: 'resume', side },
+        at('10:04:00'),
+      );
+      const stopped = changeNapperNursing(readNursing(resumed), { kind: 'stop' }, at('10:04:10'));
+      expect(stopped).toMatchObject({
+        id: reopened.id,
+        comment: reopened.comment,
+        isOpen: false,
+        activeBreast: side,
+        breastLeftMinutes: side === 'LEFT' ? 35 : 5.75,
+        breastRightMinutes: side === 'RIGHT' ? 35 : 5.75,
+      });
+      expect((stopped.pauses as unknown[]).slice(0, 2)).toEqual([oldPause, gap]);
+      expect(reopened).toEqual(original);
+    },
+  );
+  it.each([-1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '12.5'])(
+    'still rejects an invalid breast duration: %s',
+    (duration) => {
+      expect(() => readNursing({ ...started(), breastLeftMinutes: duration })).toThrow(
+        'A breast duration is invalid',
+      );
+    },
+  );
   it('retains comments, ownership and pauses when correcting an interval across midnight', () => {
     const log = {
       ...started(),

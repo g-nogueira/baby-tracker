@@ -94,6 +94,49 @@ async function harness(initial: WireLog[] = [], clock = at('10:00:00')) {
   };
 }
 describe('Napper-backed Nursing application', () => {
+  it('rereads an externally reopened stopped feed and confirms subsequent writes to the same record', async () => {
+    const h = await harness([seed()], at('10:01:00'));
+    const stopped = (await h.tracker.change('test-baby', seed(), { kind: 'stop' })).logs[0];
+    // The remote pause editor can retain subsecond breast totals. Resume uses the
+    // same log and adds the stopped interval as a pause rather than creating a log.
+    const reopened = {
+      ...stopped,
+      end: stopped.start,
+      isOpen: true,
+      activeBreast: 'RIGHT',
+      breastLeftMinutes: 12.75,
+      breastRightMinutes: 47.25,
+      updatedAt: at('10:03:00').toISOString(),
+      pauses: [
+        {
+          start: Date.parse(String(stopped.end)),
+          end: at('10:03:00').getTime(),
+          breast: 'RIGHT',
+        },
+      ],
+    };
+    h.setRows([reopened]);
+    h.time(at('10:03:23'));
+    const current = await h.tracker.current('test-baby');
+    expect(current).toEqual([reopened]);
+    const paused = (await h.tracker.change('test-baby', current[0], { kind: 'pause' })).logs[0];
+    h.time(at('10:04:00'));
+    const resumed = (await h.tracker.change('test-baby', paused, { kind: 'resume', side: 'RIGHT' }))
+      .logs[0];
+    h.time(at('10:04:10'));
+    const ended = (await h.tracker.change('test-baby', resumed, { kind: 'stop' })).logs[0];
+    expect(ended).toMatchObject({
+      id: stopped.id,
+      isOpen: false,
+      breastLeftMinutes: 12.75,
+      breastRightMinutes: 80,
+      comment: stopped.comment,
+    });
+    expect((ended.pauses as unknown[])[0]).toEqual(reopened.pauses[0]);
+    expect(h.rows()).toEqual([ended]);
+    expect(h.tracker.writeNeedsRefresh).toBe(false);
+    expect(h.sent).toHaveLength(4);
+  });
   it('runs start → switch → pause → resume → stop → edit against a synthetic server', async () => {
     const h = await harness();
     let result = await h.tracker.start('test-baby', 'LEFT');
