@@ -18,7 +18,7 @@ import { RadialCycle } from '@/features/timeline/radial-cycle';
 import type { Breast, WireLog } from './contracts';
 import { nursingTotals, readNursing } from './nursing';
 import { NapperNursingSheet } from './nursing-sheet';
-import { dateFeeds, nursingCycle } from './nursing-view';
+import { dateFeeds, inspectNursingLogs, nursingCycle } from './nursing-view';
 import { useNapper } from './use-napper';
 
 type Drawer = { kind: 'create' } | { kind: 'active'; id: string } | { kind: 'edit'; log: WireLog };
@@ -36,18 +36,20 @@ export function NapperScreen() {
   const now = new Date(Math.max(clock.getTime(), Date.now()));
   const open = model.current.filter((log) => log.category === 'NURSING' && log.isOpen === true);
   const active = open.length === 1 ? open[0] : null;
-  let invalid = false;
-  let last: Breast | null = null;
-  let total: ReturnType<typeof nursingTotals> | null = null;
-  const latest = [...model.current]
-    .filter((log) => log.category === 'NURSING' && log.isOpen === false)
-    .sort((a, b) => Date.parse(String(b.end)) - Date.parse(String(a.end)))[0];
-  try {
-    if (latest) last = readNursing(latest).last;
-    if (active) total = nursingTotals(readNursing(active), now);
-  } catch {
-    invalid = true;
-  }
+  const currentNursing = inspectNursingLogs(model.current, now);
+  const historyNursing = inspectNursingLogs(model.history, now);
+  const activeFeed = currentNursing.valid.find((feed) => feed.id === active?.id);
+  const invalid = active !== null && activeFeed === undefined;
+  const unknownRunningState = model.current.some(
+    (log) => log.category === 'NURSING' && typeof log.isOpen !== 'boolean',
+  );
+  const latest = [...currentNursing.valid]
+    .filter((feed) => !feed.open)
+    .sort((a, b) => Date.parse(b.end) - Date.parse(a.end))[0];
+  const last: Breast | null = latest?.last ?? null;
+  const total = activeFeed ? nursingTotals(activeFeed, now) : null;
+  const unsupported =
+    currentNursing.unsupportedIds.length + historyNursing.unsupportedIds.length > 0;
   useEffect(() => {
     if (drawer?.kind === 'create' && active) setDrawer({ kind: 'active', id: String(active.id) });
     else if (drawer?.kind === 'active' && !open.some((log) => log.id === drawer.id))
@@ -60,13 +62,21 @@ export function NapperScreen() {
     setDrawer(log.isOpen === true ? { kind: 'active', id: String(log.id) } : { kind: 'edit', log });
   };
   let view: ReturnType<typeof nursingCycle> | null = null;
+  let timelineUnavailable = false;
   if (model.baby)
     try {
-      view = nursingCycle(model.history, model.baby.id, model.date, model.timezone, now);
+      view = nursingCycle(
+        historyNursing.valid.map((feed) => feed.wire),
+        model.baby.id,
+        model.date,
+        model.timezone,
+        now,
+      );
     } catch {
-      invalid = true;
+      timelineUnavailable = true;
     }
-  const blocked = model.busy || model.needsRefresh || invalid || open.length > 1;
+  const blocked =
+    model.busy || model.needsRefresh || invalid || unknownRunningState || open.length > 1;
   const feeds = dateFeeds(model.history, model.date, model.timezone);
   const visibleTotal = model.date === model.today ? total : null;
   const time = (seconds: number) => formatLiveDuration(seconds * 1000);
@@ -158,7 +168,7 @@ export function NapperScreen() {
           </>
         )}
         <Link href="/local" style={styles.link}>
-          On-device records
+          Separate on-device tracker
         </Link>
       </View>
     ) : model.stage === 'profiles' ? (
@@ -205,6 +215,8 @@ export function NapperScreen() {
             <Text>Sign out</Text>
           </Pressable>
         </View>
+        <Text style={styles.copy}>Shared Nursing records · Napper</Text>
+        <Text style={styles.copy}>Sleep and other activities are coming next.</Text>
         <View style={styles.dates}>
           <Pressable
             accessibilityRole="button"
@@ -270,9 +282,11 @@ export function NapperScreen() {
           <ActivityIcon name="nursing" size={28} />
         </Pressable>
         <Text style={styles.recency}>
-          {latest
-            ? `${time(Math.max(0, Math.round((now.getTime() - Date.parse(String(latest.end))) / 1000)))} since last feed`
-            : '—'}
+          {activeFeed
+            ? `${time(Math.max(0, Math.round((now.getTime() - Date.parse(activeFeed.start)) / 1000)))} since feed started`
+            : latest
+              ? `${time(Math.max(0, Math.round((now.getTime() - Date.parse(latest.end)) / 1000)))} since last feed`
+              : '—'}
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -287,11 +301,20 @@ export function NapperScreen() {
             ? `Updated ${new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(model.updatedAt)}`
             : 'Waiting for shared records'}
         </Text>
-        {invalid || open.length > 1 ? (
+        {invalid || unknownRunningState || open.length > 1 || unsupported ? (
           <Text accessibilityRole="alert" style={styles.error}>
             {open.length > 1
               ? 'More than one feed is running. Review the records in Napper before making another change.'
-              : 'Some Nursing times or totals could not be displayed. Review these records in Napper.'}
+              : unknownRunningState
+                ? 'A Nursing record has an unknown running state. Review it in Napper before making changes.'
+                : invalid
+                  ? 'This running feed could not be read. Refresh or review it in Napper before changing it.'
+                  : 'Some Nursing records could not be read and are read-only here. Other feed controls remain available.'}
+          </Text>
+        ) : null}
+        {timelineUnavailable ? (
+          <Text accessibilityRole="alert" style={styles.error}>
+            The timeline could not be displayed. Nursing controls remain available for valid feeds.
           </Text>
         ) : null}
         {feeds.length === 0 && !model.refreshing ? (
@@ -328,7 +351,7 @@ export function NapperScreen() {
           );
         })}
         <Link href="/local" style={styles.link}>
-          On-device records
+          Separate on-device tracker
         </Link>
       </>
     );

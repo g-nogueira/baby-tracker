@@ -125,7 +125,7 @@ type UndoState =
 /**
  * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
  */
-export function TodayScreen() {
+export function TodayScreen({ onReturnToNapper }: { onReturnToNapper?: () => void } = {}) {
   const insets = useSafeAreaInsets();
   const {
     recordCompleted: recordCompletedSleep,
@@ -609,6 +609,19 @@ export function TodayScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}>
+        {onReturnToNapper ? (
+          <View style={styles.localNotice}>
+            <Text style={styles.localNoticeTitle}>On-device tracker</Text>
+            <Text>These records are separate from Napper.</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onReturnToNapper}
+              style={styles.localReturn}
+            >
+              <Text>Return to shared Napper records</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>{isToday ? 'TODAY' : 'HISTORY'}</Text>
@@ -1217,6 +1230,9 @@ function useAdaptiveClock(showSeconds: boolean): Date {
 }
 
 const styles = StyleSheet.create({
+  localNotice: { padding: 14, borderRadius: 14, gap: 6, backgroundColor: '#EEEAF9' },
+  localNoticeTitle: { color: '#292724', fontWeight: '700' },
+  localReturn: { minHeight: 44, justifyContent: 'center' },
   safeArea: { flex: 1, backgroundColor: palette.background },
   loading: {
     flex: 1,

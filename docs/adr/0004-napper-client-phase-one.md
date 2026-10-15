@@ -81,6 +81,12 @@ Current-state reads cover today and yesterday; an abnormally long feed starting 
 covered. Historical screens follow calendar days for this first slice, not Napper's complete
 Wake-up-to-Bedtime/Night cycle model.
 
+Offset-bearing wire timestamps are converted to canonical UTC only at the radial projection
+boundary. The original shared record remains unchanged for fingerprint checks and writes.
+Unsupported closed history records stay read-only without disabling a valid running feed;
+unsupported running records, unknown running states and multiple active feeds still block writes.
+The separate on-device tracker carries a persistent source notice and a return-to-Napper action.
+
 ## Acceptance and validation
 
 Automated tests exercise synthetic HTTP contracts, secure-store boundary failures, restart,

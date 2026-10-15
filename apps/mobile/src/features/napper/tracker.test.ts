@@ -52,7 +52,11 @@ async function harness(initial: WireLog[] = [], clock = at('10:00:00')) {
       const date = path.split('/').at(-1);
       return new Response(
         JSON.stringify({
-          item: { allLogs: rows.filter((log) => String(log.start).slice(0, 10) === date) },
+          item: {
+            allLogs: rows.filter(
+              (log) => new Date(String(log.start)).toISOString().slice(0, 10) === date,
+            ),
+          },
         }),
       );
     }

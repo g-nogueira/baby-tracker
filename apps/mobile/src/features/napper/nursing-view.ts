@@ -5,7 +5,24 @@ import {
   type RadialCycleView,
 } from '@/features/timeline/radial-cycle-state';
 import type { WireLog } from './contracts';
-import { readNursing } from './nursing';
+import { type NursingLog, nursingTotals, readNursing } from './nursing';
+
+/** A malformed historical feed stays read-only without disabling an unrelated valid feed. */
+export function inspectNursingLogs(logs: WireLog[], now: Date) {
+  const valid: NursingLog[] = [];
+  const unsupportedIds: string[] = [];
+  for (const log of logs) {
+    if (log.category !== 'NURSING') continue;
+    try {
+      const feed = readNursing(log);
+      nursingTotals(feed, now);
+      valid.push(feed);
+    } catch {
+      unsupportedIds.push(String(log.id));
+    }
+  }
+  return { valid, unsupportedIds };
+}
 
 /** Read projection only; Napper records never become local SQLite aggregates. */
 export function nursingCycle(
@@ -16,7 +33,18 @@ export function nursingCycle(
   now: Date,
 ): RadialCycleView {
   const cycle = resolveCanonicalCycles([], { childId: babyId, localDate: date, timezone }).day;
-  const feeds = logs.filter((log) => log.category === 'NURSING').map(readNursing);
+  // The domain projection requires canonical UTC. Napper uses offset-bearing wire
+  // timestamps; normalize only this read model and retain original wire values for saves.
+  const feeds = logs
+    .filter((log) => log.category === 'NURSING')
+    .map((wire) => {
+      const feed = readNursing(wire);
+      return {
+        ...feed,
+        start: new Date(feed.start).toISOString(),
+        end: new Date(feed.end).toISOString(),
+      };
+    });
   const projection = projectCycle(
     cycle,
     feeds.map((feed) =>

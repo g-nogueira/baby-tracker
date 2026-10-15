@@ -1,3 +1,7 @@
 import { TodayScreen } from '@/features/naps/today-screen';
+import { useRouter } from 'expo-router';
 
-export default TodayScreen;
+export default function LocalTrackerScreen() {
+  const router = useRouter();
+  return <TodayScreen onReturnToNapper={() => router.replace('/')} />;
+}
