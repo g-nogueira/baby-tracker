@@ -2,9 +2,15 @@
 
 ## MVP product and technical specification
 
-Status: build-ready  
+Status: original standalone specification; phase-one direction superseded by ADR 0004
 Date: 2026-08-07  
 Audience: Gustavo, Paloma, and implementation agents
+
+As of 2026-10-13, phase one is a thin Napper client with a Nursing vertical slice.
+[ADR 0004](adr/0004-napper-client-phase-one.md) controls that mode's scope and persistence:
+Napper is authoritative and writes require connectivity. The specification below remains the
+reference for the separate on-device tracker and future standalone product, not a claim that
+the current Napper client implements the complete MVP or offline/concurrency guarantees.
 
 ## 1. Product intent
 

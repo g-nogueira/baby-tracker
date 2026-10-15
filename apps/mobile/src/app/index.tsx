@@ -1,3 +1,2 @@
-import { TodayScreen } from '@/features/naps/today-screen';
-
-export default TodayScreen;
+import { NapperScreen } from '@/features/napper/napper-screen';
+export default NapperScreen;

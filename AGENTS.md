@@ -2,7 +2,9 @@
 
 ## Product invariants
 
-- The app is local-first: user writes must commit to SQLite before network synchronization.
+- The original on-device tracker is local-first: its writes commit to SQLite before sync.
+- The phase-1 Napper client uses Napper as the authoritative store. Its online writes go through
+  the Napper application adapter, never the local tracker/outbox. Keep these two modes isolated.
 - Historical care data belongs to the tracker; Home Assistant only consumes canonical live state
   and transition events.
 - Never log medicine text, credentials, pairing codes, or raw request bodies.

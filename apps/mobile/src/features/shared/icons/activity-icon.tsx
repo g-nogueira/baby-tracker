@@ -20,6 +20,7 @@ export function ActivityIcon({
     diaper: 'M4 5H20L19 16Q12 23 5 16Z M4 9L9 11 M20 9L15 11 M8 6V9 M16 6V9',
     medicine: 'M8 7V3H16V7 M7 7H17V21H7Z M9 14H15 M12 11V17',
     stop: 'M6 6H18V18H6Z',
+    pause: 'M8 5V19 M16 5V19',
     play: 'M8 5L19 12L8 19Z',
     check: 'M4 12L9 17L20 6',
   };
