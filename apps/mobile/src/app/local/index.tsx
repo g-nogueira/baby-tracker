@@ -3,5 +3,5 @@ import { useRouter } from 'expo-router';
 
 export default function LocalTrackerScreen() {
   const router = useRouter();
-  return <TodayScreen onReturnToNapper={() => router.replace('/')} />;
+  return <TodayScreen onReturnToSharedTracker={() => router.replace('/')} />;
 }

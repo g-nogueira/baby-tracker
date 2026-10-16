@@ -1,6 +1,8 @@
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { useNapper } from './use-napper';
+import { useCareTracker } from '@/features/care-service/use-care-tracker';
+import { createCareProvider } from '@/composition/care-provider';
+const useNapper = () => useCareTracker(createCareProvider);
 import type { NapperCredentials } from './contracts';
 const boundary = vi.hoisted(() => ({
   saved: null as NapperCredentials | null,
@@ -152,13 +154,13 @@ it('discards an old history response after navigating back to today and clears d
     );
   });
   expect(model.date).toBe(model.today);
-  expect(model.history).toEqual([]);
+  expect(model.history).toEqual({ activities: [], issues: [] });
   await act(async () => {
     await model.signOut();
   });
   expect(model.stage).toBe('email');
   expect(model.baby).toBeNull();
-  expect(model.current).toEqual([]);
+  expect(model.current).toEqual({ activities: [], issues: [] });
   expect(boundary.saved).toBeNull();
 });
 it('lets an already-delivered code reach verification after a failed send acknowledgment, without resending', async () => {

@@ -1,6 +1,21 @@
 import { expect, it } from 'vitest';
 import type { WireLog } from './contracts';
-import { inspectNursingLogs, nursingCycle } from './nursing-view';
+import { careCycleViews } from '@/features/care-service/cycle-view';
+import { toNursingActivity } from './care-records';
+const nursingCycle = (
+  logs: WireLog[],
+  _babyId: string,
+  date: string,
+  timezone: string,
+  now: Date,
+) =>
+  careCycleViews(
+    logs.map((wire) => toNursingActivity(wire, 'fixture-v1', now)),
+    date,
+    timezone,
+    now,
+    false,
+  ).day;
 const log: WireLog = {
   id: 'synthetic-feed',
   category: 'NURSING',
@@ -14,9 +29,14 @@ const log: WireLog = {
 const now = new Date('2026-10-15T01:25:23.000Z');
 it('provides a fixed read failure reason without leaking response contents', () => {
   const malformed = { ...log, breastLeftMinutes: 'private-response-marker' };
-  const result = inspectNursingLogs([malformed], now);
-  expect(result.issues).toEqual([{ id: log.id, reason: 'A breast duration is invalid.' }]);
-  expect(JSON.stringify(result)).not.toContain('private-response-marker');
+  expect(() => toNursingActivity(malformed, 'fixture-v1', now)).toThrow(
+    'A breast duration is invalid.',
+  );
+  try {
+    toNursingActivity(malformed, 'fixture-v1', now);
+  } catch (error) {
+    expect(String(error)).not.toContain('private-response-marker');
+  }
 });
 it('projects Napper offset-bearing timestamps without mutating the shared record', () => {
   const original = structuredClone(log);

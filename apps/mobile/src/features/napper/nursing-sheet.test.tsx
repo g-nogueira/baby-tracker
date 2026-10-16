@@ -1,8 +1,21 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { type ComponentProps, forwardRef, useImperativeHandle } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
-import { NapperNursingSheet } from './nursing-sheet';
+import { NursingSheet } from '@/features/care-service/nursing-sheet';
+import { toNursingActivity } from './care-records';
 import type { WireLog } from './contracts';
+
+// Integrate the observed Nursing wire fixture through the adapter into the actual generic drawer.
+type FixtureProps = Omit<ComponentProps<typeof NursingSheet>, 'log'> & { log: WireLog | null };
+function NapperNursingSheet(props: FixtureProps) {
+  return (
+    <NursingSheet
+      {...props}
+      log={props.log ? toNursingActivity(props.log, 'fixture-v1', props.now) : null}
+    />
+  );
+}
+
 const native = vi.hoisted(() => ({ resize: vi.fn().mockResolvedValue(undefined) }));
 // Native boundaries only. These checks cannot verify real phone gesture arbitration.
 vi.mock('react-native', () => ({
