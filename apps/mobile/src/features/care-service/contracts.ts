@@ -37,6 +37,8 @@ export interface NursingActivity extends ActivityBase {
 }
 export interface SleepActivity extends ActivityBase {
   kind: 'nap' | 'night-waking';
+  /** Pause total at this UTC instant; paused sleep does not accrue after it. */
+  measuredAt: string;
   pauseSeconds: number;
 }
 export interface PointActivity extends ActivityBase {
@@ -83,7 +85,11 @@ export type CareCommand =
     }
   | { type: 'start-nap' | 'bedtime'; at: string }
   | { type: 'wake-up' | 'start-night-waking'; expected: ActivityReference; at: string }
-  | { type: 'stop-nap' | 'fall-asleep' | 'continue-nap'; expected: ActivityReference; at: string }
+  | {
+      type: 'stop-nap' | 'fall-asleep' | 'continue-nap' | 'pause-nap' | 'resume-nap';
+      expected: ActivityReference;
+      at: string;
+    }
   | {
       type: 'edit-activity';
       expected: ActivityReference;

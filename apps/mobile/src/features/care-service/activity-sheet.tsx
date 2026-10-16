@@ -408,6 +408,25 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             {active ? 'Save start time' : intent.type === 'transition' ? title : 'Save'}
           </Text>
         </Pressable>
+        {record?.kind === 'nap' && active ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
+            disabled={busy}
+            onPress={() =>
+              onExecute({
+                type: record.status === 'paused' ? 'resume-nap' : 'pause-nap',
+                expected: record,
+                at: new Date().toISOString(),
+              })
+            }
+            style={styles.choice}
+          >
+            <Text style={styles.choiceText}>
+              {record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
+            </Text>
+          </Pressable>
+        ) : null}
         {activeStop ? (
           <Pressable
             accessibilityRole="button"

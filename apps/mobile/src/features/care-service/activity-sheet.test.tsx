@@ -168,6 +168,7 @@ it('continues an accidentally stopped Nap and dismisses the drawer without an im
     id: 'nap',
     revision: 'nap-v1',
     kind: 'nap',
+    measuredAt: '2026-10-15T12:00:00.000Z',
     startedAt: '2026-10-15T11:00:00.000Z',
     endedAt: '2026-10-15T11:45:00.000Z',
     status: 'completed',
@@ -184,6 +185,68 @@ it('continues an accidentally stopped Nap and dismisses the drawer without an im
   await act(async () => renderer.root.findByType(SheetBoundary).props.onDidDismiss());
   expect(base.onClose).toHaveBeenCalledOnce();
   expect(base.onExecute).not.toHaveBeenCalled();
+});
+it('resumes or stops a paused Nap through provider-neutral commands and keeps the paused timer frozen', async () => {
+  const activity: SleepActivity = {
+    id: 'nap',
+    revision: 'paused-v1',
+    kind: 'nap',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    measuredAt: '2026-10-15T11:50:00.000Z',
+    pauseSeconds: 300,
+    status: 'paused',
+  };
+  await render({ type: 'edit', activity });
+  expect(press('Resume Nap')?.props.disabled).toBe(false);
+  await act(async () => press('Resume Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'resume-nap',
+    expected: activity,
+    at: now.toISOString(),
+  });
+  base.onExecute.mockClear();
+  await act(async () => press('Stop Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'stop-nap',
+    expected: activity,
+    at: now.toISOString(),
+  });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 0 } }),
+  );
+  const content = () =>
+    renderer.root.findAllByType('Text' as never).map((n) => n.children.join(''));
+  expect(content()).toContain('45:00');
+  await act(async () =>
+    renderer.update(
+      <ActivitySheet
+        {...base}
+        now={new Date(now.getTime() + 60000)}
+        intent={{ type: 'edit', activity }}
+      />,
+    ),
+  );
+  expect(content()).toContain('45:00');
+});
+it('pauses an active Nap through the care port', async () => {
+  const activity: SleepActivity = {
+    id: 'nap',
+    revision: 'active-v1',
+    kind: 'nap',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    measuredAt: now.toISOString(),
+    pauseSeconds: 0,
+    status: 'active',
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Pause Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'pause-nap',
+    expected: activity,
+    at: now.toISOString(),
+  });
 });
 it('edits an active Nursing start without silently adopting a newer remote revision', async () => {
   const log: NursingActivity = {

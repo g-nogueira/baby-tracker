@@ -7,13 +7,14 @@ import {
   type CareKind,
   type PastActivity,
 } from '@/features/care-service/contracts';
-import { fingerprint, type WireLog } from './contracts';
+import { fingerprint, object, type WireLog } from './contracts';
 import {
   bedtimeFields,
   categories,
   instant,
   kindForCategory,
   readCareRecord,
+  readSleepPauses,
   zonedTimestamp,
 } from './care-records';
 import { correctNapperNursing, nursingTotals, readNursing } from './nursing';
@@ -42,10 +43,19 @@ function assertNoOverlap(intervals: CareActivity[]) {
       fail('This time overlaps another activity of the same type.');
   }
 }
-/** Validate the resulting shared sleep timeline before sending any writes. */
-export function validateSleep(logs: WireLog[], now: Date) {
+interface SleepViolation {
+  key: string;
+  ids: string[];
+  message: string;
+}
+/** A bounded history can start midway through a night, without its bedtime. */
+function sleepViolations(logs: WireLog[], now: Date): SleepViolation[] {
   const records = relevant(logs, now, sleepKinds);
-  assertSleepContext(records);
+  const violations: SleepViolation[] = [];
+  const add = (rule: string, message: string, activities: CareActivity[]) => {
+    const ids = activities.map((a) => a.id).sort();
+    violations.push({ key: JSON.stringify([rule, ids]), ids, message });
+  };
   const boundaries = records
     .filter((r) => r.kind === 'bedtime' || r.kind === 'wake-up')
     .sort(byStart);
@@ -54,27 +64,72 @@ export function validateSleep(logs: WireLog[], now: Date) {
       boundaries[i].kind === boundaries[i - 1].kind ||
       boundaries[i].startedAt === boundaries[i - 1].startedAt
     )
-      fail('Bedtime and Wake up must alternate in time. Review the neighboring night boundaries.');
+      add(
+        'boundaries',
+        'Bedtime and Wake up must alternate in time. Review the neighboring night boundaries.',
+        [boundaries[i - 1], boundaries[i]],
+      );
   const naps = records.filter((r) => r.kind === 'nap');
   const wakings = records.filter((r) => r.kind === 'night-waking');
-  assertNoOverlap(naps);
-  assertNoOverlap(wakings);
+  for (const intervals of [naps, wakings]) {
+    const sorted = intervals.sort(byStart);
+    for (let i = 0; i < sorted.length; i++)
+      for (let j = i + 1; j < sorted.length; j++) {
+        const end = sorted[i].endedAt;
+        if (!end || end > sorted[j].startedAt)
+          add('overlap', 'This time overlaps another activity of the same type.', [
+            sorted[i],
+            sorted[j],
+          ]);
+      }
+  }
   for (const interval of [...naps, ...wakings]) {
     if (interval.endedAt && interval.endedAt <= interval.startedAt)
-      fail('End must be after Start.');
+      add('duration', 'End must be after Start.', [interval]);
     const preceding = [...boundaries].reverse().find((b) => b.startedAt <= interval.startedAt);
     const next = boundaries.find((b) => b.startedAt > interval.startedAt);
     if (interval.kind === 'night-waking') {
       if (preceding?.kind !== 'bedtime' || interval.startedAt <= preceding.startedAt)
-        fail('A night waking must start after its bedtime.');
+        add('waking-start', 'A night waking must start after its bedtime.', [
+          interval,
+          ...(preceding ? [preceding] : []),
+        ]);
       if (next && (!interval.endedAt || interval.endedAt > next.startedAt))
-        fail('A night waking must finish by the morning Wake up.');
+        add('waking-end', 'A night waking must finish by the morning Wake up.', [interval, next]);
+    } else if (preceding?.kind === 'bedtime') {
+      add('nap-night-start', 'A nap cannot overlap a night sleep.', [interval, preceding]);
     } else if (
-      preceding?.kind === 'bedtime' ||
-      (next?.kind === 'bedtime' && (!interval.endedAt || interval.endedAt > next.startedAt))
-    )
-      fail('A nap cannot overlap a night sleep.');
+      next?.kind === 'bedtime' &&
+      (!interval.endedAt || interval.endedAt > next.startedAt)
+    ) {
+      add('nap-night-end', 'A nap cannot overlap a night sleep.', [interval, next]);
+    }
   }
+  return violations;
+}
+/** Reject new conflicts and conflicts involving the edited records, not unrelated old history. */
+function validateSleep(before: WireLog[], after: WireLog[], requests: WireLog[], now: Date) {
+  assertSleepContext(relevant(after, now, sleepKinds));
+  const existing = new Set(sleepViolations(before, now).map((v) => v.key));
+  const changed = new Set(requests.map((r) => String(r.id)));
+  for (const violation of sleepViolations(after, now))
+    if (!existing.has(violation.key) || violation.ids.some((id) => changed.has(id)))
+      fail(violation.message);
+}
+/** Stopping a paused timer ends at the pause start, matching the observed timer contract. */
+function closeSleep(log: WireLog, at: Date, now: Date, timezone: string): WireLog {
+  const pauses = readSleepPauses(log, now);
+  const last = pauses.at(-1);
+  if (last?.end === null) {
+    if (at.getTime() < last.start) fail('Stop must not precede the current pause.');
+    return {
+      ...log,
+      isOpen: false,
+      end: zonedTimestamp(new Date(last.start), timezone),
+      pauses: Array.isArray(log.pauses) ? log.pauses.slice(0, -1) : [],
+    };
+  }
+  return { ...log, isOpen: false, end: zonedTimestamp(at, timezone) };
 }
 function newLog(
   kind: CareKind,
@@ -188,15 +243,12 @@ export function prepareCareWrites(
         if (state.waking) fail('A night waking is already running.');
         requests = [newLog('night-waking', at, true, id, user, timezone)];
       } else {
-        requests = state.waking
-          ? [
-              {
-                ...logs.find((l) => l.id === state.waking?.id),
-                isOpen: false,
-                end: zonedTimestamp(at, timezone),
-              },
-            ]
-          : [];
+        requests = [];
+        if (state.waking) {
+          const waking = logs.find((l) => l.id === state.waking?.id);
+          if (!waking) fail('The running night waking changed. Refresh its record.');
+          requests.push(closeSleep(waking, at, now, timezone));
+        }
         requests.push(newLog('wake-up', at, false, id, user, timezone));
       }
       break;
@@ -204,9 +256,35 @@ export function prepareCareWrites(
     case 'stop-nap':
     case 'fall-asleep': {
       const current = command.type === 'stop-nap' ? state.nap : state.waking;
-      if (!current || current.id !== expected?.id || !at)
+      if (!current || !expected || current.id !== expected.id || !at)
         fail('This sleep activity is no longer running. Refresh its record.');
-      requests = [{ ...expected, end: zonedTimestamp(at, timezone), isOpen: false }];
+      requests = [closeSleep(expected, at, now, timezone)];
+      break;
+    }
+    case 'pause-nap':
+    case 'resume-nap': {
+      if (!state.nap || state.nap.id !== expected?.id || !expected || !at)
+        fail('This nap is no longer running. Refresh its record.');
+      const pauses = Array.isArray(expected.pauses) ? expected.pauses : [];
+      const last = readSleepPauses(expected, now).at(-1);
+      if (command.type === 'pause-nap') {
+        if (state.nap.status !== 'active') fail('This nap is already paused.');
+        requests = [{ ...expected, pauses: [...pauses, { start: at.getTime(), end: null }] }];
+      } else {
+        if (state.nap.status !== 'paused' || !last || at.getTime() < last.start)
+          fail('This nap is no longer paused, or Resume precedes its pause.');
+        requests = [
+          {
+            ...expected,
+            pauses: [
+              ...pauses.slice(0, -1),
+              ...(at.getTime() === last.start
+                ? []
+                : [{ ...object(pauses.at(-1)), end: at.getTime() }]),
+            ],
+          },
+        ];
+      }
       break;
     }
     case 'continue-nap': {
@@ -269,7 +347,7 @@ export function prepareCareWrites(
   const replacements = new Map(requests.map((r) => [r.id, r]));
   const after = [...logs.filter((l) => !replacements.has(l.id)), ...requests];
   if (requests.some((r) => sleepKinds.has(kindForCategory(r.category) ?? '')))
-    validateSleep(after, now);
+    validateSleep(logs, after, requests, now);
   if (requests.some((r) => r.category === 'NURSING'))
     assertNoOverlap(relevant(after, now, new Set(['nursing'])));
   // Validate every prepared record, including diaper enums, times and pause bounds.

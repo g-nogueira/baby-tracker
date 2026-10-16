@@ -81,6 +81,7 @@ const waking: SleepActivity = {
   id: 'waking',
   revision: 'waking-v1',
   kind: 'night-waking',
+  measuredAt: '2026-10-15T12:00:00.000Z',
   startedAt: '2026-10-15T01:10:00.000Z',
   endedAt: null,
   status: 'active',
@@ -248,11 +249,42 @@ it('blocks writes and displays a fixed validation reason for an unsupported runn
   expect(press('Nursing,')?.props.disabled).toBe(true);
   expect(press('Stop running Nursing')).toBeUndefined();
 });
+it('keeps a paused Nap editable alongside Nursing and care actions', async () => {
+  const nap: SleepActivity = {
+    id: 'paused-nap',
+    revision: 'paused-v1',
+    kind: 'nap',
+    startedAt: '2026-10-15T00:00:00.000Z',
+    endedAt: null,
+    measuredAt: '2026-10-15T01:25:00.000Z',
+    pauseSeconds: 1500,
+    status: 'paused',
+  };
+  hooks.model.current = snapshot([nap, active]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(text()).toContain('Nap paused');
+  expect(press('Stop running Nap')?.props.disabled).toBe(false);
+  expect(press('Stop running Nursing')?.props.disabled).toBe(false);
+  expect(press('Diaper,')?.props.disabled).toBe(false);
+  await act(async () => press('Open running Nap')?.props.onPress());
+  expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
+    type: 'edit',
+    activity: nap,
+  });
+  await act(async () => press('Resume Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenCalledWith({
+    type: 'resume-nap',
+    expected: nap,
+    at: new Date().toISOString(),
+  });
+});
 it('blocks multiple active feeds and conflicting sleep state', async () => {
   const nap: SleepActivity = {
     id: 'nap',
     revision: 'nap-v1',
     kind: 'nap',
+    measuredAt: '2026-10-15T12:00:00.000Z',
     startedAt: '2026-10-15T01:00:00.000Z',
     endedAt: null,
     status: 'active',

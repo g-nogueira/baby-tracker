@@ -59,6 +59,8 @@ export function assertSleepContext(activities: readonly CareActivity[]) {
   return state;
 }
 export function activityDuration(activity: SleepActivity, now: Date): number {
-  const through = Date.parse(activity.endedAt ?? now.toISOString());
+  const through = Date.parse(
+    activity.endedAt ?? (activity.status === 'paused' ? activity.measuredAt : now.toISOString()),
+  );
   return Math.max(0, through - Date.parse(activity.startedAt) - activity.pauseSeconds * 1000);
 }

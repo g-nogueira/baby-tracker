@@ -448,7 +448,7 @@ function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }) {
             <ActivityLiveController
               accentColor={activityColors[liveSleep.kind]}
               accessibilityLabel={`Open running ${activityLabels[liveSleep.kind]}`}
-              activityLabel={activityLabels[liveSleep.kind]}
+              activityLabel={`${activityLabels[liveSleep.kind]}${liveSleep.status === 'paused' ? ' paused' : ''}`}
               disabled={blocked}
               elapsedLabel={duration(activityDuration(liveSleep, now))}
               icon={activityIcons[liveSleep.kind]}

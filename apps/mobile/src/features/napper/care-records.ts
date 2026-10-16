@@ -104,6 +104,30 @@ export function toNursingActivity(
     throw invalid(nursingReadReason(error));
   }
 }
+/** The final pause may remain open while a Napper timer is paused. */
+export function readSleepPauses(wire: WireLog, now: Date) {
+  const raw = wire.pauses ?? [];
+  if (!Array.isArray(raw)) throw invalid('The sleep pause list is unsupported.');
+  let previous = Date.parse(instant(wire.start));
+  const through = wire.isOpen ? now.getTime() : Date.parse(instant(wire.end));
+  return raw.map((item, index) => {
+    const row = object(item);
+    const start = typeof row.start === 'number' ? row.start : Date.parse(String(row.start));
+    const end =
+      row.end == null ? null : typeof row.end === 'number' ? row.end : Date.parse(String(row.end));
+    if (
+      !Number.isFinite(start) ||
+      start < previous ||
+      start > through ||
+      (end === null
+        ? wire.isOpen !== true || index !== raw.length - 1
+        : !Number.isFinite(end) || end < start || end > through)
+    )
+      throw invalid('A sleep pause overlaps another pause or is outside its interval.');
+    previous = end ?? through;
+    return { start, end };
+  });
+}
 export function readCareRecord(wire: WireLog, revision: string, now: Date): CareActivity | null {
   const kind = kindForCategory(wire.category);
   if (!kind || wire.skipped === true) return null;
@@ -126,34 +150,17 @@ export function readCareRecord(wire: WireLog, revision: string, now: Date): Care
     status: wire.isOpen ? ('active' as const) : ('completed' as const),
   };
   if (kind === 'nap' || kind === 'night-waking') {
-    const raw = wire.pauses ?? [];
-    if (!Array.isArray(raw)) throw invalid('The sleep pause list is unsupported.');
-    let previous = Date.parse(startedAt);
-    const pauses = raw.map((item) => {
-      const row = object(item);
-      const start = typeof row.start === 'number' ? row.start : Date.parse(String(row.start));
-      const end =
-        row.end == null
-          ? null
-          : typeof row.end === 'number'
-            ? row.end
-            : Date.parse(String(row.end));
-      if (
-        !Number.isFinite(start) ||
-        end === null ||
-        !Number.isFinite(end) ||
-        start < previous ||
-        end < start ||
-        (!wire.isOpen && end > Date.parse(base.endedAt ?? startedAt))
-      )
-        throw invalid('A sleep pause is open, overlapping, or outside its interval.');
-      previous = end;
-      return { start, end };
-    });
+    const pauses = readSleepPauses(wire, now);
     return {
       ...base,
       kind,
-      pauseSeconds: pauses.reduce((sum, p) => sum + ((p.end ?? p.start) - p.start), 0) / 1000,
+      status: wire.isOpen
+        ? pauses.some((p) => p.end === null)
+          ? 'paused'
+          : 'active'
+        : 'completed',
+      measuredAt: now.toISOString(),
+      pauseSeconds: pauses.reduce((sum, p) => sum + ((p.end ?? now.getTime()) - p.start), 0) / 1000,
     };
   }
   if (kind === 'diaper') {

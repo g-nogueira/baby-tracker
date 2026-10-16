@@ -24,12 +24,13 @@ The separate SQLite tracker remains under `/local`; its data/outbox is not uploa
 - Nursing exposes accumulated L/R totals measured at an instant plus total pause seconds.
   Running clocks extrapolate from that measurement. Exact pause intervals remain inside
   the provider, so our existing Nursing aggregate can implement the port without fabricating
-  historical pauses. Sleep exposes the same aggregate pause duration for elapsed displays.
+  historical pauses. Sleep exposes an aggregate pause duration measured at an instant too;
+  its paused clock stays frozen between reads without exposing transport pause arrays.
 - The factory receives the selected IANA zone for new writes. A provider can expose an
   activity's `originTimezone` for historical editing. Napper supplies only offset timestamps;
   its original IANA zone is unknown and is not guessed. Its adapter translates the selected
   zone into the offset-bearing timestamps required by the observed SDK.
-- Commands express care operations: start/pause/switch/stop Nursing, start/stop/continue Nap,
+- Commands express care operations: start/pause/switch/stop Nursing, start/pause/resume/stop/continue Nap,
   bedtime, night waking, fall asleep, morning wake-up, edits and past activity creation.
   Auth and care ports are separate, so changing authentication does not affect activity code.
 - `execute` resolves only after an authoritative reread confirms the save. The hook never
@@ -53,6 +54,8 @@ Derived from the supplied SDK capture, not from calls to the family's live accou
 | Morning wake-up | Closed `WOKE_UP` point |
 | Nap | `NAP` interval with `isOpen` and optional pause intervals |
 | Night waking / fell asleep | Open / closed `NIGHT_WAKING` interval |
+| Pause / resume a Nap | Append a final open pause / close that pause on the same open record |
+| Stop a paused Nap | End at the open pause start and remove that final pause |
 | Continue a stopped Nap | Same record reopened, stopped gap appended as a pause; SDK's one-hour resume limit |
 | Diaper | `CHANGED_DIAPER`, `diaperContent` in `DRY/WET/DIRTY/MIXED` |
 | Medicine | `MEDICINE`, URI-encoded unrestricted comment; no dose validation or advice |
@@ -65,8 +68,12 @@ Neighboring storage dates are read because an evening bedtime may be stored on t
 date. Duplicate windows share reads and independent reads run concurrently.
 
 Napper has separate records for the night boundaries and each waking. Sleep writes validate
-boundary alternation, ordering, containing nights, pauses and overlaps before sending. Nursing
-can run concurrently with sleep; duplicate/ambiguous live state remains blocked. Unknown
+boundary alternation, ordering, containing nights, pauses and overlaps before sending. A bounded
+read may begin with a night waking whose bedtime is outside the window. Validation compares the
+before/after timeline: newly introduced conflicts and conflicts involving edited records are
+rejected; unchanged unrelated history does not prevent an afternoon Nap. Ambiguous live state
+still blocks writes. A final open pause is valid only on an open sleep record; overlapping,
+non-final, future or out-of-bounds pauses remain invalid. Nursing can run concurrently with sleep; duplicate/ambiguous live state remains blocked. Unknown
 records remain read-only with fixed explanations that contain no raw response data.
 
 Morning wake-up during an active waking needs two ordered PUTs: close that waking, then add
@@ -103,13 +110,16 @@ Migration/backfill of existing Napper records is a separate explicit operation, 
 ## Validation and remaining acceptance
 
 Synthetic HTTP tests cover complete nights, concurrent Nursing, both kinds of waking completion,
-reopened naps, time edits, history, unknown state, stale/forged revisions, double taps and partial
-transitions. Hook tests verify provider substitution, midnight rollover and confirmed-save/read
+reopened and paused naps, frozen paused clocks, stopping during a pause, time edits, truncated
+night history, neighboring-boundary conflicts, unknown state, stale/forged revisions, double taps
+and partial transitions. Hook tests verify provider substitution, midnight rollover and confirmed-save/read
 failure handling. Native-boundary tests cover stable pickers, proposed times, continuous sliders,
 explicit Last, active-start revisions and dismissal without an implicit write.
 
 Android/iOS JavaScript exports check bundling, not installed native behavior. Acceptance still
 requires a test profile on both phones: run bedtime → night waking → fell asleep → morning wake-up,
 with concurrent Nursing; confirm changes in Napper and in the other phone. Also edit a morning
-wake-up, log past-night care, and continue an accidentally stopped nap. Existing native dependencies
+wake-up, log past-night care, pause/resume a nap in both apps, stop it while paused, and continue
+an accidentally stopped nap. Night read synchronization has been reported working on a phone;
+night write acceptance remains outstanding. Existing native dependencies
 are unchanged; this delivery does not require adding another native module.
