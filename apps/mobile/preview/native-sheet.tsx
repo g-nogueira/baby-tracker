@@ -9,6 +9,7 @@ import {
 type DetentEvent = { nativeEvent: { index: number } };
 interface Props {
   children?: ReactNode;
+  footer?: ReactNode;
   initialDetentIndex?: number;
   detents?: (number | string)[];
   onDidPresent?: (event: DetentEvent) => void;
@@ -85,6 +86,20 @@ export const TrueSheet = forwardRef(function Sheet(props: Props, ref) {
           />
         </button>
         {props.children}
+        {props.footer ? (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              width: '100%',
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{ pointerEvents: 'auto' }}>{props.footer}</div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

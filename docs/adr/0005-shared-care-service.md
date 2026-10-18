@@ -110,8 +110,26 @@ Proposed start/transition times are tappable. Native TrueSheet owns detents and 
 native slider updates arrive during dragging. Date/time pickers hold unconfirmed selections
 through clock renders. Active Nursing start editing captures its original reviewed revision;
 completed Nursing retains explicit Last and whole-second split editing. Past activity creation
-uses the selected historical cycle, including past nights. Weekly history and broader Napper
-features are outside this delivery.
+uses the selected historical cycle, including past nights. History has a calendar strip, cycle/list views and recorded totals. Predictions and full Napper
+analytics remain outside this delivery.
+
+## Portable activity annotations
+
+`ActivityDetails` adds optional settling flags, sleep method, wake mood and comment to the read model.
+Creation, transition, edit and past-record commands carry sparse detail patches alongside timestamps.
+The UI uses neutral values such as `held` and `took-long`; Napper strings stay in `care-details.ts`.
+
+| Care field | Observed Napper field | Examples |
+| --- | --- | --- |
+| `settling` | `babyMoodOnSleep` | `took-long` → `LONG_TIME_TO_FALL_ASLEEP`, `upset` → `UPSET` |
+| `sleepMethod` | `howBabySlept` | `in-bed` → `IN_BED`, `held` → `WORN_OR_HELD` |
+| `wakeMood` | `babyMoodOnWakeUp` | `bad` / `neutral` / `good` → `BAD` / `NEUTRAL` / `GOOD` |
+| `comment` | `comment` | URI-encoded only inside the adapter |
+
+Only edited keys are replaced; other permitted Napper fields and unknown enum values are preserved.
+Annotations use the same reviewed revision and authoritative confirmation as time edits. During a
+morning transition, mood/comment target the new Wake-up record; they do not overwrite the waking
+record that must first be closed. A replacement service stores the neutral values directly.
 
 ## Replacing Napper with our service
 

@@ -18,3 +18,9 @@ export const Path = element('path');
 export const G = element('g');
 export const Line = element('line');
 export const Text = element('text');
+
+export const Defs = element('defs');
+export const LinearGradient = element('linearGradient');
+export const RadialGradient = element('radialGradient');
+export const Stop = element('stop');
+export const Rect = element('rect');

@@ -19,3 +19,20 @@ export function shortDuration(ms: number): string {
   const hours = Math.floor(minutes / 60);
   return hours ? `${hours}h ${minutes % 60}m` : `${minutes} min`;
 }
+
+/** Calendar labels follow the activity's display zone, including across UTC midnight. */
+export function dayLabel(date: Date, now: Date, timezone: string): string {
+  const format = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: timezone,
+  });
+  return format.format(date) === format.format(now)
+    ? 'Today'
+    : new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        timeZone: timezone,
+      }).format(date);
+}

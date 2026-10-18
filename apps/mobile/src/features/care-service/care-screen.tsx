@@ -1,3 +1,5 @@
+import { RoundAction } from '@/features/shared/round-action';
+import { HistoryWeek } from './history-week';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityMenuSheet } from './activity-menu-sheet';
 import { shortDuration } from './presentation';
@@ -10,10 +12,12 @@ import {
   type ActivityTheme,
 } from '@/features/shared/activity-theme';
 import { ProfileSheet } from './profile-sheet';
-import Svg, { Circle } from 'react-native-svg';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import Svg, { Circle, Defs, LinearGradient, Stop, Rect, RadialGradient } from 'react-native-svg';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   PanResponder,
+  Animated,
+  LayoutAnimation,
   Pressable,
   ScrollView,
   StatusBar,
@@ -23,7 +27,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
-import { instantForZonedDateTime, shiftCalendarDay } from '@/features/naps/calendar-day';
+import { instantForZonedDateTime } from '@/features/naps/calendar-day';
 import {
   HomeQuickActions,
   type HomeQuickAction,
@@ -71,9 +75,16 @@ export function CareScreen({ createProvider }: { createProvider: CareProviderFac
 }
 
 /** The connected home depends exclusively on care ports/read models; no provider payloads. */
-export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }) {
+export function CareHome({
+  model,
+  initialHistoryView,
+}: {
+  model: ReturnType<typeof useCareTracker>;
+  initialHistoryView?: 'dial' | 'log' | 'totals';
+}) {
   const scroll = useRef<ScrollView>(null);
   const logOffset = useRef(0);
+  const dragY = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
   const viewport = useWindowDimensions();
   const [clock, setClock] = useState(() => new Date());
@@ -87,7 +98,14 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
   const state = sleepContext(current);
   const [selection, setSelection] = useState<RadialCycleSelection>(state.night ? 'night' : 'day');
   const theme = nightTheme;
-  const [historyMode, setHistoryMode] = useState(false);
+  const [historyMode, updateHistoryMode] = useState(initialHistoryView !== undefined);
+  const setHistoryMode = useCallback((next: boolean) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    updateHistoryMode(next);
+  }, []);
+  const [historyView, setHistoryView] = useState<'dial' | 'log' | 'totals'>(
+    initialHistoryView ?? 'dial',
+  );
   const styles = connectedStyles;
   const [selectedManually, setSelectedManually] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
@@ -99,7 +117,12 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
           !model.busy &&
           Math.abs(gesture.dy) > 24 &&
           Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.5,
+        onPanResponderMove: (_, gesture) =>
+          dragY.setValue(Math.max(-60, Math.min(90, gesture.dy * 0.35))),
+        onPanResponderTerminate: () =>
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(),
         onPanResponderRelease: (_, gesture) => {
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
           if (gesture.dy > 60) setHistoryMode(true);
           else if (gesture.dy < -60) {
             setHistoryMode(false);
@@ -108,7 +131,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
           }
         },
       }),
-    [model.busy, model.date, model.today, model.setDate],
+    [model.busy, model.date, model.today, model.setDate, dragY, setHistoryMode],
   );
   const activeFeeds = current.filter(
     (a): a is NursingActivity => a.kind === 'nursing' && a.status !== 'completed',
@@ -199,7 +222,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
       meta: state.waking
         ? focusElapsed(state.waking.startedAt)
         : recency(state.night ? 'night-waking' : 'nap'),
-      icon: state.night ? (state.waking ? 'night' : 'night-waking') : 'nap',
+      icon: state.night ? 'night-waking' : 'nap',
       color: state.night ? '#52728A' : '#7367B9',
       disabled: blocked,
       disabledReason: null,
@@ -321,8 +344,30 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
         minimumLiveControllerStackHeight(controllerCount),
       )
     : Math.max(8, insets.bottom) + 84;
-  const dialMaxSize = Math.min(440, viewport.width - 32);
   const homeHeight = Math.max(0, viewport.height - (insets.top ?? 0) - bottomSpace);
+  const dialMaxSize = Math.min(
+    440,
+    viewport.width - 32,
+    Math.max(250, homeHeight - (historyMode ? 210 : 210)),
+  );
+  const homeTop = historyMode
+    ? 4
+    : Math.max(20, Math.min(64, (homeHeight - dialMaxSize - 145) * 0.25));
+  const actionGap = Math.max(24, Math.min(48, (homeHeight - dialMaxSize - 130) * 0.3));
+  const displayCenter = historyMode
+    ? {
+        label: selection === 'night' ? 'Night to' : 'Day of',
+        value:
+          model.date === model.today
+            ? 'Today'
+            : new Intl.DateTimeFormat(undefined, {
+                month: 'short',
+                day: 'numeric',
+                timeZone: 'UTC',
+              }).format(new Date(`${model.date}T12:00:00Z`)),
+        hint: '',
+      }
+    : center;
   return (
     <ActivityThemeContext.Provider value={theme}>
       <SafeAreaView style={styles.safe}>
@@ -342,6 +387,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
             },
           ]}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={historyMode && historyView !== 'dial'}
         >
           <View style={styles.header}>
             <Pressable
@@ -353,62 +399,47 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
             >
               <ActivityIcon name="baby" color={theme.muted} size={24} />
             </Pressable>
-            {historyMode ? (
-              <View style={styles.dates}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Previous day"
-                  disabled={model.busy}
-                  onPress={() => model.setDate(shiftCalendarDay(model.date, -1))}
-                  style={styles.dateButton}
-                >
-                  <Text style={styles.arrow}>‹</Text>
-                </Pressable>
-                <Text style={styles.muted}>
-                  {model.date === model.today ? 'Today' : model.date}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Next day"
-                  disabled={model.busy || model.date >= model.today}
-                  onPress={() => model.setDate(shiftCalendarDay(model.date, 1))}
-                  style={styles.dateButton}
-                >
-                  <Text style={styles.arrow}>›</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Text style={styles.cycleHint}>{selection === 'night' ? 'Night' : 'Day'}</Text>
-            )}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Choose baby profile"
-              disabled={model.busy}
-              onPress={() =>
-                model.babies.length > 1 ? model.showProfiles() : setDrawer({ type: 'profile' })
-              }
-              style={styles.dateButton}
+              accessibilityLabel="Open cycle history"
+              onPress={() => setHistoryMode(true)}
+              style={styles.historyHint}
             >
-              <ActivityIcon name="settings" color={theme.muted} size={22} />
+              {historyMode ? (
+                <Text style={styles.cycleHint}>History</Text>
+              ) : (
+                <ActivityIcon name="down" size={18} color={theme.muted} />
+              )}
             </Pressable>
+            <View style={styles.dateButton} />
           </View>
-          <View
+          {historyMode ? (
+            <HistoryWeek
+              date={model.date}
+              today={model.today}
+              onChange={model.setDate}
+              disabled={model.busy}
+            />
+          ) : null}
+          <Animated.View
             {...navigationGesture.panHandlers}
-            style={[styles.home, { minHeight: Math.max(0, homeHeight - 60) }]}
+            style={[styles.home, { paddingTop: homeTop, transform: [{ translateY: dragY }] }]}
           >
-            {view ? (
+            {(!historyMode || historyView === 'dial') && view ? (
               <RadialCycle
                 view={view}
                 maxSize={dialMaxSize}
-                centerStatus={{ ...center, hint: historyMode ? center.hint : '' }}
+                centerStatus={{ ...displayCenter, hint: historyMode ? displayCenter.hint : '' }}
                 controls={
-                  <RadialCycleSelector
-                    selection={selection}
-                    onChange={(next) => {
-                      setSelectedManually(true);
-                      setSelection(next);
-                    }}
-                  />
+                  historyMode || view.projection === null ? (
+                    <RadialCycleSelector
+                      selection={selection}
+                      onChange={(next) => {
+                        setSelectedManually(true);
+                        setSelection(next);
+                      }}
+                    />
+                  ) : undefined
                 }
                 disabled={blocked}
                 onPressRecord={(record) => {
@@ -420,32 +451,40 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
                   if (a) open(a);
                 }}
               />
-            ) : (
+            ) : !view ? (
               <Text accessibilityRole="alert" style={styles.error}>
                 The timeline could not be displayed. Valid activity controls remain available.
               </Text>
-            )}
-            <View style={styles.quickActions}>
-              <HomeQuickActions
-                actions={actions.map((action) => ({
-                  ...action,
-                  color: theme.night
-                    ? nightActivityColors[
-                        action.id === 'night'
-                          ? state.night
-                            ? 'wake-up'
-                            : 'bedtime'
-                          : action.id === 'sleep'
-                            ? state.night
-                              ? 'night-waking'
-                              : 'nap'
-                            : (action.id as CareKind)
-                      ]
-                    : action.color,
-                }))}
-              />
-            </View>
-          </View>
+            ) : null}
+            {!historyMode ? (
+              <View style={[styles.quickActions, { marginTop: actionGap }]}>
+                <HomeQuickActions
+                  compact
+                  actions={actions
+                    .filter(
+                      (action) =>
+                        action.id !== 'medicine' && (!state.night || action.id !== 'diaper'),
+                    )
+                    .map((action) => ({
+                      ...action,
+                      color: theme.night
+                        ? nightActivityColors[
+                            action.id === 'night'
+                              ? state.night
+                                ? 'wake-up'
+                                : 'bedtime'
+                              : action.id === 'sleep'
+                                ? state.night
+                                  ? 'night-waking'
+                                  : 'nap'
+                                : (action.id as CareKind)
+                          ]
+                        : action.color,
+                    }))}
+                />
+              </View>
+            ) : null}
+          </Animated.View>
           {state.problem || activeFeeds.length > 1 || blockingIssue ? (
             <Text accessibilityRole="alert" style={styles.error}>
               {state.problem ??
@@ -469,7 +508,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
               {issue.message}
             </Text>
           ))}
-          {historyMode ? (
+          {historyMode && historyView === 'log' ? (
             <>
               <View
                 style={styles.logHeader}
@@ -537,69 +576,170 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
               </View>
             </>
           ) : null}
+          {historyMode && historyView === 'totals' ? (
+            <View style={{ gap: 16, paddingVertical: 24 }}>
+              <Text accessibilityRole="header" style={styles.sectionTitle}>
+                {selection === 'night' ? 'Night' : 'Day'} totals
+              </Text>
+              {(['nap', 'night-waking', 'nursing', 'diaper', 'medicine'] as const).map((kind) => {
+                const matching = rows.filter((a) => a.kind === kind);
+                const total = matching.reduce(
+                  (sum, a) =>
+                    sum +
+                    (a.kind === 'nursing'
+                      ? nursingTimes(a, now).total * 1000
+                      : a.kind === 'nap' || a.kind === 'night-waking'
+                        ? activityDuration(a, now)
+                        : 0),
+                  0,
+                );
+                return (
+                  <View key={kind} style={styles.totalRow}>
+                    <ActivityIcon name={activityIcons[kind]} size={32} />
+                    <Text style={styles.muted}>{activityLabels[kind]}</Text>
+                    <Text style={styles.rowTitle}>
+                      {kind === 'diaper' || kind === 'medicine'
+                        ? matching.length
+                        : shortDuration(total)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
         </ScrollView>
         <View style={[styles.dockHost, { bottom: Math.max(8, insets.bottom) }]}>
-          <View style={styles.dock}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Home"
-              accessibilityState={{ selected: !historyMode }}
-              onPress={() => {
-                setHistoryMode(false);
-                setSelectedManually(false);
-                if (model.date !== model.today) model.setDate(model.today);
-                scroll.current?.scrollTo({ y: 0, animated: false });
-              }}
-              style={styles.dockTarget}
-            >
-              <ActivityIcon name="home" color={!historyMode ? theme.text : theme.muted} size={24} />
-            </Pressable>
-            <View
-              accessibilityLabel="Sleep sounds unavailable"
-              style={[styles.dockTarget, { opacity: 0.35 }]}
-            >
-              <ActivityIcon name="music" color={theme.muted} size={25} />
+          {historyMode ? (
+            <View style={styles.historyDock}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Home"
+                onPress={() => {
+                  setHistoryMode(false);
+                  setSelectedManually(false);
+                  if (model.date !== model.today) model.setDate(model.today);
+                  scroll.current?.scrollTo({ y: 0, animated: false });
+                }}
+                style={styles.dockTarget}
+              >
+                <ActivityIcon name="back" color={theme.muted} />
+              </Pressable>
+              <View style={styles.historyModes}>
+                {(
+                  [
+                    ['dial', 'Cycle dial', 'cycle'],
+                    ['log', 'Activity list', 'log'],
+                    ['totals', 'Cycle totals', 'chart'],
+                  ] as const
+                ).map(([mode, label, icon]) => (
+                  <Pressable
+                    key={mode}
+                    accessibilityRole="tab"
+                    accessibilityLabel={label}
+                    accessibilityState={{ selected: historyView === mode }}
+                    onPress={() => {
+                      setHistoryView(mode);
+                      scroll.current?.scrollTo({ y: 0, animated: false });
+                    }}
+                    style={styles.dockTarget}
+                  >
+                    <ActivityIcon
+                      name={icon}
+                      color={historyView === mode ? theme.accent : theme.muted}
+                      size={22}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add past activity"
+                disabled={blocked}
+                onPress={() =>
+                  show({
+                    type: 'activity',
+                    intent: {
+                      type: 'past',
+                      at: pastAt(),
+                      kind: selection === 'night' ? 'night-waking' : 'nap',
+                    },
+                  })
+                }
+                style={styles.dockTarget}
+              >
+                <ActivityIcon name="plus" size={28} color={theme.muted} />
+              </Pressable>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={model.date === model.today ? 'Add activity' : 'Add past activity'}
-              disabled={blocked || model.refreshing}
-              onPress={() =>
-                model.date === model.today
-                  ? show({ type: 'actions' })
-                  : show({
-                      type: 'activity',
-                      intent: {
-                        type: 'past',
-                        at: pastAt(),
-                        kind: selection === 'night' ? 'night-waking' : 'nap',
-                      },
-                    })
-              }
-              style={styles.pastButton}
-            >
-              <ActivityIcon name="plus" color={theme.text} size={30} />
-            </Pressable>
+          ) : (
+            <View style={styles.dock}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Home"
+                accessibilityState={{ selected: !historyMode }}
+                onPress={() => {
+                  setHistoryMode(false);
+                  setSelectedManually(false);
+                  if (model.date !== model.today) model.setDate(model.today);
+                  scroll.current?.scrollTo({ y: 0, animated: false });
+                }}
+                style={styles.dockTarget}
+              >
+                <ActivityIcon
+                  name="home-filled"
+                  color={!historyMode ? theme.text : theme.muted}
+                  size={24}
+                />
+              </Pressable>
+              <View
+                accessibilityLabel="Sleep sounds unavailable"
+                style={[styles.dockTarget, { opacity: 0.35 }]}
+              >
+                <ActivityIcon name="music" color={theme.muted} size={25} />
+              </View>
+              <RoundAction
+                label={model.date === model.today ? 'Add activity' : 'Add past activity'}
+                icon="plus"
+                size={52}
+                disabled={blocked || model.refreshing}
+                onPress={() =>
+                  model.date === model.today
+                    ? show({ type: 'actions' })
+                    : show({
+                        type: 'activity',
+                        intent: {
+                          type: 'past',
+                          at: pastAt(),
+                          kind: selection === 'night' ? 'night-waking' : 'nap',
+                        },
+                      })
+                }
+              />
 
-            <View
-              accessibilityLabel="Sleep library unavailable"
-              style={[styles.dockTarget, { opacity: 0.35 }]}
-            >
-              <ActivityIcon name="books" color={theme.muted} size={24} />
+              <View
+                accessibilityLabel="Sleep library unavailable"
+                style={[styles.dockTarget, { opacity: 0.35 }]}
+              >
+                <ActivityIcon name="books" color={theme.muted} size={24} />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="History"
+                accessibilityState={{ selected: historyMode }}
+                onPress={() => {
+                  setHistoryMode(true);
+                  setHistoryView('dial');
+                  scroll.current?.scrollTo({ y: 0, animated: false });
+                }}
+                style={styles.dockTarget}
+              >
+                <ActivityIcon
+                  name="chart"
+                  color={historyMode ? theme.text : theme.muted}
+                  size={24}
+                />
+              </Pressable>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="History"
-              accessibilityState={{ selected: historyMode }}
-              onPress={() => {
-                setHistoryMode(true);
-                scroll.current?.scrollTo({ y: logOffset.current, animated: false });
-              }}
-              style={styles.dockTarget}
-            >
-              <ActivityIcon name="chart" color={historyMode ? theme.text : theme.muted} size={24} />
-            </Pressable>
-          </View>
+          )}
         </View>
         {hasControllers ? (
           <ActivityLiveControllerStack raised onReservedSpaceChange={setReserved}>
@@ -771,6 +911,29 @@ function NightSky() {
   return (
     <View pointerEvents="none" style={skyStyle}>
       <Svg width="100%" height="100%" viewBox="0 0 400 900" preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#101024" />
+            <Stop offset="1" stopColor="#1B1A3D" />
+          </LinearGradient>
+          <RadialGradient id="starGlow">
+            <Stop offset="0" stopColor="#EEE9FF" stopOpacity={0.45} />
+            <Stop offset="1" stopColor="#EEE9FF" stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Rect x={0} y={0} width={400} height={900} fill="url(#sky)" />
+        {nightStars
+          .filter((_, i) => i % 5 === 0)
+          .map((star) => (
+            <Circle
+              key={`glow${star.id}`}
+              cx={star.x}
+              cy={star.y}
+              r={3}
+              fill="url(#starGlow)"
+              opacity={0.55}
+            />
+          ))}
         {nightStars.map((star) => (
           <Circle
             key={star.id}
@@ -785,12 +948,12 @@ function NightSky() {
     </View>
   );
 }
-const nightStars = Array.from({ length: 36 }, (_, i) => ({
+const nightStars = Array.from({ length: 70 }, (_, i) => ({
   id: `star-${i}`,
   x: (i * 127 + 19) % 400,
   y: (i * 197 + 31) % 900,
   radius: i % 4 === 0 ? 1.1 : 0.6,
-  opacity: 0.12 + (i % 3) * 0.07,
+  opacity: 0.15 + (i % 3) * 0.1,
 }));
 const skyStyle = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
 const createStyles = (theme: ActivityTheme) =>
@@ -811,8 +974,37 @@ const createStyles = (theme: ActivityTheme) =>
       alignItems: 'center',
       justifyContent: 'space-between',
     },
-    home: { paddingTop: 36 },
-    quickActions: { marginTop: 24, marginBottom: 24 },
+    home: { alignItems: 'center' },
+    historyHint: { minWidth: 100, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    historyPrompt: {
+      alignSelf: 'center',
+      minHeight: 60,
+      paddingTop: 28,
+      alignItems: 'center',
+      gap: 6,
+    },
+    historyPromptText: { fontSize: 11, color: theme.muted, opacity: 0.55 },
+    historyDock: {
+      height: 56,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    historyModes: {
+      flexDirection: 'row',
+      borderRadius: 28,
+      paddingHorizontal: 4,
+      backgroundColor: theme.raised,
+    },
+    totalRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      padding: 16,
+      borderRadius: 16,
+      backgroundColor: theme.surface,
+    },
+    quickActions: { marginBottom: 0, width: '100%', maxWidth: 360 },
     cycleHint: { fontSize: 14, color: theme.muted },
     eyebrow: { color: theme.muted, fontSize: 10, fontWeight: '600', letterSpacing: 2 },
     profileButton: {
@@ -834,7 +1026,7 @@ const createStyles = (theme: ActivityTheme) =>
     link: { minHeight: 44, paddingVertical: 12 },
     dockHost: { position: 'absolute', left: 16, right: 16, zIndex: 30, elevation: 10 },
     dock: {
-      height: 68,
+      height: 62,
       maxWidth: 448,
       width: '100%',
       alignSelf: 'center',
@@ -848,9 +1040,9 @@ const createStyles = (theme: ActivityTheme) =>
     dockTarget: { minHeight: 48, width: 44, alignItems: 'center', justifyContent: 'center' },
     pastButton: {
       alignSelf: 'center',
-      width: 58,
-      height: 58,
-      borderRadius: 29,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
       backgroundColor: '#999BFF',
       borderWidth: 2,
       borderColor: '#BCBDFF',

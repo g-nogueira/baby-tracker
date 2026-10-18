@@ -41,6 +41,14 @@ export function ActivityIcon({
     pause: 'M8 5V19 M16 5V19',
     play: 'M8 5L19 12L8 19Z',
     check: 'M4 12L9 17L20 6',
+    'home-filled': 'M2 11L12 2L22 11H20V22H14V15H10V22H4V11Z',
+    moon: 'M20 15A9 9 0 0 1 9 4A9 9 0 1 0 20 15Z',
+    sun: 'M12 7A5 5 0 1 0 12 17A5 5 0 1 0 12 7 M12 2V4 M12 20V22 M2 12H4 M20 12H22 M5 5L6.5 6.5 M17.5 17.5L19 19 M5 19L6.5 17.5 M17.5 6.5L19 5',
+    cycle: 'M5 19A9 9 0 1 1 19 19',
+    down: 'M6 9L12 15L18 9',
+    back: 'M20 12H4 M10 6L4 12L10 18',
+    rewind: 'M5 9V3 M5 9H11 M5 9A8 8 0 1 1 4 15',
+    forward: 'M19 9V3 M19 9H13 M19 9A8 8 0 1 0 20 15',
   };
   const aliases: Record<string, string> = {
     z: 'nap',
@@ -76,7 +84,7 @@ export function ActivityIcon({
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path
         d={paths[kind] ?? paths.check}
-        fill={kind === 'stop' ? color : 'none'}
+        fill={kind === 'stop' || kind === 'home-filled' ? color : 'none'}
         stroke={color}
         strokeWidth={1.7}
         strokeLinecap="round"

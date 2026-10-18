@@ -49,10 +49,28 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
       <TrackingFontsContext.Provider value={true}>
         <View style={{ width, height, overflow: 'hidden' }}>
           <Preview
-            scenario={dark ? 'night' : scenario === 'first-nursing' ? 'first-nursing' : 'day'}
+            scenario={
+              scenario === 'history'
+                ? 'history'
+                : dark
+                  ? 'night'
+                  : scenario === 'first-nursing'
+                    ? 'first-nursing'
+                    : 'day'
+            }
             now={now.getTime()}
           />
           <ActivityThemeContext.Provider value={theme}>
+            {scenario === 'bedtime' || scenario === 'new-nap' ? (
+              <ActivitySheet
+                {...callbacks}
+                intent={{
+                  type: 'transition',
+                  command: scenario === 'bedtime' ? 'bedtime' : 'start-nap',
+                }}
+                onExecute={() => {}}
+              />
+            ) : null}
             {scenario === 'nap-drawer' ? (
               <ActivitySheet
                 {...callbacks}
@@ -79,5 +97,5 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
   AppRegistry.registerComponent('Review', () => Screen);
   const { element, getStyleElement } = AppRegistry.getApplication('Review');
   const body = renderToString(element);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${renderToString(getStyleElement())}<style>@font-face{font-family:Saans-Regular;src:url('${regular}')}@font-face{font-family:Saans-Medium;src:url('${medium}')}@font-face{font-family:Saans-RegularItalic;src:url('${italic}')}@page{size:${width}px ${height}px;margin:0}html,body{width:${width}px;height:${height}px;margin:0;overflow:hidden}body{font-family:Saans-Regular,sans-serif;background:${theme.background}}#react-root{height:${height}px}[role=dialog]{position:fixed;top:0;left:0;bottom:0;right:0}[role=dialog]>div{height:${scenario === 'nursing' || scenario === 'first-nursing' ? 540 : 450}px!important;top:auto!important;bottom:0!important;left:0!important;transform:none!important}[role=dialog]>button{top:0;left:0;bottom:0;right:0}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${renderToString(getStyleElement())}<style>@font-face{font-family:Saans-Regular;src:url('${regular}')}@font-face{font-family:Saans-Medium;src:url('${medium}')}@font-face{font-family:Saans-RegularItalic;src:url('${italic}')}@page{size:${width}px ${height}px;margin:0}html,body{width:${width}px;height:${height}px;margin:0;overflow:hidden}body{font-family:Saans-Regular,sans-serif;background:${theme.background}}#react-root{height:${height}px}[role=dialog]{position:fixed;top:0;left:0;bottom:0;right:0}[role=dialog]>div{height:${scenario === 'bedtime' ? height * 0.74 : scenario === 'nursing' ? Math.min(height * 0.78, 600) : scenario === 'first-nursing' ? Math.min(height * 0.78, 540) : Math.min(height * 0.62, 450)}px!important;top:auto!important;bottom:0!important;left:0!important;transform:none!important}[role=dialog]>button{top:0;left:0;bottom:0;right:0}</style></head><body>${body}</body></html>`;
 }

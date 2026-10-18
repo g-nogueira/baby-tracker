@@ -89,6 +89,14 @@ const gestures = vi.hoisted(() => ({
   },
 }));
 vi.mock('react-native', () => ({
+  LayoutAnimation: { configureNext: () => {}, Presets: { easeInEaseOut: {} } },
+  Animated: {
+    Value: class {
+      setValue() {}
+    },
+    View: 'View',
+    spring: () => ({ start: () => {} }),
+  },
   PanResponder: {
     create: (config: NonNullable<typeof gestures.current>) => {
       gestures.current = config;
@@ -117,6 +125,11 @@ vi.mock('react-native-svg', () => ({
   G: 'G',
   Line: 'Line',
   Path: 'Path',
+  Defs: 'Defs',
+  LinearGradient: 'LinearGradient',
+  Stop: 'Stop',
+  Rect: 'Rect',
+  RadialGradient: 'RadialGradient',
   Text: 'SvgText',
 }));
 vi.mock('@lodev09/react-native-true-sheet', () => ({
@@ -125,7 +138,12 @@ vi.mock('@lodev09/react-native-true-sheet', () => ({
       resize: async () => undefined,
       dismiss: async () => (props.onDidDismiss as (() => void) | undefined)?.(),
     }));
-    return <>{props.children as import('react').ReactNode}</>;
+    return (
+      <>
+        {props.children as import('react').ReactNode}
+        {props.footer as import('react').ReactNode}
+      </>
+    );
   }),
 }));
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
@@ -236,6 +254,7 @@ it('uses the dark surface for both cycles and keeps navigation available on an e
   hooks.model.history = hooks.model.current;
   await render();
   expect(renderer.root.findByType('StatusBar' as never).props.barStyle).toBe('light-content');
+  await act(async () => press('History')?.props.onPress());
   await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
   expect(text()).toContain('No night sleep logged');
   expect(press('Day')).toBeDefined();
@@ -247,6 +266,9 @@ it('opens history separately and returns Home to the current day', async () => {
   await render();
   expect(text()).not.toContain('Day log');
   await act(async () => press('History')?.props.onPress());
+  expect(press('Show 2026-10-14')).toBeDefined();
+  expect(press('Cycle dial')).toBeDefined();
+  await act(async () => press('Activity list')?.props.onPress());
   expect(text()).toContain('Day log');
   expect(press('Previous day')).toBeDefined();
   await act(async () => press('Home')?.props.onPress());
@@ -258,7 +280,8 @@ it('swipes between the tracking dial and history without taking horizontal gestu
   expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 80, dy: 10 })).toBe(false);
   expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 5, dy: 80 })).toBe(true);
   await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: 80 }));
-  expect(text()).toContain('Day log');
+  expect(press('Cycle dial')).toBeDefined();
+  expect(press('Activity list')).toBeDefined();
   await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: -80 }));
   expect(text()).not.toContain('Day log');
 });
@@ -269,6 +292,18 @@ it('opens the activity menu from plus and hands off to Nursing after dismissal',
   await act(async () => press('Track Nursing')?.props.onPress());
   expect(renderer.root.findByType(NursingSheet).props.log).toEqual(active);
   expect(press('Track Nursing')).toBeUndefined();
+});
+it('navigates the week, blocks future dates and switches between history surfaces', async () => {
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  expect(press('Show 2026-10-16')?.props.disabled).toBe(true);
+  await act(async () => press('Show 2026-10-13')?.props.onPress());
+  expect(hooks.model.setDate).toHaveBeenCalledWith('2026-10-13');
+  await act(async () => press('Cycle totals')?.props.onPress());
+  expect(text()).toContain('Day totals');
+  expect(press('Nursing,')).toBeUndefined();
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(text()).toContain('Day log');
 });
 it('switches, pauses and resumes Nursing directly from the persistent side controls', async () => {
   await render();
@@ -325,7 +360,7 @@ it('renders Night waking with Nursing concurrently, and distinguishes falling as
   hooks.model.current = snapshot([bed, waking, active]);
   hooks.model.history = hooks.model.current;
   await render();
-  expect(renderer.root.findByType(RadialCycleSelector).props.selection).toBe('night');
+  expect(renderer.root.findByType(RadialCycle).props.view.kind).toBe('night');
   expect(text()).toContain('Awake for');
   expect(press('Fell asleep again')?.props.disabled).toBe(false);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
@@ -372,6 +407,7 @@ it('opens the exact Wake up anchor and permits new records on a past night while
   hooks.model.current = snapshot([{ ...active, startedAt: '2026-10-16T11:55:00.000Z' }]);
   hooks.model.history = snapshot([bed, wake]);
   await render();
+  await act(async () => press('History')?.props.onPress());
   await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
   const dial = renderer.root.findByType(RadialCycle);
   expect(dial.props.view.projection.cycle.startedAt).toBe(bed.startedAt);
@@ -523,7 +559,8 @@ it('opens care logging on the shared screen instead of routing to the separate l
     kind: 'diaper',
   });
   await act(async () => renderer.root.findByType(ActivitySheet).props.onClose());
-  await act(async () => press('Medicine,')?.props.onPress());
+  await act(async () => press('Add activity')?.props.onPress());
+  await act(async () => press('Track Medicine')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toMatchObject({
     type: 'care',
     kind: 'medicine',

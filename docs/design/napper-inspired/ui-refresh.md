@@ -1,7 +1,7 @@
 # Napper tracking UI parity
 
 This revision replaces the earlier visual refresh with tracking layouts based on the supplied
-Napper JavaScript and screenshots. **Exact parity is still incomplete.** Broader Napper features,
+Napper JavaScript, screenshots and the supplied `91733.mp4` / `91734.mp4` recordings. **Exact parity is still incomplete.** Broader Napper features,
 remaining geometry/effects and installed-phone acceptance remain outstanding.
 
 ## References and recovered values
@@ -21,14 +21,24 @@ sets the connected client's appearance. The separate local tracker remains avail
 - Bundled the supplied Saans Regular/Medium/Italic fonts and original colored activity artwork.
 - Added purple artwork variants to persistent Nap/Night-waking timers and font-load failure fallback.
 - Dark connected surfaces for both cycles; moved cycle switching into an icon pill on the dial.
-- Enlarged the dial to use the phone width and removed the large name header/segmented switch.
-- Kept midnight visible and placed timed activity markers at their start, independently of duration.
-- Added vertical swiping between the dial and history, and a five-position dock. Home, Add and History work;
-  the sound/library positions are dim, non-interactive slots because those features are unavailable.
+- Sized Home from the available viewport; reduced quick actions to four in Day and three in Night.
+  Medicine and other supported actions remain in the three-column `+` menu.
+- Removed the utility header and Home cycle pill; cycle switching lives in history and empty-cycle states.
+- Kept midnight visible and placed timed markers at their start, independently of duration.
+  Markers near a wake/bedtime anchor use an inner rail at the same angle; nearby groups retain exact record IDs.
+  Sleep intervals use quiet outlined bands; the completed Night no longer paints a bright full dial.
+- Added drag feedback and animated layout changes between Home and history.
+  History has a Sunday–Saturday strip with future dates disabled, plus dial/list/recorded-total views.
+  Its dock has Back, view selectors and Add; Home retains five positions. Sound/library slots remain inactive.
 - Added an activity menu to `+`; historical dates still open past-activity entry directly.
 - Added L/R switch, pause and resume to the persistent Nursing bar alongside its stop control.
-- Added larger drawer symbols, clock ranges without repeated AM/PM, duration/age captions,
-  round primary actions and native expansion from the options button.
+- Removed the extra artwork rings in drawers and enlarged the symbols. Clock ranges omit repeated AM/PM.
+- Moved primary actions and Nursing side controls into TrueSheet native floating footers.
+  Bedtime initially opens at 74% with contextual fields; expanded drawers reach 94%.
+- Added functional Start/How/comment fields for Bedtime/Nap and wake-mood/comment fields for waking.
+  Draft patches save with timestamps through portable care commands; the adapter maps the observed Napper enums.
+  Unedited supported provider fields and unknown enum values survive annotation edits.
+- Added explicit end-time entry on a proposed Nap/waking, saving a completed interval instead of a live timer.
 - Preserved exact timestamp drafts, continuous Nursing split updates and native TrueSheet ownership.
 - Preserved the replaceable care ports, authoritative Napper writes and collision/stale-save guards.
 
@@ -50,8 +60,8 @@ still opens the tracker with the system typeface. Typography selects the supplie
 files instead of synthesizing bold faces. Exact gradients, glows, animation and remaining geometry
 are still under comparison; supplying the artwork alone does not establish full UI parity.
 
-Sleep predictions, the complete weekly/history presentation, sounds and the sleep-content library
-are not implemented by this tracking port. No predictions, future wake-up anchors or working
+Sleep predictions, full Napper analytics, sounds and the sleep-content library
+are not implemented by this tracking port. History totals describe recorded data only. No predictions, future wake-up anchors or working
 sound/library destinations are fabricated. Full app parity includes those separate capabilities.
 
 ## Review and validation
@@ -59,26 +69,32 @@ sound/library destinations are fabricated. Full app parity includes those separa
 `pnpm preview:ui` runs the actual connected components with synthetic records and browser adapters
 for native sheets, pickers and SVG. Preview commands never contact Napper; ordinary writes show a
 preview-only message and Remove affects synthetic memory only. `--build` creates a standalone
-browser preview; `--static` emits static component markup.
+browser preview; `--static` emits static component markup; `--height=958` matches the recordings’ aspect ratio at 390 px width.
 
 The PNGs below are **static component renders through a CSS print engine**, not browser/device
-screenshots. They help inspect hierarchy and geometry; native font rendering, stacking, gestures, keyboard
+screenshots. The core layouts were also inspected at 320 × 740. They help inspect hierarchy and geometry; native font rendering, stacking, gestures, keyboard
 behavior and safe areas still need Android/iPhone validation. No live browser visual pass is claimed.
 
 | Day | Night |
 | --- | --- |
 | ![Day](ui-refresh/day.png) | ![Night](ui-refresh/night.png) |
 
+| History | Bedtime | New Nap |
+| --- | --- | --- |
+| ![History](ui-refresh/history.png) | ![Bedtime](ui-refresh/bedtime.png) | ![New Nap](ui-refresh/new-nap.png) |
+
 | Completed Nap | Running Nursing | First Nursing |
 | --- | --- | --- |
 | ![Nap](ui-refresh/nap-drawer.png) | ![Nursing](ui-refresh/nursing.png) | ![First Nursing](ui-refresh/first-nursing.png) |
 
-Validation passed: `pnpm check` (449 tests), the Lisbon timezone care/timeline suite
-(144 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (456 tests), the Lisbon timezone care/timeline suite
+(151 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
-that changing an activity's end does not move its start marker.
+that changing an activity's end does not move its start marker, and that an anchor and care record
+at the same instant remain separate. Other regressions cover week navigation, future dates, completed
+interval entry, annotation draft retention and the dependent Wake-up mood write.
 
 On a test profile, compare each state side by side with Napper on both phones: home, current and
 historical cycles, first/active/paused/completed Nursing, Nap, Night waking, past care, exact time

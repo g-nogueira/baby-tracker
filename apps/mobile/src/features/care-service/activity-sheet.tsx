@@ -1,7 +1,9 @@
+import { RoundAction } from '@/features/shared/round-action';
+import { SleepDetailsFields } from './sleep-details-fields';
+import type { ActivityDetails } from './contracts';
 import { Text } from '@/features/shared/tracking-text';
-import { clockLabel, shortDuration } from './presentation';
+import { clockLabel, shortDuration, dayLabel } from './presentation';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
-import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { SheetToolbar } from './sheet-toolbar';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import Slider from '@react-native-community/slider';
@@ -123,6 +125,13 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
   const [adjusted, setAdjusted] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [detailPatch, setDetailPatch] = useState<ActivityDetails>({});
+  const details = { ...record?.details, ...detailPatch };
+  const detailDirty = Object.keys(detailPatch).length > 0;
+  const annotations = detailDirty ? { details: detailPatch } : {};
+  const sleepDetails =
+    kind === 'bedtime' || kind === 'nap' || kind === 'night-waking' || kind === 'wake-up';
   const [diaper, setDiaper] = useState<DiaperType>(
     record?.kind === 'diaper' ? (record.diaperType ?? 'wet') : 'wet',
   );
@@ -140,7 +149,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   const timed = kind === 'nap' || kind === 'night-waking' || kind === 'nursing';
   const active = record !== null && record.status !== 'completed';
   const total = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
-  const interval = timed && !active && intent.type !== 'transition';
+  const interval = timed && !active && (intent.type !== 'transition' || ending);
   const valid =
     start <= now &&
     (!interval || (end >= start && end <= now)) &&
@@ -154,19 +163,13 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       : intent.type === 'past'
         ? 'Add past activity'
         : activityLabels[kind];
-  const format = (at: Date) =>
-    new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: timezone,
-    }).format(at);
-  const openTime = async () => {
+  const openTime = async (field: 'start' | 'end' = 'start', mode: 'date' | 'time' = 'time') => {
     if (opening.current || busy) return;
     opening.current = true;
     try {
       await sheet.current?.resize(1);
       setExpanded(true);
-      setPicker({ field: 'start', mode: 'time' });
+      setPicker({ field, mode });
     } catch {
       setPickerError('The time editor could not be opened. Close and reopen the drawer.');
     } finally {
@@ -184,7 +187,10 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           ? mergeDatePart(previous, selected, timezone)
           : mergeTimePart(previous, selected, timezone);
       if (current.field === 'start') setStart(next);
-      else setEnd(next);
+      else {
+        setEnd(next);
+        setEnding(true);
+      }
       setAdjusted(true);
       setPickerError(null);
     } catch {
@@ -193,13 +199,25 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   };
   const save = () => {
     if (!valid || busy || pickerError) return;
-    if (intent.type === 'transition') {
+    if (intent.type === 'transition' && ending && (kind === 'nap' || kind === 'night-waking')) {
+      onExecute({
+        type: 'record-past',
+        activity: {
+          kind,
+          startedAt: start.toISOString(),
+          endedAt: end.toISOString(),
+          ...annotations,
+        },
+      });
+    } else if (intent.type === 'transition') {
       const at = (adjusted ? start : new Date()).toISOString();
       if (intent.command === 'bedtime' || intent.command === 'start-nap')
-        onExecute({ type: intent.command, at });
-      else if (intent.expected) onExecute({ type: intent.command, expected: intent.expected, at });
+        onExecute({ type: intent.command, at, ...annotations });
+      else if (intent.expected)
+        onExecute({ type: intent.command, expected: intent.expected, at, ...annotations });
     } else if (intent.type === 'edit') {
       onExecute({
+        ...annotations,
         type: 'edit-activity',
         expected: intent.activity,
         startedAt: start.toISOString(),
@@ -224,7 +242,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       else if (kind === 'diaper') activity = { kind, startedAt, diaperType: diaper };
       else if (kind === 'medicine') activity = { kind, startedAt, note };
       else activity = { kind, startedAt };
-      onExecute({ type: 'record-past', activity });
+      onExecute({ type: 'record-past', activity: { ...activity, ...annotations } });
     }
   };
   const activeStop =
@@ -234,17 +252,102 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             type: record.kind === 'nap' ? 'stop-nap' : 'fall-asleep',
             expected: record,
             at: new Date().toISOString(),
+            ...annotations,
           })
       : null;
+  const footer = (
+    <View pointerEvents="box-none" style={[styles.footer, { width: '100%' }]}>
+      <View style={[styles.footerActions, { width: '100%' }]}>
+        {intent.type === 'transition' && !active ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Start one minute earlier"
+            disabled={busy}
+            onPress={() => {
+              setStart(new Date(start.getTime() - 60000));
+              setAdjusted(true);
+            }}
+            style={styles.minute}
+          >
+            <ActivityIcon name="rewind" size={22} color={theme.muted} />
+            <Text style={styles.muted}>-1 min</Text>
+          </Pressable>
+        ) : null}
+        {!active || (expanded && (adjusted || detailDirty)) ? (
+          <RoundAction
+            label={
+              active ? 'Save start time' : intent.type === 'transition' ? title : 'Save activity'
+            }
+            icon={
+              intent.type === 'transition' &&
+              (intent.command === 'start-nap' || intent.command === 'start-night-waking') &&
+              !ending
+                ? 'play'
+                : 'check'
+            }
+            disabled={busy || !valid || pickerError !== null}
+            onPress={save}
+          />
+        ) : null}
+        {activeStop ? (
+          <RoundAction
+            label={record?.kind === 'nap' ? 'Stop Nap' : 'Fell asleep again'}
+            icon="stop"
+            disabled={busy}
+            onPress={activeStop}
+          />
+        ) : null}
+        {intent.type === 'transition' && !active ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Start one minute later"
+            disabled={busy || start.getTime() + 60000 > now.getTime()}
+            onPress={() => {
+              setStart(new Date(start.getTime() + 60000));
+              setAdjusted(true);
+            }}
+            style={[styles.minute, start.getTime() + 60000 > now.getTime() && styles.disabled]}
+          >
+            <ActivityIcon name="forward" size={22} color={theme.muted} />
+            <Text style={styles.muted}>+1 min</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {record?.kind === 'nap' && active ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
+          disabled={busy}
+          onPress={() =>
+            onExecute({
+              type: record.status === 'paused' ? 'resume-nap' : 'pause-nap',
+              expected: record,
+              at: new Date().toISOString(),
+            })
+          }
+          style={styles.pause}
+        >
+          <ActivityIcon
+            name={record.status === 'paused' ? 'play' : 'pause'}
+            size={18}
+            color={theme.muted}
+          />
+          <Text style={styles.muted}>{record.status === 'paused' ? 'Resume' : 'Pause'}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
   return (
     <TrueSheet
       ref={sheet}
       initialDetentIndex={intent.type === 'past' ? 1 : 0}
       detents={[
-        Math.min(0.6, (kind === 'medicine' ? 490 : 450) / height),
-        Math.min(0.9, 710 / height),
+        kind === 'bedtime' ? 0.74 : Math.min(0.62, (kind === 'medicine' ? 490 : 450) / height),
+        0.94,
       ]}
       scrollable
+      footer={footer}
+      cornerRadius={28}
       draggable
       dismissible
       backgroundColor={theme.surface}
@@ -278,9 +381,9 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           }
         />
         <View style={styles.hero}>
-          <ActivityBadge icon={activityIcons[kind]} color={color} size={72} active={active} />
+          <ActivityIcon name={activityIcons[kind]} color={color} size={88} />
           <Text accessibilityRole="header" style={styles.title}>
-            {title}
+            {kind === 'bedtime' ? 'Bedtime' : title}
           </Text>
           {!expanded && active && (record.kind === 'nap' || record.kind === 'night-waking') ? (
             <Text style={styles.timer}>{formatLiveDuration(activityDuration(record, now))}</Text>
@@ -290,6 +393,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               accessibilityLabel={`Set ${activityLabels[kind]} time`}
               disabled={busy}
               onPress={() => void openTime()}
+              style={{ width: '100%', alignItems: 'center' }}
             >
               <Text
                 numberOfLines={1}
@@ -298,10 +402,34 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               >
                 {record?.status === 'completed' && timed
                   ? `${clockLabel(start, timezone, false)} – ${clockLabel(end, timezone, false)}`
-                  : format(start)}
+                  : expanded && timed
+                    ? `${clockLabel(start, timezone, false)} – ${ending ? clockLabel(end, timezone, false) : active ? '…' : 'Set time'}`
+                    : clockLabel(start, timezone, false)}
               </Text>
             </Pressable>
           )}
+          {expanded && timed && (active || (intent.type === 'transition' && !ending)) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Set activity end time"
+              disabled={busy || active}
+              onPress={() => void openTime('end')}
+              style={styles.setEnd}
+            >
+              <Text style={styles.muted}>{active ? 'End · Running' : 'Set end time'}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Set activity date"
+            disabled={busy}
+            onPress={() => void openTime('start', 'date')}
+            style={styles.date}
+          >
+            <Text style={[styles.muted, { width: '100%', textAlign: 'center' }]}>
+              {dayLabel(start, now, timezone)}
+            </Text>
+          </Pressable>
           {record?.status === 'completed' && timed ? (
             <Text style={styles.summary}>
               {shortDuration(end.getTime() - start.getTime())} long ·{' '}
@@ -319,6 +447,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
                 disabled={busy}
                 onPress={() => {
                   setKind(choice);
+                  setDetailPatch({});
                   setPicker(null);
                 }}
                 style={[styles.choice, kind === choice && styles.selected]}
@@ -328,7 +457,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             ))}
           </View>
         ) : null}
-        {expanded ? (
+        {expanded && (!sleepDetails || picker !== null || intent.type === 'past') ? (
           <>
             <ActivityTimestampField
               label={intent.type === 'transition' ? 'Time' : 'Start'}
@@ -341,7 +470,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               onDone={() => setPicker(null)}
               onPickerChange={pick}
             />
-            {interval ? (
+            {interval || picker?.field === 'end' ? (
               <ActivityTimestampField
                 label="End"
                 value={end}
@@ -357,6 +486,14 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               <Text style={styles.muted}>End · Running</Text>
             ) : null}
           </>
+        ) : null}
+        {sleepDetails && (expanded || kind === 'bedtime') ? (
+          <SleepDetailsFields
+            kind={kind as 'bedtime' | 'nap' | 'night-waking' | 'wake-up'}
+            details={details}
+            disabled={busy}
+            onChange={(patch) => setDetailPatch((previous) => ({ ...previous, ...patch }))}
+          />
         ) : null}
         {kind === 'diaper' ? (
           <View style={styles.choices}>
@@ -431,56 +568,6 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             {pickerError ?? error}
           </Text>
         ) : null}
-        {!active || (expanded && adjusted) ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              active ? 'Save start time' : intent.type === 'transition' ? title : 'Save activity'
-            }
-            disabled={busy || !valid || pickerError !== null}
-            onPress={save}
-            style={[styles.save, (busy || !valid) && styles.disabled]}
-          >
-            <ActivityIcon
-              name={
-                intent.type === 'transition' &&
-                (intent.command === 'stop-nap' || intent.command === 'fall-asleep')
-                  ? 'stop'
-                  : 'check'
-              }
-            />
-          </Pressable>
-        ) : null}
-        {record?.kind === 'nap' && active ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
-            disabled={busy}
-            onPress={() =>
-              onExecute({
-                type: record.status === 'paused' ? 'resume-nap' : 'pause-nap',
-                expected: record,
-                at: new Date().toISOString(),
-              })
-            }
-            style={styles.choice}
-          >
-            <Text style={styles.choiceText}>
-              {record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
-            </Text>
-          </Pressable>
-        ) : null}
-        {activeStop ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={record?.kind === 'nap' ? 'Stop Nap' : 'Fell asleep again'}
-            disabled={busy}
-            onPress={activeStop}
-            style={styles.stop}
-          >
-            <ActivityIcon name="stop" color="#F9F8F6" />
-          </Pressable>
-        ) : null}
         {record?.kind === 'nap' &&
         record.status === 'completed' &&
         record.endedAt &&
@@ -503,8 +590,31 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
 }
 const createStyles = (theme: ActivityTheme) =>
   StyleSheet.create({
-    content: { padding: 16, paddingBottom: 32, gap: 20 },
-    hero: { alignItems: 'center', gap: 20, marginTop: -28, paddingHorizontal: 32 },
+    content: { padding: 20, paddingTop: 16, paddingBottom: 160, gap: 28 },
+    footer: { paddingTop: 12, paddingBottom: 24, alignItems: 'center', gap: 8 },
+    footerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 32,
+    },
+    minute: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 6 },
+    pause: {
+      minHeight: 44,
+      flexDirection: 'row',
+      gap: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    date: { minHeight: 32, justifyContent: 'center', width: '100%', alignItems: 'center' },
+    setEnd: {
+      minHeight: 44,
+      justifyContent: 'center',
+      backgroundColor: theme.field,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+    },
+    hero: { alignItems: 'center', gap: 16, marginTop: -28, paddingHorizontal: 24 },
     title: { fontSize: 20, fontWeight: '500', color: theme.muted },
     summary: { marginTop: 4, fontSize: 14, color: theme.muted, opacity: 0.65, textAlign: 'center' },
     range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },

@@ -23,11 +23,16 @@ vi.mock('@lodev09/react-native-true-sheet', () => ({
   }),
 }));
 function SheetBoundary(props: Record<string, unknown>) {
-  return <>{props.children as import('react').ReactNode}</>;
+  return (
+    <>
+      {props.children as import('react').ReactNode}
+      {props.footer as import('react').ReactNode}
+    </>
+  );
 }
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
 vi.mock('@react-native-community/datetimepicker', () => ({ default: 'DateTimePicker' }));
-vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path' }));
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path', Circle: 'Circle' }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
 const now = new Date('2026-10-15T12:00:00Z');
@@ -96,6 +101,52 @@ it('uses the instant of confirmation when the proposed start time was left untou
   expect(base.onExecute).toHaveBeenCalledWith({
     type: 'start-nap',
     at: '2026-10-15T12:01:05.000Z',
+  });
+});
+it('allows an explicit end on a new Nap and records the chosen interval instead of starting a timer', async () => {
+  await render({ type: 'transition', command: 'start-nap' });
+  await act(async () => press('Set Nap time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-15T11:00:00Z')),
+  );
+  await act(async () => press('Set activity end time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-15T11:30:00Z')),
+  );
+  await act(async () => press('Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'record-past',
+    activity: {
+      kind: 'nap',
+      startedAt: '2026-10-15T11:00:00.000Z',
+      endedAt: '2026-10-15T11:30:00.000Z',
+    },
+  });
+});
+it('keeps Bedtime annotations in the draft across ticks and saves them with the transition', async () => {
+  const intent: ActivitySheetIntent = { type: 'transition', command: 'bedtime' };
+  await render(intent);
+  await act(async () => press('Long time to fall asleep')?.props.onPress());
+  await act(async () => press('Worn or held')?.props.onPress());
+  await act(async () =>
+    renderer.root.findByType('TextInput' as never).props.onChangeText('Synthetic note'),
+  );
+  await act(async () =>
+    renderer.update(
+      <ActivitySheet {...base} intent={intent} now={new Date(now.getTime() + 1000)} />,
+    ),
+  );
+  const footer = renderer.root.findByType(SheetBoundary).props.footer;
+  expect(footer).toBeDefined();
+  await act(async () => press('Night sleep')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'bedtime',
+    at: now.toISOString(),
+    details: { settling: ['took-long'], sleepMethod: 'held', comment: 'Synthetic note' },
   });
 });
 it('retains an edited diaper timestamp/category through ticking and saves the exact revision', async () => {

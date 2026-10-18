@@ -1,6 +1,23 @@
 /** Provider-neutral application contract. Transport payloads stay private; IDs/revisions are opaque. */
 export type Breast = 'LEFT' | 'RIGHT';
 export type DiaperType = 'dry' | 'wet' | 'dirty' | 'mixed';
+export type SleepMethod =
+  | 'in-bed'
+  | 'nursing'
+  | 'held'
+  | 'next-to-me'
+  | 'bottle'
+  | 'stroller'
+  | 'car'
+  | 'swing';
+export type WakeMood = 'bad' | 'neutral' | 'good';
+/** Portable annotations; providers translate these values into their own schema. */
+export interface ActivityDetails {
+  settling?: ('took-long' | 'upset')[];
+  sleepMethod?: SleepMethod | null;
+  wakeMood?: WakeMood | null;
+  comment?: string;
+}
 export type CareKind =
   | 'bedtime'
   | 'wake-up'
@@ -18,6 +35,7 @@ export interface ActivityReference {
   revision: string;
 }
 interface ActivityBase extends ActivityReference {
+  details?: ActivityDetails;
   kind: CareKind;
   /** Canonical UTC instants; the selected IANA display zone belongs to the service/session. */
   startedAt: string;
@@ -60,7 +78,7 @@ export const emptySnapshot = (): CareSnapshot => ({ activities: [], issues: [] }
 export type NursingCommand =
   | { kind: 'switch' | 'resume'; side: Breast }
   | { kind: 'pause' | 'stop' };
-export type PastActivity =
+export type PastActivity = (
   | { kind: 'nap' | 'night-waking'; startedAt: string; endedAt: string }
   | { kind: 'bedtime' | 'wake-up'; startedAt: string }
   | { kind: 'diaper'; startedAt: string; diaperType: DiaperType }
@@ -71,7 +89,8 @@ export type PastActivity =
       endedAt: string;
       leftSeconds: number;
       lastBreast: Breast;
-    };
+    }
+) & { details?: ActivityDetails };
 export type CareCommand =
   | { type: 'start-nursing'; side: Breast; at: string }
   | { type: 'change-nursing'; expected: ActivityReference; command: NursingCommand }
@@ -83,12 +102,18 @@ export type CareCommand =
       leftSeconds: number;
       lastBreast: Breast;
     }
-  | { type: 'start-nap' | 'bedtime'; at: string }
-  | { type: 'wake-up' | 'start-night-waking'; expected: ActivityReference; at: string }
+  | { type: 'start-nap' | 'bedtime'; at: string; details?: ActivityDetails }
+  | {
+      type: 'wake-up' | 'start-night-waking';
+      expected: ActivityReference;
+      at: string;
+      details?: ActivityDetails;
+    }
   | {
       type: 'stop-nap' | 'fall-asleep' | 'continue-nap' | 'pause-nap' | 'resume-nap';
       expected: ActivityReference;
       at: string;
+      details?: ActivityDetails;
     }
   | {
       type: 'edit-activity';
@@ -97,6 +122,7 @@ export type CareCommand =
       endedAt?: string;
       diaperType?: DiaperType;
       note?: string;
+      details?: ActivityDetails;
     }
   | { type: 'record-past'; activity: PastActivity }
   | { type: 'remove-activity'; expected: ActivityReference };

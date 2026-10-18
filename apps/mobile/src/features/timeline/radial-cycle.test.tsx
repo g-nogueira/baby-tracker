@@ -4,9 +4,11 @@ import { expect, it, vi } from 'vitest';
 import { RadialCycle } from './radial-cycle';
 import { careCycleViews } from '@/features/care-service/cycle-view';
 import type { CareActivity } from '@/features/care-service/contracts';
+import { ActivityThemeContext, nightTheme } from '@/features/shared/activity-theme';
 const native = vi.hoisted(() => ({ dismiss: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('react-native', () => ({
   View: 'View',
+  Image: 'Image',
   Text: 'Text',
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
@@ -32,6 +34,59 @@ function SheetBoundary(props: Record<string, unknown>) {
 }
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
+it('separates a care marker from the wake-up anchor without changing its time angle', async () => {
+  const records: CareActivity[] = [
+    {
+      id: 'wake',
+      revision: 'v',
+      kind: 'wake-up',
+      status: 'completed',
+      startedAt: '2026-10-18T07:00:00.000Z',
+      endedAt: '2026-10-18T07:00:00.000Z',
+    },
+    {
+      id: 'diaper',
+      revision: 'v',
+      kind: 'diaper',
+      diaperType: 'wet',
+      status: 'completed',
+      startedAt: '2026-10-18T07:00:00.000Z',
+      endedAt: '2026-10-18T07:00:00.000Z',
+    },
+  ];
+  const view = careCycleViews(
+    records,
+    '2026-10-18',
+    'UTC',
+    new Date('2026-10-18T09:00:00Z'),
+    true,
+  ).day;
+  await act(async () => {
+    renderer = create(
+      <ActivityThemeContext.Provider value={nightTheme}>
+        <RadialCycle
+          view={view}
+          centerStatus={{ label: 'Awake for', value: '2h', hint: '' }}
+          disabled={false}
+          onPressRecord={() => {}}
+        />
+      </ActivityThemeContext.Provider>,
+    );
+  });
+  const targets = renderer.root.findAllByType('Pressable' as never);
+  const position = (prefix: string) =>
+    targets.find((n) => String(n.props.accessibilityLabel).startsWith(prefix))?.props.style[1];
+  const care = position('Diaper, wet');
+  const anchor = position('Edit Wake up');
+  expect(care).toBeDefined();
+  expect(anchor).toBeDefined();
+  expect(Math.hypot(care.left - anchor.left, care.top - anchor.top)).toBeGreaterThanOrEqual(44);
+  const center = 358 / 2 - 22;
+  expect(Math.atan2(care.top - center, care.left - center)).toBeCloseTo(
+    Math.atan2(anchor.top - center, anchor.left - center),
+  );
+  await act(async () => renderer.unmount());
+});
 it('keeps the activity marker at its start when only its duration changes', async () => {
   const wake: CareActivity = {
     id: 'wake',

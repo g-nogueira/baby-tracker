@@ -18,7 +18,13 @@ export interface HomeQuickAction {
 }
 
 /** Renders ordered Home action slots without owning activity state. */
-export function HomeQuickActions({ actions }: { actions: readonly HomeQuickAction[] }) {
+export function HomeQuickActions({
+  actions,
+  compact = false,
+}: {
+  actions: readonly HomeQuickAction[];
+  compact?: boolean;
+}) {
   const { width } = useWindowDimensions();
   const [containerWidth, setContainerWidth] = useState(Math.min(440, width - 32));
   const layout = homeQuickActionsLayout(containerWidth, actions.length);
@@ -26,7 +32,7 @@ export function HomeQuickActions({ actions }: { actions: readonly HomeQuickActio
     <View
       accessibilityLabel="Quick actions"
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
-      style={[styles.row, { gap: layout.gap }]}
+      style={[styles.row, { gap: compact ? 12 : layout.gap, minHeight: compact ? 72 : 84 }]}
     >
       {actions.map((action) => (
         <Pressable
@@ -43,7 +49,11 @@ export function HomeQuickActions({ actions }: { actions: readonly HomeQuickActio
           onPress={action.onPress}
           style={({ pressed }) => [
             styles.action,
-            containerWidth > 0 && { width: layout.actionWidth },
+            containerWidth > 0 && {
+              width: compact
+                ? Math.min(76, (containerWidth - 12 * (actions.length - 1)) / actions.length)
+                : layout.actionWidth,
+            },
 
             action.disabled && styles.disabled,
             pressed && styles.pressed,
@@ -52,7 +62,7 @@ export function HomeQuickActions({ actions }: { actions: readonly HomeQuickActio
           <ActivityBadge
             icon={action.icon}
             color={action.color}
-            size={layout.circleSize}
+            size={compact ? 44 : layout.circleSize}
             active={action.active}
             outlined={Boolean(action.active)}
           />

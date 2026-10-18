@@ -34,11 +34,16 @@ vi.mock('@lodev09/react-native-true-sheet', () => ({
   }),
 }));
 function SheetBoundary(props: Record<string, unknown>) {
-  return <>{props.children as import('react').ReactNode}</>;
+  return (
+    <>
+      {props.children as import('react').ReactNode}
+      {props.footer as import('react').ReactNode}
+    </>
+  );
 }
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
 vi.mock('@react-native-community/datetimepicker', () => ({ default: 'DateTimePicker' }));
-vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path' }));
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path', Circle: 'Circle' }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
 afterEach(async () => {

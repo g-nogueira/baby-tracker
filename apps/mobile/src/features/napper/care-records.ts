@@ -1,3 +1,4 @@
+import { readActivityDetails } from './care-details';
 import {
   calendarDayForInstant,
   zonedDayBounds,
@@ -131,7 +132,9 @@ export function readSleepPauses(wire: WireLog, now: Date) {
 export function readCareRecord(wire: WireLog, revision: string, now: Date): CareActivity | null {
   const kind = kindForCategory(wire.category);
   if (!kind || wire.skipped === true) return null;
-  if (kind === 'nursing') return toNursingActivity(wire, revision, now);
+  const details = readActivityDetails(wire);
+  if (kind === 'nursing')
+    return { ...toNursingActivity(wire, revision, now), ...(details ? { details } : {}) };
   if (typeof wire.id !== 'string') throw invalid('An activity ID is missing.');
   const startedAt = kind === 'bedtime' ? bedtimeInstant(wire) : instant(wire.start);
   const end = instant(wire.end);
@@ -145,6 +148,7 @@ export function readCareRecord(wire: WireLog, revision: string, now: Date): Care
   const base = {
     id: wire.id,
     revision,
+    ...(details ? { details } : {}),
     startedAt,
     endedAt: wire.isOpen ? null : end,
     status: wire.isOpen ? ('active' as const) : ('completed' as const),

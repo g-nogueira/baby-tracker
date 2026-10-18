@@ -72,8 +72,24 @@ if (process.argv.includes('--static')) {
     },
   });
   const { renderPreview } = await import(path.join(outDir, 'render.mjs'));
-  for (const scenario of ['day', 'night', 'nap-drawer', 'nursing', 'first-nursing']) {
-    await fs.writeFile(path.join(outDir, `${scenario}.html`), renderPreview(scenario));
+  for (const scenario of [
+    'day',
+    'night',
+    'history',
+    'bedtime',
+    'new-nap',
+    'nap-drawer',
+    'nursing',
+    'first-nursing',
+  ]) {
+    await fs.writeFile(
+      path.join(outDir, `${scenario}.html`),
+      renderPreview(
+        scenario,
+        Number(process.argv.find((arg) => arg.startsWith('--width='))?.split('=')[1] ?? 390),
+        Number(process.argv.find((arg) => arg.startsWith('--height='))?.split('=')[1] ?? 844),
+      ),
+    );
   }
   console.log(`Static layouts: ${outDir}`);
 } else if (process.argv.includes('--build')) {

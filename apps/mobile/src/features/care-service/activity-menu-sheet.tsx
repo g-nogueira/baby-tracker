@@ -30,7 +30,7 @@ export function ActivityMenuSheet({
     <TrueSheet
       ref={sheet}
       initialDetentIndex={0}
-      detents={['auto', 0.8]}
+      detents={[0.72, 0.94]}
       scrollable
       draggable
       dismissible
@@ -44,13 +44,9 @@ export function ActivityMenuSheet({
       }}
     >
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40, gap: 24 }}>
-        <Text
-          accessibilityRole="header"
-          style={{ color: theme.text, fontSize: 24, textAlign: 'center' }}
+        <View
+          style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', gap: 12 }}
         >
-          Add activity
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16 }}>
           {actions.map((action) => (
             <Pressable
               key={action.id}
@@ -59,16 +55,19 @@ export function ActivityMenuSheet({
               disabled={action.disabled}
               onPress={() => choose(action.onPress)}
               style={{
-                width: 88,
-                minHeight: 108,
+                width: '30%',
+                minHeight: 120,
                 alignItems: 'center',
                 gap: 8,
                 opacity: action.disabled ? 0.4 : 1,
               }}
             >
-              <ActivityBadge icon={action.icon} color={action.color} size={56} />
+              <ActivityBadge icon={action.icon} color={action.color} size={56} outlined={false} />
               <Text style={{ color: theme.muted, textAlign: 'center', fontSize: 14 }}>
                 {action.label}
+              </Text>
+              <Text style={{ color: theme.muted, opacity: 0.6, fontSize: 10, textAlign: 'center' }}>
+                {action.meta}
               </Text>
             </Pressable>
           ))}

@@ -140,6 +140,79 @@ export async function careHarness(
   };
 }
 describe('provider-neutral care port backed by the observed Napper contracts', () => {
+  it('keeps the chosen morning mood on Wake up while confirming closure of a concurrent waking', async () => {
+    const waking: WireLog = {
+      id: 'synthetic-waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('07:00:00'),
+      end: stamp('07:00:00'),
+      isOpen: true,
+      babyMoodOnWakeUp: 'BAD',
+      comment: '',
+    };
+    const h = await careHarness([point('bedtime', stamp('06:00:00')), waking]);
+    await h.care.execute('test-baby', {
+      type: 'wake-up',
+      expected: await h.find('bedtime'),
+      at: stamp('07:30:00'),
+      details: { wakeMood: 'good', comment: 'Morning note' },
+    });
+    expect(h.sent.map((row) => [row.category, row.babyMoodOnWakeUp])).toEqual([
+      ['NIGHT_WAKING', 'BAD'],
+      ['WOKE_UP', 'GOOD'],
+    ]);
+    expect((await h.find('wake-up')).details).toEqual({
+      wakeMood: 'good',
+      comment: 'Morning note',
+    });
+  });
+  it('saves sleep annotations with the initial write and reads the confirmed provider-neutral values', async () => {
+    const h = await careHarness();
+    const details = {
+      settling: ['took-long' as const, 'upset' as const],
+      sleepMethod: 'held' as const,
+      comment: 'Synthetic 5% & / 🌙',
+    };
+    await h.provider.care.execute('test-baby', { type: 'bedtime', at: stamp('07:00:00'), details });
+    expect((await h.find('bedtime')).details).toEqual(details);
+    expect(h.sent.at(-1)).toMatchObject({
+      babyMoodOnSleep: ['LONG_TIME_TO_FALL_ASLEEP', 'UPSET'],
+      howBabySlept: 'WORN_OR_HELD',
+      comment: encodeURIComponent(details.comment),
+    });
+  });
+  it('merges only edited annotation fields and rejects a stale reviewed revision', async () => {
+    const log = {
+      ...point('bedtime', stamp('06:00:00')),
+      howBabySlept: 'UNKNOWN_FUTURE_METHOD',
+      babyMoodOnSleep: ['PROVIDER_ONLY'],
+      timeToFallAsleep: 'TOOK_A_WHILE',
+    };
+    const h = await careHarness([log]);
+    const reviewed = await h.find('bedtime');
+    await h.provider.care.execute('test-baby', {
+      type: 'edit-activity',
+      expected: reviewed,
+      startedAt: reviewed.startedAt,
+      details: { comment: 'Edited note' },
+    });
+    expect(h.sent.at(-1)).toMatchObject({
+      howBabySlept: 'UNKNOWN_FUTURE_METHOD',
+      babyMoodOnSleep: ['PROVIDER_ONLY'],
+      timeToFallAsleep: 'TOOK_A_WHILE',
+      comment: 'Edited%20note',
+    });
+    const count = h.sent.length;
+    await expect(
+      h.provider.care.execute('test-baby', {
+        type: 'edit-activity',
+        expected: reviewed,
+        startedAt: reviewed.startedAt,
+        details: { comment: 'Stale note' },
+      }),
+    ).rejects.toBeInstanceOf(CareServiceError);
+    expect(h.sent).toHaveLength(count);
+  });
   it.each(['nap', 'night-waking', 'nursing', 'diaper', 'medicine'] as const)(
     'removes the exact shared %s record and confirms its absence',
     async (kind) => {

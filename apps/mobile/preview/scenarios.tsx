@@ -69,7 +69,7 @@ export function Preview({
   const [rows, setRows] = useState<CareActivity[]>(
     scenario === 'first-nursing'
       ? [wake]
-      : scenario === 'day'
+      : scenario === 'day' || scenario === 'history'
         ? [wake, nap, nursing]
         : [bed, waking, nursing],
   );
@@ -109,7 +109,7 @@ export function Preview({
           insets: { top: 0, left: 0, right: 0, bottom: 16 },
         }}
       >
-        <CareHome model={model} />
+        <CareHome model={model} initialHistoryView={scenario === 'history' ? 'dial' : undefined} />
       </SafeAreaProvider>
     </TrackingFontsContext.Provider>
   );

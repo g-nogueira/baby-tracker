@@ -1,3 +1,4 @@
+import { applyActivityDetails } from './care-details';
 import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calendar-day';
 import { assertSleepContext, byStart, sleepKinds } from '@/features/care-service/sleep-state';
 import {
@@ -115,16 +116,19 @@ function pastLog(
       breastRightMinutes: 0,
       activeBreast: activity.lastBreast,
     });
-    return correctNapperNursing(
-      readNursing(log),
-      at,
-      time(activity.endedAt, now),
-      activity.leftSeconds,
-      activity.lastBreast,
-      now,
+    return applyActivityDetails(
+      correctNapperNursing(
+        readNursing(log),
+        at,
+        time(activity.endedAt, now),
+        activity.leftSeconds,
+        activity.lastBreast,
+        now,
+      ),
+      activity.details,
     );
   }
-  return log;
+  return applyActivityDetails(log, activity.details);
 }
 /** Pure command planning; the tracker owns preflight reads, locking, writes and confirmation. */
 export function prepareCareWrites(
@@ -285,6 +289,11 @@ export function prepareCareWrites(
       break;
     default:
       throw new CareServiceError('invalid', 'Use Nursing controls for this action.');
+  }
+  if ('details' in command && command.details) {
+    // Wake up can also close a running waking: annotations belong to the newly requested boundary.
+    const target = requests.at(-1);
+    if (target) applyActivityDetails(target, command.details);
   }
   const replacements = new Map(requests.map((r) => [r.id, r]));
   const after = [...logs.filter((l) => !replacements.has(l.id)), ...requests];

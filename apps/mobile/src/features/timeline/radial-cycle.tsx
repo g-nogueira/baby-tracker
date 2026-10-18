@@ -60,7 +60,7 @@ export function RadialCycleSelector({
             style={[styles.selectorOption, selected && styles.selectorOptionSelected]}
           >
             <ActivityIcon
-              name={option === 'night' ? 'night' : 'wake'}
+              name={option === 'night' ? 'moon' : 'sun'}
               color={selected ? theme.text : theme.muted}
               size={22}
             />
@@ -158,7 +158,7 @@ export function RadialCycle({
                   fontWeight={theme.night ? 'normal' : '500'}
                   fontFamily={theme.night ? 'Saans-Medium' : undefined}
                   textAnchor="middle"
-                  x={label.x}
+                  x={theme.night ? Math.min(299, Math.max(21, label.x)) : label.x}
                   y={label.y + 3}
                 >
                   {tick.label}
@@ -168,11 +168,29 @@ export function RadialCycle({
           })}
         {view.records.map((record) => {
           const arc = record.projection.arc;
-          if (arc === null || arc.visibleDurationMs <= 0) return null;
+          if (
+            arc === null ||
+            arc.visibleDurationMs <= 0 ||
+            (theme.night && record.kind === 'night')
+          )
+            return null;
           const radius = laneRadius(record.projection.lane);
           const start = arc.start.angleDegrees;
           const actualSweep = Math.max(0, arc.end.angleDegrees - start);
           const visualSweep = Math.max(0.8, actualSweep);
+          if (theme.night)
+            return (
+              <Path
+                key={`arc:${record.id}`}
+                d={bandPath(start, start + Math.max(5, actualSweep), radius, 22)}
+                fill={radialActivityColor(record.kind, true)}
+                fillOpacity={0.12}
+                stroke={radialActivityColor(record.kind, true)}
+                strokeWidth={1.2}
+                strokeOpacity={0.65}
+                strokeDasharray={arc.active ? '2 3' : undefined}
+              />
+            );
           return (
             <Path
               d={arcPath(start, start + visualSweep, radius)}
@@ -218,47 +236,55 @@ export function RadialCycle({
         })}
       </Svg>
 
-      {clusterRadialTargets(view.records, (2 * Math.asin(22 / (135 * scale)) * 180) / Math.PI).map(
-        (group) => {
-          const first = group[0];
-          const token = first.projection.token;
-          const arc = first.projection.arc;
-          const angle = token?.projection.angleDegrees ?? (arc ? arc.start.angleDegrees : 0);
-          const point = polarPoint(angle, laneRadius(first.projection.lane));
-          return (
-            <RecordTarget
-              disabled={disabled}
-              key={`token:${first.id}`}
-              label={
-                group.length === 1
-                  ? activityAccessibilityLabel(first, projection.cycle.timezone)
-                  : `${group.length} activities near ${formatClock(first.occurredAt, projection.cycle.timezone)}. Choose a record`
-              }
-              left={point.x * scale - 22}
-              top={point.y * scale - 22}
-              onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
-            >
-              {group.length === 1 ? (
-                <ActivityBadge
-                  icon={first.kind}
-                  color={radialActivityColor(first.kind, theme.night)}
-                  size={36}
-                  active={first.status === 'active'}
-                />
-              ) : (
-                <View
-                  style={[
-                    styles.token,
-                    { backgroundColor: radialActivityColor(first.kind, theme.night) },
-                  ]}
-                >
-                  <Text style={styles.tokenText}>{group.length}</Text>
-                </View>
-              )}
-            </RecordTarget>
+      {clusterRadialTargets(
+        view.records,
+        (2 * Math.asin(22 / ((theme.night ? 93 : 135) * scale)) * 180) / Math.PI,
+      ).map((group) => {
+        const first = group[0];
+        const token = first.projection.token;
+        const arc = first.projection.arc;
+        const angle = token?.projection.angleDegrees ?? (arc ? arc.start.angleDegrees : 0);
+        const nearAnchor =
+          theme.night &&
+          projection.anchors.some(
+            (anchor) =>
+              anchor.recordId !== null && Math.abs(anchor.projection.angleDegrees - angle) < 28,
           );
-        },
-      )}
+        // Keep the true time angle. A second radial rail separates nearby anchors and care records.
+        const point = polarPoint(angle, nearAnchor ? 93 : laneRadius(first.projection.lane));
+        return (
+          <RecordTarget
+            disabled={disabled}
+            key={`token:${first.id}`}
+            label={
+              group.length === 1
+                ? activityAccessibilityLabel(first, projection.cycle.timezone)
+                : `${group.length} activities near ${formatClock(first.occurredAt, projection.cycle.timezone)}. Choose a record`
+            }
+            left={point.x * scale - 22}
+            top={point.y * scale - 22}
+            onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
+          >
+            {group.length === 1 ? (
+              <ActivityBadge
+                icon={first.kind}
+                color={radialActivityColor(first.kind, theme.night)}
+                size={36}
+                active={first.status === 'active'}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.token,
+                  { backgroundColor: radialActivityColor(first.kind, theme.night) },
+                ]}
+              >
+                <Text style={styles.tokenText}>{group.length}</Text>
+              </View>
+            )}
+          </RecordTarget>
+        );
+      })}
       {projection.anchors
         .filter((anchor) => anchor.recordId !== null)
         .map((anchor) => {
@@ -410,6 +436,18 @@ function arcPath(startAngle: number, endAngle: number, radius: number): string {
   return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${sweep > 180 ? 1 : 0} 1 ${end.x} ${end.y}`;
 }
 
+/** Closed annular band keeps duration exact while outlining a quiet capsule, rather than filling the dial. */
+function bandPath(startAngle: number, endAngle: number, radius: number, width: number): string {
+  const outer = radius + width / 2,
+    inner = radius - width / 2;
+  const a = polarPoint(startAngle, outer),
+    b = polarPoint(endAngle, outer),
+    c = polarPoint(endAngle, inner),
+    d = polarPoint(startAngle, inner);
+  const large = endAngle - startAngle > 180 ? 1 : 0;
+  return `M ${a.x} ${a.y} A ${outer} ${outer} 0 ${large} 1 ${b.x} ${b.y} A ${width / 2} ${width / 2} 0 0 1 ${c.x} ${c.y} A ${inner} ${inner} 0 ${large} 0 ${d.x} ${d.y} A ${width / 2} ${width / 2} 0 0 1 ${a.x} ${a.y} Z`;
+}
+
 function activityAccessibilityLabel(record: ProjectedRadialActivity, timezone: string): string {
   const start = formatClock(record.occurredAt, timezone);
   const name = activityName(record.kind);
@@ -541,7 +579,7 @@ const createStyles = (theme: ActivityTheme) =>
       borderRadius: 999,
       backgroundColor: 'transparent',
     },
-    statusLabel: { color: theme.muted, fontSize: 17, textAlign: 'center' },
+    statusLabel: { color: theme.muted, fontSize: 16, textAlign: 'center' },
     anchorTarget: {
       width: 32,
       height: 32,
@@ -574,7 +612,7 @@ const createStyles = (theme: ActivityTheme) =>
     clusterText: { flex: 1, fontSize: 14, color: theme.text },
     status: {
       color: theme.text,
-      fontSize: 52,
+      fontSize: 54,
       fontWeight: '500',
       letterSpacing: -1.8,
       lineHeight: 62,
