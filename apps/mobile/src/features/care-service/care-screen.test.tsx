@@ -1,6 +1,9 @@
 import { forwardRef, useImperativeHandle } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import type {
   CareActivity,
   CareSnapshot,
@@ -8,12 +11,76 @@ import type {
   PointActivity,
   SleepActivity,
 } from './contracts';
-import { CareScreen } from './care-screen';
+import type { CareScreen } from './care-screen';
 import { NursingSheet } from './nursing-sheet';
 import { ActivitySheet } from './activity-sheet';
 import { RadialCycle, RadialCycleSelector } from '@/features/timeline/radial-cycle';
+
+/** Exercise Expo's Android transform: source-only rendering misses compiler ordering bugs. */
+async function compileNativeScreen(isDev: boolean): Promise<typeof CareScreen> {
+  const mobileRequire = createRequire(new URL('../../../package.json', import.meta.url));
+  const expoRequire = createRequire(mobileRequire.resolve('expo/package.json'));
+  const babel = expoRequire('@babel/core') as {
+    transformFileSync: (path: string, options: Record<string, unknown>) => { code: string };
+  };
+  const compiled = babel.transformFileSync(
+    fileURLToPath(new URL('./care-screen.tsx', import.meta.url)),
+    {
+      babelrc: false,
+      configFile: false,
+      presets: [expoRequire.resolve('babel-preset-expo')],
+      caller: {
+        name: 'metro',
+        bundler: 'metro',
+        platform: 'android',
+        engine: 'hermes',
+        isDev,
+        supportsReactCompiler: true,
+        projectRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+      },
+    },
+  );
+  const dependencies = new Map<string, unknown>([
+    ['react-native', await vi.importMock('react-native')],
+    ['react-native-svg', { __esModule: true, ...(await vi.importMock('react-native-svg')) }],
+    ['react-native-safe-area-context', await vi.importMock('react-native-safe-area-context')],
+    ['./use-care-tracker', await vi.importMock('./use-care-tracker')],
+  ]);
+  for (const [, id] of compiled.code.matchAll(/require\("([^"]+)"\)/g)) {
+    if (!dependencies.has(id)) {
+      try {
+        dependencies.set(id, id.startsWith('@babel/runtime/') ? expoRequire(id) : await import(id));
+      } catch (cause) {
+        throw new Error(`Native test import failed: ${id}`, { cause });
+      }
+    }
+  }
+  const module = { exports: {} as { CareScreen: typeof CareScreen } };
+  runInNewContext(compiled.code, {
+    require: (id: string) => {
+      if (!dependencies.has(id)) throw new Error(`Unresolved native test import: ${id}`);
+      return dependencies.get(id);
+    },
+    module,
+    exports: module.exports,
+    get Date() {
+      return globalThis.Date;
+    },
+    get setInterval() {
+      return globalThis.setInterval;
+    },
+    get clearInterval() {
+      return globalThis.clearInterval;
+    },
+  });
+  return module.exports.CareScreen;
+}
+let NativeCareScreen: typeof CareScreen;
+beforeAll(async () => {
+  NativeCareScreen = await compileNativeScreen(true);
+});
 const hooks = vi.hoisted(() => ({ model: {} as Record<string, unknown> }));
-vi.mock('./use-care-tracker', () => ({ useCareTracker: () => hooks.model }));
+vi.mock('./use-care-tracker', () => ({ useCareTracker: () => ({ ...hooks.model }) }));
 vi.mock('expo-router', () => ({ Link: 'Link' }));
 vi.mock('react-native', () => ({
   View: 'View',
@@ -105,11 +172,11 @@ const factory = vi.fn();
 const snapshot = (activities: CareActivity[]): CareSnapshot => ({ activities, issues: [] });
 const render = async () => {
   await act(async () => {
-    renderer = create(<CareScreen createProvider={factory} />);
+    renderer = create(<NativeCareScreen createProvider={factory} />);
   });
 };
 const update = async () => {
-  await act(async () => renderer.update(<CareScreen createProvider={factory} />));
+  await act(async () => renderer.update(<NativeCareScreen createProvider={factory} />));
 };
 beforeEach(() => {
   vi.useFakeTimers();
@@ -141,17 +208,26 @@ afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount());
   vi.useRealTimers();
 });
+it('renders action recency with the production native compiler', async () => {
+  const ProductionCareScreen = await compileNativeScreen(false);
+  await act(async () => {
+    renderer = create(<ProductionCareScreen createProvider={factory} />);
+  });
+  expect(press('Nursing, 3m')).toBeDefined();
+});
 it('renders shared canonical Nursing on the dial and keeps live controls available without a Napper dependency', async () => {
   await render();
   expect(press('Profile and sync')).toBeDefined();
   expect(renderer.root.findByType(RadialCycle).props.view.records).toHaveLength(1);
   expect(text()).not.toContain('coming next');
+  expect(text()).toContain('03:23');
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   await act(async () => press('Open running Nursing')?.props.onPress());
   expect(renderer.root.findByType(NursingSheet).props.log).toEqual(active);
   await act(async () => {
     vi.advanceTimersByTime(2000);
   });
+  expect(text()).toContain('03:25');
   await act(async () => press('Stop running Nursing')?.props.onPress());
   expect(hooks.model.execute).toHaveBeenCalledWith({
     type: 'change-nursing',

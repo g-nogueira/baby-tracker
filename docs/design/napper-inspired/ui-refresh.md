@@ -56,8 +56,12 @@ is claimed.
 
 ## Acceptance
 
-Validation passed: `pnpm check` (440 tests in 45 files), the care/Napper and nearby-record suites
-with `TZ=Europe/Lisbon` (129 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (441 tests in 45 files), the care/Napper and nearby-record suites
+with `TZ=Europe/Lisbon` (130 tests), Android/iOS JavaScript exports and the standalone preview build.
+The connected-home suite now executes the Expo Android transform with React Compiler enabled,
+including a production render. This reproduces the reported `focusDuration is not a function`
+failure before the fix; the pure formatter now lives outside the component. The 14 compiled-screen
+tests also pass with `TZ=Europe/Lisbon`. Native modules remain mocked in these render tests.
 On Android and iPhone, verify the five-action row at normal and enlarged font sizes, Day/Night
 contrast, both live controllers above the dock, native handle expansion/dismissal, time editing,
 first Nursing, active/completed Nursing, Medicine with the keyboard open, nearby-record selection,

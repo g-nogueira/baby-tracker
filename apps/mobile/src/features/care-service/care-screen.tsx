@@ -53,6 +53,15 @@ type Drawer =
   | { type: 'nursing'; id: string | null; snapshot?: NursingActivity }
   | { type: 'activity'; intent: ActivitySheetIntent }
   | { type: 'profile' };
+// Keep this pure formatter outside the component: React Compiler memoizes nested
+// declarations at their source position, after action recency has already called it.
+function focusDuration(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m` : `${seconds}s`;
+}
+
 export function CareScreen({ createProvider }: { createProvider: CareProviderFactory }) {
   const model = useCareTracker(createProvider);
   if (model.stage !== 'ready' || !model.baby)
@@ -213,12 +222,6 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
         show({ type: 'activity', intent: { type: 'care', kind, at: now.toISOString() } }),
     })),
   ];
-  function focusDuration(ms: number) {
-    const seconds = Math.max(0, Math.floor(ms / 1000));
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor(seconds / 60) % 60;
-    return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m` : `${seconds}s`;
-  }
   function focusElapsed(at: string | null) {
     return at ? focusDuration(now.getTime() - Date.parse(at)) : '—';
   }
