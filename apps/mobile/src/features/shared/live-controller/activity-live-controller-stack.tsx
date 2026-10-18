@@ -35,5 +35,12 @@ export function ActivityLiveControllerStack({
 }
 
 const styles = StyleSheet.create({
-  stack: { position: 'absolute', left: 16, right: 16, gap: LIVE_CONTROLLER_STACK_GAP },
+  stack: {
+    zIndex: 20,
+    elevation: 8,
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    gap: LIVE_CONTROLLER_STACK_GAP,
+  },
 });

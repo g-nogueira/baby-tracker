@@ -1,7 +1,10 @@
+import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
+import { ActivityBadge } from '@/features/shared/icons/activity-badge';
+import { SheetToolbar } from './sheet-toolbar';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import Slider from '@react-native-community/slider';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -54,6 +57,15 @@ export const activityColors: Record<CareKind, string> = {
   diaper: '#47735A',
   medicine: '#A65F35',
 };
+export const nightActivityColors: Record<CareKind, string> = {
+  bedtime: '#B5A7EE',
+  'wake-up': '#E9B67F',
+  nap: '#B5A7EE',
+  'night-waking': '#F09C8C',
+  nursing: '#9DD7BC',
+  diaper: '#A3CCB0',
+  medicine: '#DBAC85',
+};
 type Transition =
   | 'bedtime'
   | 'start-nap'
@@ -86,6 +98,8 @@ const transitionKind = (type: Transition): CareKind =>
 
 /** Native drawer for sleep, care records and historical creation; timestamps remain stable while ticking. */
 export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onExecute }: Props) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const record = intent.type === 'edit' ? intent.activity : null;
   const initial = useRef({
     start: new Date(record?.startedAt ?? ('at' in intent ? intent.at : now)),
@@ -104,6 +118,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             ? (intent.kind ?? 'nap')
             : 'nap'),
   );
+  const color = (theme.night ? nightActivityColors : activityColors)[kind];
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
   const [adjusted, setAdjusted] = useState(false);
@@ -117,7 +132,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
     null,
   );
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(intent.type === 'past' || intent.type === 'edit');
+  const [expanded, setExpanded] = useState(intent.type === 'past');
   const sheet = useRef<TrueSheet>(null);
   const opening = useRef(false);
   const { height } = useWindowDimensions();
@@ -137,7 +152,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       ? 'Fell asleep again'
       : intent.type === 'past'
         ? 'Add past activity'
-        : `${intent.type === 'edit' ? 'Edit ' : ''}${activityLabels[kind]}`;
+        : activityLabels[kind];
   const format = (at: Date) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -223,16 +238,16 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   return (
     <TrueSheet
       ref={sheet}
-      initialDetentIndex={intent.type === 'past' || intent.type === 'edit' ? 1 : 0}
+      initialDetentIndex={intent.type === 'past' ? 1 : 0}
       detents={[
-        Math.min(0.6, (kind === 'medicine' ? 400 : 330) / height),
+        Math.min(0.6, (kind === 'medicine' ? 430 : 380) / height),
         Math.min(0.9, 710 / height),
       ]}
       scrollable
       draggable
       dismissible
-      backgroundColor="#FFFFFF"
-      grabberOptions={{ color: '#C5BBB3', width: 42, adaptive: false }}
+      backgroundColor={theme.surface}
+      grabberOptions={{ color: theme.muted, width: 42, adaptive: false }}
       accessibilityOptions={{ paneTitle: title, grabberLabel: `${title} drawer` }}
       onDidDismiss={onClose}
       onDidPresent={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
@@ -243,8 +258,18 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
       >
+        <SheetToolbar
+          label={activityLabels[kind]}
+          busy={busy}
+          onClose={() => void sheet.current?.dismiss()}
+          onRemove={
+            record && record.kind !== 'bedtime' && record.kind !== 'wake-up'
+              ? () => onExecute({ type: 'remove-activity', expected: record })
+              : undefined
+          }
+        />
         <View style={styles.hero}>
-          <ActivityIcon name={activityIcons[kind]} color={activityColors[kind]} size={32} />
+          <ActivityBadge icon={activityIcons[kind]} color={color} size={56} active={active} />
           <Text accessibilityRole="header" style={styles.title}>
             {title}
           </Text>
@@ -257,7 +282,15 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               disabled={busy}
               onPress={() => void openTime()}
             >
-              <Text style={styles.timer}>{format(start)}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={[styles.timer, record?.status === 'completed' && timed && styles.range]}
+              >
+                {record?.status === 'completed' && timed
+                  ? `${format(start)} – ${format(end)}`
+                  : format(start)}
+              </Text>
             </Pressable>
           )}
         </View>
@@ -383,31 +416,26 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             {pickerError ?? error}
           </Text>
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            active ? 'Save start time' : intent.type === 'transition' ? title : 'Save activity'
-          }
-          disabled={busy || !valid || pickerError !== null}
-          onPress={save}
-          style={[
-            styles.save,
-            { backgroundColor: activityColors[kind] },
-            (busy || !valid) && styles.disabled,
-          ]}
-        >
-          <ActivityIcon
-            name={
-              intent.type === 'transition' &&
-              (intent.command === 'stop-nap' || intent.command === 'fall-asleep')
-                ? 'stop'
-                : 'check'
+        {!active || (expanded && adjusted) ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              active ? 'Save start time' : intent.type === 'transition' ? title : 'Save activity'
             }
-          />
-          <Text style={styles.white}>
-            {active ? 'Save start time' : intent.type === 'transition' ? title : 'Save'}
-          </Text>
-        </Pressable>
+            disabled={busy || !valid || pickerError !== null}
+            onPress={save}
+            style={[styles.save, { backgroundColor: color }, (busy || !valid) && styles.disabled]}
+          >
+            <ActivityIcon
+              name={
+                intent.type === 'transition' &&
+                (intent.command === 'stop-nap' || intent.command === 'fall-asleep')
+                  ? 'stop'
+                  : 'check'
+              }
+            />
+          </Pressable>
+        ) : null}
         {record?.kind === 'nap' && active ? (
           <Pressable
             accessibilityRole="button"
@@ -435,7 +463,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             onPress={activeStop}
             style={styles.stop}
           >
-            <ActivityIcon name="stop" color={activityColors[kind]} />
+            <ActivityIcon name="stop" color={color} />
           </Pressable>
         ) : null}
         {record?.kind === 'nap' &&
@@ -458,48 +486,52 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
     </TrueSheet>
   );
 }
-const styles = StyleSheet.create({
-  content: { padding: 20, paddingBottom: 32, gap: 16 },
-  hero: { alignItems: 'center', gap: 10 },
-  title: { fontSize: 21, fontWeight: '700', color: '#292724' },
-  timer: { fontSize: 36, color: '#292724', fontWeight: '700', fontVariant: ['tabular-nums'] },
-  choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
-  choice: {
-    padding: 12,
-    minHeight: 44,
-    borderRadius: 14,
-    backgroundColor: '#F3F1EE',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  selected: { backgroundColor: '#E6DFF6', borderWidth: 1, borderColor: '#7367B9' },
-  choiceText: { fontSize: 14, color: '#554878', fontWeight: '600' },
-  muted: { color: '#746F68', fontSize: 13 },
-  note: {
-    minHeight: 90,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: '#F3F1EE',
-    textAlignVertical: 'top',
-    fontSize: 16,
-    color: '#292724',
-  },
-  save: {
-    minHeight: 54,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 12,
-  },
-  white: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  stop: {
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F3F1EE',
-    borderRadius: 16,
-  },
-  disabled: { opacity: 0.4 },
-  error: { color: '#A64444', fontSize: 14 },
-});
+const createStyles = (theme: ActivityTheme) =>
+  StyleSheet.create({
+    content: { padding: 22, paddingBottom: 36, gap: 16 },
+    hero: { alignItems: 'center', gap: 12, marginTop: -42, paddingHorizontal: 42 },
+    title: { fontSize: 20, fontWeight: '500', color: theme.text },
+    range: { fontSize: 24, lineHeight: 34, letterSpacing: -0.5, textAlign: 'center' },
+    timer: { fontSize: 38, color: theme.text, fontWeight: '500', fontVariant: ['tabular-nums'] },
+    choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+    choice: {
+      padding: 12,
+      minHeight: 44,
+      borderRadius: 14,
+      backgroundColor: theme.field,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    selected: { backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: theme.accent },
+    choiceText: { fontSize: 14, color: theme.text, fontWeight: '600' },
+    muted: { color: theme.muted, fontSize: 13 },
+    note: {
+      minHeight: 90,
+      padding: 12,
+      borderRadius: 14,
+      backgroundColor: theme.field,
+      textAlignVertical: 'top',
+      fontSize: 16,
+      color: theme.text,
+    },
+    save: {
+      width: 70,
+      height: 70,
+      alignSelf: 'center',
+      borderRadius: 35,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 12,
+    },
+    white: { color: theme.onAccent, fontSize: 16, fontWeight: '700' },
+    stop: {
+      minHeight: 48,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.field,
+      borderRadius: 16,
+    },
+    disabled: { opacity: 0.4 },
+    error: { color: theme.error, fontSize: 14 },
+  });

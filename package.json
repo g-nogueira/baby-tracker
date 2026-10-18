@@ -14,7 +14,8 @@
     "mobile": "pnpm --filter @baby-tracker/mobile start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm --filter @baby-tracker/domain typecheck && pnpm --filter @baby-tracker/mobile typecheck"
+    "typecheck": "pnpm --filter @baby-tracker/domain typecheck && pnpm --filter @baby-tracker/mobile typecheck",
+    "preview:ui": "node scripts/preview-ui.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",

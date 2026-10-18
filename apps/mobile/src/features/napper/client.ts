@@ -81,6 +81,12 @@ export class NapperClient {
   async put(babyId: string, log: WireLog) {
     await this.request(`/logs/${encodeURIComponent(babyId)}`, 'PUT', log);
   }
+  async remove(babyId: string, logId: string) {
+    await this.request(
+      `/logs/${encodeURIComponent(babyId)}/${encodeURIComponent(logId)}`,
+      'DELETE',
+    );
+  }
   private authError() {
     return new NapperError('auth', 'Sign in to Napper again.');
   }
@@ -190,7 +196,7 @@ export class NapperClient {
           'rate-limit',
           'Napper is receiving too many requests. Wait before refreshing.',
         );
-      if (method === 'PUT' && response.status >= 500)
+      if ((method === 'PUT' || method === 'DELETE') && response.status >= 500)
         throw new NapperError(
           'uncertain',
           'The save could not be confirmed. Refresh before trying another change.',
@@ -200,9 +206,9 @@ export class NapperClient {
           'invalid',
           'Napper could not complete the request. Refresh and try again.',
         );
-      if (path === '/auth/send-otp') {
-        // Sending a code is an acknowledgment, not a token/data response. A 2xx
-        // may have plain text, a JSON scalar, or no body. Still honor explicit
+      if (path === '/auth/send-otp' || method === 'DELETE') {
+        // Code sending and deletion return acknowledgments, not token/data responses.
+        // A 2xx may have plain text, a JSON scalar, or no body. Still honor explicit
         // JSON rejection envelopes without exposing their private error text.
         const text = await response.text();
         let acknowledgment: unknown;
@@ -224,13 +230,13 @@ export class NapperClient {
       try {
         const bodyText = await response.text();
         // Empty acknowledged writes are confirmed by the application's subsequent reread.
-        if (!bodyText && method === 'PUT') return null;
+        if (!bodyText && (method === 'PUT' || method === 'DELETE')) return null;
         result = JSON.parse(bodyText);
         object(result);
       } catch {
         throw new NapperError(
-          method === 'PUT' ? 'uncertain' : 'invalid',
-          method === 'PUT'
+          method === 'PUT' || method === 'DELETE' ? 'uncertain' : 'invalid',
+          method === 'PUT' || method === 'DELETE'
             ? 'The save could not be confirmed. Refresh before trying another change.'
             : 'Napper returned an unsupported response.',
         );
@@ -241,8 +247,8 @@ export class NapperClient {
     } catch (error) {
       if (error instanceof NapperError) throw error;
       throw new NapperError(
-        method === 'PUT' ? 'uncertain' : 'network',
-        method === 'PUT'
+        method === 'PUT' || method === 'DELETE' ? 'uncertain' : 'network',
+        method === 'PUT' || method === 'DELETE'
           ? 'The save could not be confirmed. Refresh before trying another change.'
           : 'Could not reach Napper. Check your connection and try again.',
       );

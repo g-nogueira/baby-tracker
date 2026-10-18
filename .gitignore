@@ -14,3 +14,6 @@ coverage/
 *.suo
 
 infra/data/
+
+# Standalone component review output
+apps/mobile/preview/dist/

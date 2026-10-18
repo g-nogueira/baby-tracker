@@ -1,12 +1,13 @@
+import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import {
   CYCLE_START_ANGLE_DEGREES,
   CYCLE_SWEEP_ANGLE_DEGREES,
   formatDuration,
 } from '@baby-tracker/domain';
-import { type ReactNode, useState } from 'react';
-import { ActivityDrawer } from '@/features/shared/activity-drawer/activity-drawer';
+import { type ReactNode, useMemo, useRef, useState } from 'react';
+import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import {
@@ -21,6 +22,7 @@ export type RadialCycleSelection = 'day' | 'night';
 interface RadialCycleProps {
   centerStatus: { hint: string; label: string; value: string | null };
   disabled: boolean;
+  maxSize?: number;
   onPressAnchor?: (recordId: string) => void;
   onPressRecord: (record: ProjectedRadialActivity) => void;
   view: RadialCycleView;
@@ -38,6 +40,8 @@ export function RadialCycleSelector({
   onChange: (selection: RadialCycleSelection) => void;
   selection: RadialCycleSelection;
 }) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View accessibilityRole="tablist" style={styles.selector}>
       {(['day', 'night'] as const).map((option) => {
@@ -67,11 +71,16 @@ export function RadialCycle({
   disabled,
   onPressRecord,
   onPressAnchor,
+  maxSize = 440,
   view,
 }: RadialCycleProps) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const clusterSheet = useRef<TrueSheet>(null);
+  const pendingRecord = useRef<ProjectedRadialActivity | null>(null);
   const [cluster, setCluster] = useState<readonly ProjectedRadialActivity[] | null>(null);
   const { width } = useWindowDimensions();
-  const size = Math.min(340, width - 32);
+  const size = Math.min(maxSize, width - 32);
   const scale = size / VIEWBOX_SIZE;
   const projection = view.projection;
   const status =
@@ -103,40 +112,50 @@ export function RadialCycle({
           d={arcPath(
             CYCLE_START_ANGLE_DEGREES,
             CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES,
-            139,
+            126,
           )}
           fill="none"
-          stroke="#E7E0D7"
+          stroke={theme.track}
           strokeLinecap="round"
-          strokeWidth={2}
+          strokeWidth={theme.night ? 22 : 12}
         />
-        {view.ticks.map((tick) => {
-          const inner = polarPoint(tick.angleDegrees, 136);
-          const outer = polarPoint(tick.angleDegrees, 143);
-          const label = polarPoint(tick.angleDegrees, 151);
-          return (
-            <G key={tick.offsetMs}>
-              <Line
-                stroke="#BFB6AA"
-                strokeWidth={1.5}
-                x1={inner.x}
-                x2={outer.x}
-                y1={inner.y}
-                y2={outer.y}
-              />
-              <SvgText
-                fill="#746F68"
-                fontSize={8.5}
-                fontWeight="700"
-                textAnchor="middle"
-                x={label.x}
-                y={label.y + 3}
-              >
-                {tick.label}
-              </SvgText>
-            </G>
-          );
-        })}
+        {view.ticks
+          .filter(
+            (tick) =>
+              tick.label === 'Midnight' ||
+              !projection.anchors.some(
+                (anchor) =>
+                  anchor.recordId !== null &&
+                  Math.abs(anchor.projection.angleDegrees - tick.angleDegrees) < 8,
+              ),
+          )
+          .map((tick) => {
+            const inner = polarPoint(tick.angleDegrees, 136);
+            const outer = polarPoint(tick.angleDegrees, 143);
+            const label = polarPoint(tick.angleDegrees, 151);
+            return (
+              <G key={tick.offsetMs}>
+                <Line
+                  stroke={theme.border}
+                  strokeWidth={1.5}
+                  x1={inner.x}
+                  x2={outer.x}
+                  y1={inner.y}
+                  y2={outer.y}
+                />
+                <SvgText
+                  fill={theme.muted}
+                  fontSize={tick.label === 'Midnight' ? 8 : 7}
+                  fontWeight="500"
+                  textAnchor="middle"
+                  x={label.x}
+                  y={label.y + 3}
+                >
+                  {tick.label}
+                </SvgText>
+              </G>
+            );
+          })}
         {view.records.map((record) => {
           const arc = record.projection.arc;
           if (arc === null || arc.visibleDurationMs <= 0) return null;
@@ -150,35 +169,39 @@ export function RadialCycle({
               fill="none"
               key={`arc:${record.id}`}
               opacity={arc.active ? 1 : 0.82}
-              stroke={radialActivityColor(record.kind)}
+              stroke={radialActivityColor(record.kind, theme.night)}
               strokeLinecap="round"
-              strokeWidth={record.projection.lane === 'outer' ? 9 : 7}
+              strokeWidth={record.projection.lane === 'outer' ? 12 : 7}
             />
           );
         })}
         {projection.anchors.map((anchor) => {
           const point = polarPoint(anchor.projection.angleDegrees, 139);
-          const label = polarPoint(anchor.projection.angleDegrees, 119);
+          const label = polarPoint(anchor.projection.angleDegrees, 155);
           return (
             <G key={`${anchor.boundary}:${anchor.kind}:${anchor.at}`}>
-              <Circle
-                cx={point.x}
-                cy={point.y}
-                fill="#FFFFFF"
-                r={5}
-                stroke="#5B4C94"
-                strokeWidth={2}
-              />
-              <SvgText
-                fill="#5B4C94"
-                fontSize={9}
-                fontWeight="800"
-                textAnchor="middle"
-                x={label.x}
-                y={label.y + 3}
-              >
-                {anchorLabel(anchor.kind)}
-              </SvgText>
+              {anchor.recordId === null ? (
+                <Circle
+                  cx={point.x}
+                  cy={point.y}
+                  fill={theme.surface}
+                  r={5}
+                  stroke={theme.accent}
+                  strokeWidth={2}
+                />
+              ) : null}
+              {anchor.recordId === null ? (
+                <SvgText
+                  fill={theme.muted}
+                  fontSize={9}
+                  fontWeight="800"
+                  textAnchor="middle"
+                  x={label.x}
+                  y={label.y + 3}
+                >
+                  {anchorLabel(anchor.kind)}
+                </SvgText>
+              ) : null}
             </G>
           );
         })}
@@ -206,7 +229,12 @@ export function RadialCycle({
               top={point.y * scale - 22}
               onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
             >
-              <View style={[styles.token, { backgroundColor: radialActivityColor(first.kind) }]}>
+              <View
+                style={[
+                  styles.token,
+                  { backgroundColor: radialActivityColor(first.kind, theme.night) },
+                ]}
+              >
                 {group.length === 1 ? (
                   <ActivityIcon name={first.kind} size={18} />
                 ) : (
@@ -232,42 +260,65 @@ export function RadialCycle({
                 if (anchor.recordId) onPressAnchor?.(anchor.recordId);
               }}
             >
-              <View style={styles.anchorTarget} />
+              <View style={[styles.anchorTarget, { borderColor: '#D9A36C' }]}>
+                <ActivityIcon
+                  name={anchor.kind === 'bedtime' ? 'night' : 'wake'}
+                  color="#D9A36C"
+                  size={19}
+                />
+              </View>
+              <Text numberOfLines={1} style={styles.anchorTime}>
+                {formatClock(anchor.at, projection.cycle.timezone)}
+              </Text>
             </RecordTarget>
           );
         })}
       {cluster ? (
-        <ActivityDrawer
-          activityLabel="Nearby activities"
-          mode="edit"
-          scrollContent
-          onDismiss={() => setCluster(null)}
+        <TrueSheet
+          ref={clusterSheet}
+          initialDetentIndex={0}
+          detents={['auto', 0.8]}
+          scrollable
+          draggable
+          dismissible
+          backgroundColor={theme.surface}
+          onDidDismiss={() => {
+            setCluster(null);
+            const record = pendingRecord.current;
+            pendingRecord.current = null;
+            if (record) onPressRecord(record);
+          }}
+          accessibilityOptions={{ paneTitle: 'Nearby activities' }}
         >
-          {() => (
-            <>
-              <Text accessibilityRole="header" style={styles.clusterTitle}>
-                Nearby activities
-              </Text>
-              {cluster.map((record) => (
-                <Pressable
-                  accessibilityRole="button"
-                  key={record.id}
-                  disabled={disabled}
-                  onPress={() => {
-                    setCluster(null);
-                    onPressRecord(record);
-                  }}
-                  style={styles.clusterRow}
-                >
-                  <ActivityIcon name={record.kind} color={radialActivityColor(record.kind)} />
-                  <Text style={styles.clusterText}>
-                    {activityAccessibilityLabel(record, projection.cycle.timezone)}
-                  </Text>
-                </Pressable>
-              ))}
-            </>
-          )}
-        </ActivityDrawer>
+          <ScrollView nestedScrollEnabled contentContainerStyle={{ padding: 24 }}>
+            <Text accessibilityRole="header" style={styles.clusterTitle}>
+              Nearby activities
+            </Text>
+            {cluster.map((record) => (
+              <Pressable
+                accessibilityRole="button"
+                key={record.id}
+                disabled={disabled}
+                onPress={() => {
+                  if (pendingRecord.current) return;
+                  pendingRecord.current = record;
+                  void clusterSheet.current?.dismiss().catch(() => {
+                    pendingRecord.current = null;
+                  });
+                }}
+                style={styles.clusterRow}
+              >
+                <ActivityIcon
+                  name={record.kind}
+                  color={radialActivityColor(record.kind, theme.night)}
+                />
+                <Text style={styles.clusterText}>
+                  {activityAccessibilityLabel(record, projection.cycle.timezone)}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </TrueSheet>
       ) : null}
 
       <View
@@ -278,7 +329,11 @@ export function RadialCycle({
         style={styles.centerStatus}
       >
         <Text style={styles.statusLabel}>{centerStatus.label}</Text>
-        {centerStatus.value ? <Text style={styles.status}>{centerStatus.value}</Text> : null}
+        {centerStatus.value ? (
+          <Text numberOfLines={1} adjustsFontSizeToFit style={styles.status}>
+            {centerStatus.value}
+          </Text>
+        ) : null}
         <Text style={styles.statusHint}>{centerStatus.hint}</Text>
         {projection.overflow.hasOverflow ? (
           <Text style={styles.overflow}>Cycle exceeds 24 hours</Text>
@@ -303,6 +358,8 @@ function RecordTarget({
   onPress: () => void;
   top: number;
 }) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <Pressable
       accessibilityHint="Opens this exact record for editing"
@@ -368,7 +425,16 @@ function formatClock(instant: string, timezone: string): string {
   }).format(new Date(instant));
 }
 
-export function radialActivityColor(kind: RadialActivityKind): string {
+export function radialActivityColor(kind: RadialActivityKind, night = false): string {
+  if (night)
+    return {
+      nap: '#B5A7EE',
+      night: '#7770B5',
+      'night-waking': '#F09C8C',
+      nursing: '#9DD7BC',
+      diaper: '#A3CCB0',
+      medicine: '#DBAC85',
+    }[kind];
   switch (kind) {
     case 'nap':
       return '#7367B9';
@@ -391,90 +457,107 @@ function anchorLabel(kind: 'bedtime' | 'local_midnight' | 'wake_up'): string {
   return 'Unanchored';
 }
 
-const styles = StyleSheet.create({
-  selector: {
-    flexDirection: 'row',
-    alignSelf: 'center',
-    padding: 3,
-    borderRadius: 18,
-    backgroundColor: '#EDE8E1',
-  },
-  selectorOption: {
-    minWidth: 92,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 15,
-  },
-  selectorOptionSelected: { backgroundColor: '#FFFFFF' },
-  selectorText: { color: '#746F68', fontSize: 14, fontWeight: '700' },
-  selectorTextSelected: { color: '#292724' },
-  card: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center' },
-  emptyCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: 28,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-  },
-  emptyTitle: { color: '#292724', fontSize: 19, fontWeight: '800', textAlign: 'center' },
-  emptyText: { color: '#746F68', fontSize: 13, textAlign: 'center' },
-  target: {
-    position: 'absolute',
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  token: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    borderRadius: 14,
-  },
-  tokenText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
-  continuation: { width: 20, height: 6, borderRadius: 3 },
-  centerStatus: {
-    position: 'absolute',
-    width: '36%',
-    minHeight: '30%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: '#F9F7F3',
-  },
-  statusLabel: { color: '#746F68', fontSize: 12, textAlign: 'center' },
-  anchorTarget: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: '#5B4C94',
-    backgroundColor: '#FFFFFF',
-  },
-  clusterTitle: { fontSize: 18, fontWeight: '700', color: '#292724' },
-  clusterRow: {
-    minHeight: 52,
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E7E0D7',
-  },
-  clusterText: { flex: 1, fontSize: 14, color: '#292724' },
-  status: {
-    color: '#292724',
-    fontSize: 29,
-    fontWeight: '700',
-    lineHeight: 35,
-    textAlign: 'center',
-    fontVariant: ['tabular-nums'],
-  },
-  statusHint: { color: '#746F68', fontSize: 11, textAlign: 'center' },
-  overflow: { color: '#A64444', fontSize: 10, fontWeight: '800', textAlign: 'center' },
-});
+const createStyles = (theme: ActivityTheme) =>
+  StyleSheet.create({
+    selector: {
+      flexDirection: 'row',
+      alignSelf: 'center',
+      padding: 3,
+      borderRadius: 18,
+      backgroundColor: theme.raised,
+    },
+    selectorOption: {
+      minWidth: 92,
+      minHeight: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 15,
+    },
+    selectorOptionSelected: { backgroundColor: theme.surface },
+    selectorText: { color: theme.muted, fontSize: 14, fontWeight: '700' },
+    selectorTextSelected: { color: theme.text },
+    card: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center' },
+    emptyCard: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: 28,
+      borderRadius: 28,
+      backgroundColor: theme.surface,
+    },
+    emptyTitle: { color: theme.text, fontSize: 19, fontWeight: '800', textAlign: 'center' },
+    emptyText: { color: theme.muted, fontSize: 13, textAlign: 'center' },
+    target: {
+      position: 'absolute',
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    token: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: theme.surface,
+      borderRadius: 14,
+    },
+    tokenText: { color: theme.surface, fontSize: 13, fontWeight: '900' },
+    continuation: { width: 20, height: 6, borderRadius: 3 },
+    centerStatus: {
+      position: 'absolute',
+      left: '19%',
+      top: '32%',
+      width: '62%',
+      height: '36%',
+      minHeight: '30%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderRadius: 999,
+      backgroundColor: 'transparent',
+    },
+    statusLabel: { color: theme.muted, fontSize: 14, textAlign: 'center' },
+    anchorTarget: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: theme.accent,
+      backgroundColor: theme.surface,
+    },
+    anchorTime: {
+      position: 'absolute',
+      top: 42,
+      left: -30,
+      width: 104,
+      textAlign: 'center',
+      color: theme.muted,
+      fontSize: 10,
+      fontWeight: '500',
+    },
+    clusterTitle: { fontSize: 18, fontWeight: '700', color: theme.text },
+    clusterRow: {
+      minHeight: 52,
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.border,
+    },
+    clusterText: { flex: 1, fontSize: 14, color: theme.text },
+    status: {
+      color: theme.text,
+      fontSize: 50,
+      fontWeight: '500',
+      letterSpacing: -2,
+      lineHeight: 62,
+      textAlign: 'center',
+      fontVariant: ['tabular-nums'],
+    },
+    statusHint: { color: theme.muted, fontSize: 11, textAlign: 'center', opacity: 0.72 },
+    overflow: { color: theme.error, fontSize: 10, fontWeight: '800', textAlign: 'center' },
+  });

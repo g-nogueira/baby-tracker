@@ -47,8 +47,18 @@ export async function careHarness(
   let gate: Promise<void> | null = null;
   let afterPut: (() => void) | null = null;
   const sent: WireLog[] = [];
+  const removed: string[] = [];
+  let removalMode: 'normal' | 'stale' | 'lost' = 'normal';
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const path = new URL(String(input)).pathname;
+    if (init?.method === 'DELETE') {
+      const id = decodeURIComponent(path.split('/').at(-1) ?? '');
+      removed.push(id);
+      if (gate) await gate;
+      if (removalMode !== 'stale') rows = rows.filter((r) => r.id !== id);
+      if (removalMode === 'lost') throw new Error('synthetic lost delete acknowledgment');
+      return new Response(null, { status: 204 });
+    }
     if (init?.method === 'PUT') {
       const request = JSON.parse(String(init.body)) as WireLog;
       sent.push(request);
@@ -104,6 +114,10 @@ export async function careHarness(
     care,
     client,
     sent,
+    removed,
+    removalMode: (mode: 'normal' | 'stale' | 'lost') => {
+      removalMode = mode;
+    },
     fetcher,
     find,
     now: () => now,
@@ -126,6 +140,97 @@ export async function careHarness(
   };
 }
 describe('provider-neutral care port backed by the observed Napper contracts', () => {
+  it.each(['nap', 'night-waking', 'nursing', 'diaper', 'medicine'] as const)(
+    'removes the exact shared %s record and confirms its absence',
+    async (kind) => {
+      const log: WireLog = {
+        id: 'remove-me',
+        category: categories[kind],
+        start: stamp('07:00:00'),
+        end: stamp('07:05:00'),
+        isOpen: false,
+        ...(kind === 'nursing'
+          ? { activeBreast: 'RIGHT', breastLeftMinutes: 0, breastRightMinutes: 300 }
+          : {}),
+        ...(kind === 'diaper' ? { diaperContent: 'WET' } : {}),
+        ...(kind === 'medicine' ? { comment: 'synthetic%20note' } : {}),
+      };
+      const h = await careHarness([log]);
+      await h.care.execute('test-baby', { type: 'remove-activity', expected: await h.find(kind) });
+      expect(h.removed).toEqual([log.id]);
+      expect(h.sent).toEqual([]);
+      expect((await h.care.current('test-baby')).activities).toEqual([]);
+      expect(h.care.needsRefresh).toBe(false);
+      const call = h.fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE');
+      expect(String(call?.[0])).toBe('https://api.napper.app/logs/test-baby/remove-me');
+      expect(call?.[1]?.body).toBeUndefined();
+    },
+  );
+  it('rejects stale removal, separate night-boundary removal, and repeated removal taps', async () => {
+    const log: WireLog = {
+      id: 'nap',
+      category: 'NAP',
+      start: stamp('07:00:00'),
+      end: stamp('07:10:00'),
+      isOpen: false,
+    };
+    const h = await careHarness([log]);
+    const stale = await h.find('nap');
+    h.setRows([{ ...log, comment: 'remote edit' }]);
+    await expect(
+      h.care.execute('test-baby', { type: 'remove-activity', expected: stale }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    expect(h.removed).toEqual([]);
+    const fresh = await h.find('nap');
+    let release = () => {};
+    h.hold(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const first = h.care.execute('test-baby', { type: 'remove-activity', expected: fresh });
+    await expect(
+      h.care.execute('test-baby', { type: 'remove-activity', expected: fresh }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    release();
+    await first;
+    expect(h.removed).toHaveLength(1);
+    const boundary = await careHarness([point('wake-up', stamp('06:00:00'))]);
+    await expect(
+      boundary.care.execute('test-baby', {
+        type: 'remove-activity',
+        expected: await boundary.find('wake-up'),
+      }),
+    ).rejects.toThrow('cannot be removed separately');
+    expect(boundary.removed).toEqual([]);
+  });
+  it.each(['lost', 'stale'] as const)(
+    'blocks retries after %s removal confirmation until manual reconciliation',
+    async (mode) => {
+      const h = await careHarness([
+        {
+          id: 'nap',
+          category: 'NAP',
+          start: stamp('07:00:00'),
+          end: stamp('07:10:00'),
+          isOpen: false,
+        },
+      ]);
+      const command: CareCommand = { type: 'remove-activity', expected: await h.find('nap') };
+      h.removalMode(mode);
+      await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({
+        code: 'uncertain',
+      });
+      expect(h.care.needsRefresh).toBe(true);
+      await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({
+        code: 'uncertain',
+      });
+      expect(h.removed).toHaveLength(1);
+      await h.care.reconcile('test-baby');
+      expect(h.care.needsRefresh).toBe(false);
+      expect(h.removed).toHaveLength(1);
+    },
+  );
   it('starts, stops, edits and continues a Nap when the fetched history begins mid-night', async () => {
     const oldBed: WireLog = {
       ...point('bedtime', '2026-10-13T19:00:00Z'),

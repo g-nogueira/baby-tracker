@@ -98,7 +98,8 @@ export type CareCommand =
       diaperType?: DiaperType;
       note?: string;
     }
-  | { type: 'record-past'; activity: PastActivity };
+  | { type: 'record-past'; activity: PastActivity }
+  | { type: 'remove-activity'; expected: ActivityReference };
 
 /** Replace this port to use our own API; revisions are opaque optimistic concurrency tokens. */
 export interface CareService {

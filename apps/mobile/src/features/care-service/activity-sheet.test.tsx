@@ -110,6 +110,9 @@ it('retains an edited diaper timestamp/category through ticking and saves the ex
   };
   const intent: ActivitySheetIntent = { type: 'edit', activity };
   await render(intent);
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () => press('Start time')?.props.onPress());
   await act(async () =>
     renderer.root
@@ -248,6 +251,61 @@ it('pauses an active Nap through the care port', async () => {
     at: now.toISOString(),
   });
 });
+it('requires explicit removal confirmation and keeps the reviewed revision across remote Nursing updates', async () => {
+  const log: NursingActivity = {
+    id: 'feed',
+    revision: 'v1',
+    kind: 'nursing',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    status: 'active',
+    leftSeconds: 0,
+    rightSeconds: 3600,
+    lastBreast: 'RIGHT',
+    pauseSeconds: 0,
+    measuredAt: now.toISOString(),
+  };
+  const onRemove = vi.fn();
+  const props = {
+    ...base,
+    log,
+    last: 'RIGHT' as const,
+    onStart: vi.fn(),
+    onChange: vi.fn(),
+    onCorrect: vi.fn(),
+    onRemove,
+  };
+  await act(async () => {
+    renderer = create(<NursingSheet {...props} />);
+  });
+  await act(async () => press('Remove Nursing')?.props.onPress());
+  expect(onRemove).not.toHaveBeenCalled();
+  await act(async () => press('Cancel removal')?.props.onPress());
+  expect(press('Confirm remove Nursing')).toBeUndefined();
+  await act(async () => press('Remove Nursing')?.props.onPress());
+  await act(async () =>
+    renderer.update(<NursingSheet {...props} log={{ ...log, revision: 'v2' }} />),
+  );
+  await act(async () => press('Confirm remove Nursing')?.props.onPress());
+  expect(onRemove).toHaveBeenCalledWith(log);
+});
+it('removes a Nap through the service command only after confirmation', async () => {
+  const activity: SleepActivity = {
+    id: 'nap',
+    revision: 'nap-v1',
+    kind: 'nap',
+    startedAt: '2026-10-15T10:00:00.000Z',
+    endedAt: '2026-10-15T10:30:00.000Z',
+    status: 'completed',
+    pauseSeconds: 0,
+    measuredAt: now.toISOString(),
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Remove Nap')?.props.onPress());
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Confirm remove Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({ type: 'remove-activity', expected: activity });
+});
 it('edits an active Nursing start without silently adopting a newer remote revision', async () => {
   const log: NursingActivity = {
     id: 'feed',
@@ -274,6 +332,9 @@ it('edits an active Nursing start without silently adopting a newer remote revis
   await act(async () => {
     renderer = create(<NursingSheet {...props} />);
   });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () =>
     renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
   );

@@ -17,6 +17,7 @@ vi.mock('./use-care-tracker', () => ({ useCareTracker: () => hooks.model }));
 vi.mock('expo-router', () => ({ Link: 'Link' }));
 vi.mock('react-native', () => ({
   View: 'View',
+  StatusBar: 'StatusBar',
   Text: 'Text',
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
@@ -142,7 +143,7 @@ afterEach(async () => {
 });
 it('renders shared canonical Nursing on the dial and keeps live controls available without a Napper dependency', async () => {
   await render();
-  expect(text()).toContain('Shared records · Replaceable test service');
+  expect(press('Profile and sync')).toBeDefined();
   expect(renderer.root.findByType(RadialCycle).props.view.records).toHaveLength(1);
   expect(text()).not.toContain('coming next');
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
@@ -157,6 +158,12 @@ it('renders shared canonical Nursing on the dial and keeps live controls availab
     expected: active,
     command: { kind: 'stop' },
   });
+});
+it('opens profile and sync details without signing out or leaving the shared tracker', async () => {
+  await render();
+  await act(async () => press('Profile and sync')?.props.onPress());
+  expect(text()).toContain('Shared records · Replaceable test service');
+  expect(hooks.model.signOut).not.toHaveBeenCalled();
 });
 it('renders Night waking with Nursing concurrently, and distinguishes falling asleep from morning wake-up', async () => {
   hooks.model.current = snapshot([bed, waking, active]);

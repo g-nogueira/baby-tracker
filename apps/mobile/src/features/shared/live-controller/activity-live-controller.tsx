@@ -1,4 +1,6 @@
+import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LIVE_CONTROLLER_MIN_HEIGHT } from './activity-live-controller-layout';
@@ -36,6 +38,8 @@ export function ActivityLiveController({
   stopAccessibilityLabel,
   subtitle,
 }: ActivityLiveControllerProps) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View style={styles.controller}>
       <Pressable
@@ -74,56 +78,59 @@ export function ActivityLiveController({
   );
 }
 
-const styles = StyleSheet.create({
-  controller: {
-    minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    overflow: 'hidden',
-    borderRadius: 18,
-    backgroundColor: '#292724',
-    shadowColor: '#000000',
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  body: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 21,
-    flexShrink: 0,
-  },
-  icon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
-  copy: { flex: 1, minWidth: 0, gap: 2 },
-  title: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },
-  value: {
-    color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  subtitle: { color: '#D8D2CC', fontSize: 11 },
-  stop: {
-    width: 66,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3A3733',
-  },
-  stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
-  actionIcon: { color: '#FFFFFF', fontSize: 22, fontWeight: '800' },
-  disabled: { opacity: 0.45 },
-  pressed: { opacity: 0.78 },
-});
+const createStyles = (theme: ActivityTheme) =>
+  StyleSheet.create({
+    controller: {
+      minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      overflow: 'hidden',
+      borderRadius: 24,
+      backgroundColor: theme.night ? theme.raised : '#34313D',
+      shadowColor: '#000000',
+      shadowOpacity: 0.1,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 8,
+    },
+    body: {
+      minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    iconCircle: {
+      width: 42,
+      height: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 21,
+      flexShrink: 0,
+    },
+    icon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
+    copy: { flex: 1, minWidth: 0, gap: 2 },
+    title: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },
+    value: {
+      color: '#FFFFFF',
+      fontSize: 22,
+      fontWeight: '500',
+      fontVariant: ['tabular-nums'],
+    },
+    subtitle: { color: '#D8D2CC', fontSize: 11 },
+    stop: {
+      minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
+      width: 58,
+      flexShrink: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+    },
+    stopSquare: { width: 16, height: 16, borderRadius: 3, backgroundColor: '#FFFFFF' },
+    actionIcon: { color: '#FFFFFF', fontSize: 22, fontWeight: '800' },
+    disabled: { opacity: 0.45 },
+    pressed: { opacity: 0.78 },
+  });

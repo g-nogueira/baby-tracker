@@ -144,6 +144,53 @@ export class NapperTracker {
       this.mutationInFlight = false;
     }
   }
+  /** Confirmed single-record removal; no implicit night cascade or compensating recreation. */
+  async remove(
+    babyId: string,
+    expected: WireLog,
+    validate: (before: WireLog[], after: WireLog[]) => void,
+  ) {
+    if (this.mutationInFlight)
+      throw new NapperError('conflict', 'A change is already being saved.');
+    if (this.writeNeedsRefresh)
+      throw new NapperError(
+        'uncertain',
+        'Refresh to check the previous save before making another change.',
+      );
+    this.mutationInFlight = true;
+    let accepted = false;
+    const date = calendarDayForInstant(new Date(String(expected.start)), this.timezone);
+    try {
+      const before = await this.windows(babyId, [date]);
+      const actual = before.find((r) => r.id === expected.id);
+      if (!actual || fingerprint(actual) !== fingerprint(expected))
+        throw new NapperError(
+          'conflict',
+          'This activity changed in Napper. Refresh before removing it.',
+        );
+      validate(
+        before,
+        before.filter((r) => r.id !== expected.id),
+      );
+      await this.client.remove(babyId, String(expected.id));
+      accepted = true;
+      const after = await this.windows(babyId, [date]);
+      if (after.some((r) => r.id === expected.id))
+        throw new NapperError('uncertain', 'Removal could not be confirmed.');
+      validate(before, after);
+    } catch (error) {
+      if (accepted || (error instanceof NapperError && error.code === 'uncertain')) {
+        this.uncertain = { babyId, accountId: this.client.accountId, request: expected };
+        throw new NapperError(
+          'uncertain',
+          'Removal could not be confirmed. Refresh and review before making another change.',
+        );
+      }
+      throw error;
+    } finally {
+      this.mutationInFlight = false;
+    }
+  }
   async start(babyId: string, side: Breast, at: Date = this.now()) {
     return this.mutate(babyId, async (logs) => {
       if (logs.some((log) => log.category === 'NURSING' && typeof log.isOpen !== 'boolean'))

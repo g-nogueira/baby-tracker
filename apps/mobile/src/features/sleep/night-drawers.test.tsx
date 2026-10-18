@@ -49,6 +49,7 @@ vi.mock('react-native-safe-area-context', () => ({
   SafeAreaView: 'SafeAreaView',
   useSafeAreaInsets: () => ({ top: 24, bottom: 24 }),
 }));
+vi.mock('@lodev09/react-native-true-sheet', () => ({ TrueSheet: 'TrueSheet' }));
 vi.mock('@react-native-community/datetimepicker', () => ({ default: 'DateTimePicker' }));
 
 const hooks = vi.hoisted(() => ({ sleep: vi.fn(), nursing: vi.fn(), care: vi.fn() }));

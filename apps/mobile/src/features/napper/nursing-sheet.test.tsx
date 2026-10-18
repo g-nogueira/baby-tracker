@@ -90,7 +90,7 @@ it('opens the proposed time, keeps the picker stable across ticks, and starts at
   expect(sheet.props.dismissible).toBe(true);
   expect(sheet.props.draggable).toBe(true);
   expect(sheet.props.scrollable).toBe(true);
-  expect(sheet.props.detents).toEqual([330 / 800, 650 / 800]);
+  expect(sheet.props.detents).toEqual([0.5, 0.84]);
   expect(renderer.root.findByType('ScrollView' as never).props.nestedScrollEnabled).toBe(true);
 });
 it('updates the split before finger release and preserves an edit through remote/timer rerenders', async () => {
@@ -108,6 +108,9 @@ it('updates the split before finger release and preserves an edit through remote
   await act(async () => {
     renderer = create(<NapperNursingSheet {...base} log={log} onCorrect={onCorrect} />);
   });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () => renderer.root.findByType('Slider' as never).props.onValueChange(120));
   expect(renderer.root.findByType('Slider' as never).props.value).toBe(120);
   await act(async () =>
@@ -144,6 +147,9 @@ it('opens a fractional completed split as a whole-second edit draft without chan
   await act(async () => {
     renderer = create(<NapperNursingSheet {...base} log={log} onCorrect={onCorrect} />);
   });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   expect(renderer.root.findByType('Slider' as never).props.value).toBe(13);
   expect(onCorrect).not.toHaveBeenCalled();
   expect(log.breastLeftMinutes).toBe(12.75);
