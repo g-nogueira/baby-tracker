@@ -7,6 +7,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "start": "pnpm --filter @baby-tracker/mobile start",
+    "start:metro": "pnpm --filter @baby-tracker/mobile start:metro",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "format": "biome format --write .",
     "format:check": "biome format .",
