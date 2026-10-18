@@ -1,21 +1,35 @@
-import { Pressable, View } from 'react-native';
+import { type ReactNode, useState } from 'react';
+import { Platform, Pressable, View } from 'react-native';
 import { Text } from '@/features/shared/tracking-text';
-import { shiftCalendarDay } from '@/features/naps/calendar-day';
+import {
+  calendarDayForInstant,
+  instantForZonedDateTime,
+  shiftCalendarDay,
+} from '@/features/naps/calendar-day';
 import { useActivityTheme } from '@/features/shared/activity-theme';
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
 
-/** Calendar navigation uses calendar arithmetic, independently of UTC day length and DST. */
+/** A compact history header; the date opens real calendar navigation rather than another title row. */
 export function HistoryWeek({
   date,
   today,
+  timezone,
+  profileName,
+  profileButton,
   onChange,
   disabled,
 }: {
   date: string;
   today: string;
+  timezone: string;
+  profileName: string;
+  profileButton: ReactNode;
   onChange: (date: string) => void;
   disabled: boolean;
 }) {
   const theme = useActivityTheme();
+  const [calendar, setCalendar] = useState(false);
   const day = new Date(`${date}T12:00:00Z`).getUTCDay();
   const first = shiftCalendarDay(date, -day);
   const title = new Intl.DateTimeFormat(undefined, {
@@ -23,65 +37,87 @@ export function HistoryWeek({
     day: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${date}T12:00:00Z`));
+  const [year, month, calendarDate] = date.split('-').map(Number);
+  const selected = instantForZonedDateTime(
+    { year, month, day: calendarDate, hour: 12, minute: 0, second: 0 },
+    timezone,
+  );
   return (
-    <View style={{ gap: 16, paddingBottom: 12, width: '100%' }}>
-      <View
-        style={{
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-          height: 44,
-          width: '100%',
-        }}
-      >
+    <View style={{ width: '100%' }}>
+      <View style={{ height: 44, flexDirection: 'row', alignItems: 'center' }}>
+        {profileButton}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Previous day"
+          accessibilityLabel="Choose history date"
+          accessibilityState={{ expanded: calendar }}
           disabled={disabled}
-          onPress={() => onChange(shiftCalendarDay(date, -1))}
+          onPress={() => setCalendar((open) => !open)}
           style={{
             position: 'absolute',
-            left: 0,
-            top: 0,
-            width: 44,
-            height: 44,
+            left: 52,
+            right: 52,
+            minHeight: 44,
             alignItems: 'center',
             justifyContent: 'center',
+            gap: 4,
           }}
         >
-          <Text style={{ fontSize: 22, color: theme.muted }}>‹</Text>
-        </Pressable>
-        <Text
-          numberOfLines={1}
-          style={{ fontSize: 18, color: theme.text, width: '60%', textAlign: 'center' }}
-        >
-          {title}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Next day"
-          disabled={disabled || date >= today}
-          onPress={() => onChange(shiftCalendarDay(date, 1))}
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            width: 44,
-            height: 44,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ fontSize: 22, color: theme.muted, opacity: date >= today ? 0.3 : 1 }}>
-            ›
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text
+              numberOfLines={1}
+              style={{ flexShrink: 0, color: theme.text, fontSize: 16, fontWeight: '500' }}
+            >
+              {title}
+            </Text>
+            <ActivityIcon name="down" size={16} color={theme.text} />
+          </View>
+          <Text numberOfLines={1} style={{ color: theme.muted, fontSize: 13 }}>
+            {profileName}
           </Text>
         </Pressable>
       </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+      {calendar ? (
+        <View style={{ paddingVertical: 8, gap: 8 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            {(['Previous day', 'Next day'] as const).map((label, index) => (
+              <Pressable
+                key={label}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                disabled={disabled || (index === 1 && date >= today)}
+                onPress={() => onChange(shiftCalendarDay(date, index ? 1 : -1))}
+                style={{
+                  minHeight: 44,
+                  minWidth: 44,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: index && date >= today ? 0.3 : 1,
+                }}
+              >
+                <Text style={{ color: theme.muted }}>{index ? '›' : '‹'}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <StableDateTimePicker
+            mode="date"
+            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            value={new Date(Math.min(Date.now(), selected.getTime()))}
+            maximumDate={new Date()}
+            timeZoneName={timezone}
+            onChange={(event, at) => {
+              if (Platform.OS === 'android') setCalendar(false);
+              if (event.type === 'dismissed' || !at) return;
+              const next = calendarDayForInstant(at, timezone);
+              if (next <= today) onChange(next);
+            }}
+          />
+        </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 24 }}>
         {Array.from({ length: 7 }, (_, i) => {
-          const at = shiftCalendarDay(first, i);
-          const selected = at === date;
-          const future = at > today;
+          const at = shiftCalendarDay(first, i),
+            selected = at === date,
+            future = at > today;
           return (
             <Pressable
               key={at}
@@ -92,26 +128,26 @@ export function HistoryWeek({
               onPress={() => onChange(at)}
               style={{
                 flex: 1,
-                minHeight: 60,
+                minHeight: 62,
                 alignItems: 'center',
-                gap: 10,
+                gap: 12,
                 opacity: future ? 0.35 : 1,
               }}
             >
-              <Text style={{ color: theme.muted, fontSize: 11 }}>
+              <Text style={{ color: theme.muted, fontSize: 13 }}>
                 {['S', 'M', 'T', 'W', 'T', 'F', 'S'][i]}
               </Text>
               <View
                 style={{
-                  height: 30,
-                  width: 30,
-                  borderRadius: 15,
-                  backgroundColor: selected ? theme.raised : 'transparent',
+                  height: 34,
+                  width: 34,
+                  borderRadius: 17,
+                  backgroundColor: selected ? '#25243E' : 'transparent',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: selected ? theme.accent : theme.muted, fontSize: 12 }}>
+                <Text style={{ color: selected ? theme.accent : theme.muted, fontSize: 14 }}>
                   {Number(at.slice(-2))}
                 </Text>
               </View>

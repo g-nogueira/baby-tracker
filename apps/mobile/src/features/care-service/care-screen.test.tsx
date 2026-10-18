@@ -270,6 +270,7 @@ it('opens history separately and returns Home to the current day', async () => {
   expect(press('Cycle dial')).toBeDefined();
   await act(async () => press('Activity list')?.props.onPress());
   expect(text()).toContain('Day log');
+  await act(async () => press('Choose history date')?.props.onPress());
   expect(press('Previous day')).toBeDefined();
   await act(async () => press('Home')?.props.onPress());
   expect(hooks.model.setDate).toHaveBeenCalledWith(hooks.model.today);
@@ -585,4 +586,20 @@ it('counts Night sleep and Wake-up recency from the end of the Bedtime routine',
   expect(text()).not.toContain('1h 59m');
   expect(press('Wake up, 1h 49m')).toBeDefined();
   expect(press('Edit Bedtime, 07:55 PM')).toBeDefined();
+});
+it('opens a stable history date picker and navigates using the selected calendar day', async () => {
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  expect(text().split('|')).not.toContain('History');
+  await act(async () => press('Choose history date')?.props.onPress());
+  const picker = renderer.root.findByType('DateTimePicker' as never);
+  const onChange = picker.props.onChange;
+  vi.setSystemTime(new Date('2026-10-15T01:26:23.000Z'));
+  await act(async () => {
+    vi.advanceTimersByTime(1000);
+  });
+  expect(renderer.root.findByType('DateTimePicker' as never).props.onChange).toBe(onChange);
+  await act(async () => onChange({ type: 'set' }, new Date('2026-10-13T12:00:00Z')));
+  expect(hooks.model.setDate).toHaveBeenCalledWith('2026-10-13');
+  expect(renderer.root.findAllByType('DateTimePicker' as never)).toHaveLength(0);
 });

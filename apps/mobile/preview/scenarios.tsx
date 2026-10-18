@@ -69,23 +69,37 @@ export function Preview({
     startedAt: at(-119),
     endedAt: at(-109),
   };
+  const historyAt = (time: string) => `2026-10-18T${time}:00.000Z`;
   const historyRows: CareActivity[] = [
-    { ...wake, startedAt: at(-827), endedAt: at(-827) },
-    { ...nap, startedAt: at(-660), endedAt: at(-610) },
-    { ...nursing, startedAt: at(-510), endedAt: at(-498), status: 'completed' },
-    { ...nursing, id: 'feed-2', startedAt: at(-495), endedAt: at(-483), status: 'completed' },
+    { ...wake, startedAt: historyAt('05:57'), endedAt: historyAt('05:57') },
+    {
+      ...nursing,
+      id: 'morning-feed',
+      startedAt: historyAt('05:57'),
+      endedAt: historyAt('06:05'),
+      status: 'completed',
+    },
+    { ...nap, startedAt: historyAt('09:40'), endedAt: historyAt('10:45') },
+    { ...nursing, startedAt: historyAt('14:05'), endedAt: historyAt('14:17'), status: 'completed' },
     {
       id: 'diaper',
       revision: 'v1',
       kind: 'diaper',
-      startedAt: at(-489),
-      endedAt: at(-489),
+      startedAt: historyAt('14:00'),
+      endedAt: historyAt('14:00'),
       status: 'completed',
       diaperType: 'wet',
     },
-    routine,
+    {
+      ...nursing,
+      id: 'evening-feed',
+      startedAt: historyAt('18:15'),
+      endedAt: historyAt('18:25'),
+      status: 'completed',
+    },
+    { ...routine, startedAt: historyAt('18:45'), endedAt: historyAt('18:55') },
   ];
-  const [date, setDate] = useState(at(0).slice(0, 10));
+  const [date, setDate] = useState(scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10));
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CareActivity[]>(
     scenario === 'night-asleep' || scenario === 'bedtime-range'
@@ -108,7 +122,7 @@ export function Preview({
     current: snapshot,
     history: historySnapshot,
     date,
-    today: at(0).slice(0, 10),
+    today: scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10),
     timezone: 'Europe/Lisbon',
     providerName: 'Component preview',
     busy: false,

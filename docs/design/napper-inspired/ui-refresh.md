@@ -25,9 +25,15 @@ sets the connected client's appearance. The separate local tracker remains avail
   Medicine and other supported actions remain in the three-column `+` menu.
 - Removed the utility header and Home cycle pill; cycle switching lives in history and empty-cycle states.
 - Kept midnight visible and placed timed markers at their start, independently of duration.
-  Markers near a wake/bedtime anchor use an inner rail at the same angle; nearby groups retain exact record IDs.
+  Home markers near a wake/bedtime anchor use an inner rail at the same angle; nearby groups retain exact record IDs.
   Sleep intervals use quiet outlined bands; the completed Night no longer paints a bright full dial.
 - Added drag feedback and animated layout changes between Home and history.
+- Matched the supplied history comparison with a single date header, real calendar picker, smaller
+  center text, wider C-shaped opening, moon/sun pill, plain gradient and separate circular dock buttons.
+  The subtitle uses the profile name: age is not exposed by the current provider contract.
+- History uses a single marker rail. Ellipsis groups include nearby boundaries and retain individual
+  editor selection; short care intervals avoid an extra empty capsule. Nap symbols sit inside their
+  duration band. These are history presentation rules; Home keeps its start-marker behavior.
   History has a Sunday–Saturday strip with future dates disabled, plus dial/list/recorded-total views.
   Its dock has Back, view selectors and Add; Home retains five positions. Sound/library slots remain inactive.
 - Added an activity menu to `+`; historical dates still open past-activity entry directly.
@@ -78,7 +84,8 @@ preview-only message and Remove affects synthetic memory only. `--build` creates
 browser preview; `--static` emits static component markup; `--height=958` matches the recordings’ aspect ratio at 390 px width.
 
 The PNGs below are **static component renders through a CSS print engine**, not browser/device
-screenshots. The core layouts were also inspected at 320 × 740. They help inspect hierarchy and geometry; native font rendering, stacking, gestures, keyboard
+screenshots. The print engine can omit the full-screen SVG gradient and simplify glows; history
+colors still need phone validation. The core layouts were also inspected at 320 × 740. They help inspect hierarchy and geometry; native font rendering, stacking, gestures, keyboard
 behavior and safe areas still need Android/iPhone validation. No live browser visual pass is claimed.
 
 | Day | Night |
@@ -97,8 +104,8 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 | --- | --- | --- |
 | ![Nap](ui-refresh/nap-drawer.png) | ![Nursing](ui-refresh/nursing.png) | ![First Nursing](ui-refresh/first-nursing.png) |
 
-Validation passed: `pnpm check` (467 tests), the Lisbon timezone care/timeline suite
-(162 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (472 tests), the Lisbon timezone care/timeline suite
+(167 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -107,6 +114,8 @@ at the same instant remain separate. Other regressions cover week navigation, fu
 interval entry, annotation draft retention and the dependent Wake-up mood write. Bedtime regressions
 cover readback and revision conflicts, independent endpoints, overnight and Lisbon clock rollback,
 invalid ranges, transitions inside the routine and routine edits that overlap a recorded waking.
+History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
+chooser dismissal, and stable native calendar selection while the live clock ticks.
 
 On a test profile, compare each state side by side with Napper on both phones: home, current and
 historical cycles, first/active/paused/completed Nursing, Nap, Night waking, past care, exact time

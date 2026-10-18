@@ -200,3 +200,59 @@ it('waits for the nearby-record sheet to finish dismissing before opening the ex
   expect(onPressRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'second' }));
   await act(async () => renderer.unmount());
 });
+it('lets a history group open its exact Wake-up boundary after the chooser dismisses', async () => {
+  const at = '2026-10-18T07:00:00.000Z';
+  const view = careCycleViews(
+    [
+      {
+        id: 'wake',
+        revision: 'v1',
+        kind: 'wake-up',
+        startedAt: at,
+        endedAt: at,
+        status: 'completed',
+      },
+      {
+        id: 'diaper',
+        revision: 'v1',
+        kind: 'diaper',
+        startedAt: at,
+        endedAt: at,
+        status: 'completed',
+        diaperType: 'wet',
+      },
+    ],
+    '2026-10-18',
+    'UTC',
+    new Date('2026-10-18T12:00:00Z'),
+    false,
+  ).day;
+  const openAnchor = vi.fn(),
+    openRecord = vi.fn();
+  await act(async () => {
+    renderer = create(
+      <ActivityThemeContext.Provider value={nightTheme}>
+        <RadialCycle
+          presentation="history"
+          view={view}
+          centerStatus={{ label: 'Day of', value: 'Today', hint: '' }}
+          disabled={false}
+          onPressRecord={openRecord}
+          onPressAnchor={openAnchor}
+        />
+      </ActivityThemeContext.Provider>,
+    );
+  });
+  const button = (prefix: string) =>
+    renderer.root
+      .findAllByType('Pressable' as never)
+      .find((n) => String(n.props.accessibilityLabel).startsWith(prefix));
+  await act(async () => button('2 nearby activities')?.props.onPress());
+  expect(button('Edit Diaper')).toBeDefined();
+  await act(async () => button('Edit Wake up')?.props.onPress());
+  expect(openAnchor).not.toHaveBeenCalled();
+  await act(async () => renderer.root.findByType(SheetBoundary).props.onDidDismiss());
+  expect(openAnchor).toHaveBeenCalledWith('wake');
+  expect(openRecord).not.toHaveBeenCalled();
+  await act(async () => renderer.unmount());
+});

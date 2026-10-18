@@ -31,6 +31,11 @@ export function ActivityIcon({
     books: 'M3 4H8V21H3Z M10 4H15V21H10Z M17 5L21 4L24 20L20 21Z',
     chart: 'M3 13H8V21H3Z M9 8H14V21H9Z M15 3H20V21H15Z',
     baby: 'M8 6Q12 2 16 6L18 8L13 13L7 12L5 9Z M7 12Q2 13 4 18Q7 22 12 18L13 13 M10 6L16 12',
+    pacifier:
+      'M9 10V5A3 3 0 0 1 15 5V10 M6 10Q12 8 18 10Q19 13 15 14H9Q5 13 6 10 M9 14A4 4 0 1 0 15 14',
+    list: 'M9 5H21 M9 12H21 M9 19H21 M3 5H3.1 M3 12H3.1 M3 19H3.1',
+    footprints:
+      'M8 4C4 4 4 10 6 13C9 16 12 12 11 9C10 7 11 4 8 4 M6 16C3 15 3 19 5 20C8 22 10 18 8 17Z M17 8C13 8 14 14 16 17C18 20 22 16 21 13C20 11 20 8 17 8 M15 19C12 18 12 22 15 23C18 24 19 21 17 20Z',
     log: 'M5 3H19V21H5Z M8 7H16 M8 11H16 M8 15H13',
     trash: 'M4 6H20 M9 6V3H15V6 M6 6L7 21H17L18 6 M10 10V17 M14 10V17',
     plus: 'M12 4V20 M4 12H20',
@@ -46,6 +51,7 @@ export function ActivityIcon({
     sun: 'M12 7A5 5 0 1 0 12 17A5 5 0 1 0 12 7 M12 2V4 M12 20V22 M2 12H4 M20 12H22 M5 5L6.5 6.5 M17.5 17.5L19 19 M5 19L6.5 17.5 M17.5 6.5L19 5',
     cycle: 'M5 19A9 9 0 1 1 19 19',
     down: 'M6 9L12 15L18 9',
+    'chevron-right': 'M9 5L16 12L9 19',
     back: 'M20 12H4 M10 6L4 12L10 18',
     rewind: 'M5 9V3 M5 9H11 M5 9A8 8 0 1 1 4 15',
     forward: 'M19 9V3 M19 9H13 M19 9A8 8 0 1 0 20 15',
@@ -84,6 +90,7 @@ export function ActivityIcon({
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path
         d={paths[kind] ?? paths.check}
+        transform={kind === 'pacifier' ? 'rotate(40 12 12)' : undefined}
         fill={kind === 'stop' || kind === 'home-filled' ? color : 'none'}
         stroke={color}
         strokeWidth={1.7}

@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
-import { instantForZonedDateTime } from '@/features/naps/calendar-day';
+import { instantForZonedDateTime, shiftCalendarDay } from '@/features/naps/calendar-day';
 import {
   HomeQuickActions,
   type HomeQuickAction,
@@ -351,7 +351,7 @@ export function CareHome({
     Math.max(250, homeHeight - (historyMode ? 200 : 210)),
   );
   const homeTop = historyMode
-    ? 4
+    ? Math.max(28, Math.min(44, viewport.height * 0.05))
     : Math.max(20, Math.min(64, (homeHeight - dialMaxSize - 145) * 0.25));
   const actionGap = Math.max(24, Math.min(48, (homeHeight - dialMaxSize - 130) * 0.3));
   const displayCenter = historyMode
@@ -372,7 +372,7 @@ export function CareHome({
     <ActivityThemeContext.Provider value={theme}>
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle={theme.night ? 'light-content' : 'dark-content'} />
-        {theme.night ? <NightSky /> : null}
+        {theme.night ? <NightSky history={historyMode} /> : null}
         <ScrollView
           ref={scroll}
           contentContainerStyle={[
@@ -389,38 +389,48 @@ export function CareHome({
           keyboardShouldPersistTaps="handled"
           scrollEnabled={historyMode && historyView !== 'dial'}
         >
-          <View style={styles.header}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Profile and sync"
-              disabled={model.busy}
-              onPress={() => setDrawer({ type: 'profile' })}
-              style={styles.profileButton}
-            >
-              <ActivityIcon name="baby" color={theme.muted} size={24} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open cycle history"
-              onPress={() => setHistoryMode(true)}
-              style={styles.historyHint}
-            >
-              {historyMode ? (
-                <Text style={styles.cycleHint}>History</Text>
-              ) : (
-                <ActivityIcon name="down" size={18} color={theme.muted} />
-              )}
-            </Pressable>
-            <View style={styles.dateButton} />
-          </View>
           {historyMode ? (
             <HistoryWeek
               date={model.date}
               today={model.today}
-              onChange={model.setDate}
+              timezone={model.timezone}
+              profileName={model.baby?.name ?? ''}
               disabled={model.busy}
+              onChange={model.setDate}
+              profileButton={
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Profile and sync"
+                  disabled={model.busy}
+                  onPress={() => setDrawer({ type: 'profile' })}
+                  style={[styles.profileButton, { borderColor: '#9995F0' }]}
+                >
+                  <ActivityIcon name="pacifier" color={theme.muted} size={24} />
+                </Pressable>
+              }
             />
-          ) : null}
+          ) : (
+            <View style={styles.header}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Profile and sync"
+                disabled={model.busy}
+                onPress={() => setDrawer({ type: 'profile' })}
+                style={styles.profileButton}
+              >
+                <ActivityIcon name="pacifier" color={theme.muted} size={24} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open cycle history"
+                onPress={() => setHistoryMode(true)}
+                style={styles.historyHint}
+              >
+                <ActivityIcon name="down" size={18} color={theme.muted} />
+              </Pressable>
+              <View style={styles.dateButton} />
+            </View>
+          )}
           <Animated.View
             {...navigationGesture.panHandlers}
             style={[styles.home, { paddingTop: homeTop, transform: [{ translateY: dragY }] }]}
@@ -429,10 +439,16 @@ export function CareHome({
               <RadialCycle
                 view={view}
                 maxSize={dialMaxSize}
+                presentation={historyMode ? 'history' : 'home'}
+                onNextCycle={
+                  historyMode ? () => model.setDate(shiftCalendarDay(model.date, 1)) : undefined
+                }
+                nextCycleDisabled={model.date >= model.today}
                 centerStatus={{ ...displayCenter, hint: historyMode ? displayCenter.hint : '' }}
                 controls={
                   historyMode || view.projection === null ? (
                     <RadialCycleSelector
+                      compact={historyMode}
                       selection={selection}
                       onChange={(next) => {
                         setSelectedManually(true);
@@ -615,7 +631,9 @@ export function CareHome({
         </ScrollView>
         <View style={[styles.dockHost, { bottom: Math.max(8, insets.bottom) }]}>
           {historyMode ? (
-            <View style={styles.historyDock}>
+            <View
+              style={[styles.historyDock, { paddingHorizontal: viewport.width < 360 ? 4 : 18 }]}
+            >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Home"
@@ -625,7 +643,7 @@ export function CareHome({
                   if (model.date !== model.today) model.setDate(model.today);
                   scroll.current?.scrollTo({ y: 0, animated: false });
                 }}
-                style={styles.dockTarget}
+                style={[styles.dockTarget, styles.historyRound]}
               >
                 <ActivityIcon name="back" color={theme.muted} />
               </Pressable>
@@ -633,8 +651,8 @@ export function CareHome({
                 {(
                   [
                     ['dial', 'Cycle dial', 'cycle'],
-                    ['log', 'Activity list', 'log'],
-                    ['totals', 'Cycle totals', 'chart'],
+                    ['log', 'Activity list', 'list'],
+                    ['totals', 'Cycle totals', 'footprints'],
                   ] as const
                 ).map(([mode, label, icon]) => (
                   <Pressable
@@ -646,7 +664,7 @@ export function CareHome({
                       setHistoryView(mode);
                       scroll.current?.scrollTo({ y: 0, animated: false });
                     }}
-                    style={styles.dockTarget}
+                    style={[styles.dockTarget, { minWidth: 52, height: 50 }]}
                   >
                     <ActivityIcon
                       name={icon}
@@ -670,7 +688,7 @@ export function CareHome({
                     },
                   })
                 }
-                style={styles.dockTarget}
+                style={[styles.dockTarget, styles.historyRound]}
               >
                 <ActivityIcon name="plus" size={28} color={theme.muted} />
               </Pressable>
@@ -912,14 +930,23 @@ export function CareHome({
     </ActivityThemeContext.Provider>
   );
 }
-function NightSky() {
+function NightSky({ history = false }: { history?: boolean }) {
+  const viewport = useWindowDimensions();
   return (
-    <View pointerEvents="none" style={skyStyle}>
-      <Svg width="100%" height="100%" viewBox="0 0 400 900" preserveAspectRatio="none">
+    <View
+      pointerEvents="none"
+      style={[skyStyle, { width: viewport.width, height: viewport.height }]}
+    >
+      <Svg
+        width={viewport.width}
+        height={viewport.height}
+        viewBox="0 0 400 900"
+        preserveAspectRatio="none"
+      >
         <Defs>
           <LinearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#101024" />
-            <Stop offset="1" stopColor="#1B1A3D" />
+            <Stop offset="0" stopColor={history ? '#19172D' : '#101024'} />
+            <Stop offset="1" stopColor={history ? '#252445' : '#1B1A3D'} />
           </LinearGradient>
           <RadialGradient id="starGlow">
             <Stop offset="0" stopColor="#EEE9FF" stopOpacity={0.45} />
@@ -927,28 +954,30 @@ function NightSky() {
           </RadialGradient>
         </Defs>
         <Rect x={0} y={0} width={400} height={900} fill="url(#sky)" />
-        {nightStars
-          .filter((_, i) => i % 5 === 0)
-          .map((star) => (
+        {!history &&
+          nightStars
+            .filter((_, i) => i % 5 === 0)
+            .map((star) => (
+              <Circle
+                key={`glow${star.id}`}
+                cx={star.x}
+                cy={star.y}
+                r={3}
+                fill="url(#starGlow)"
+                opacity={0.55}
+              />
+            ))}
+        {!history &&
+          nightStars.map((star) => (
             <Circle
-              key={`glow${star.id}`}
+              key={star.id}
               cx={star.x}
               cy={star.y}
-              r={3}
-              fill="url(#starGlow)"
-              opacity={0.55}
+              r={star.radius}
+              fill="#EAE4FF"
+              opacity={star.opacity}
             />
           ))}
-        {nightStars.map((star) => (
-          <Circle
-            key={star.id}
-            cx={star.x}
-            cy={star.y}
-            r={star.radius}
-            fill="#EAE4FF"
-            opacity={star.opacity}
-          />
-        ))}
       </Svg>
     </View>
   );
@@ -994,6 +1023,13 @@ const createStyles = (theme: ActivityTheme) =>
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+    },
+    historyRound: {
+      width: 48,
+      minWidth: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: '#2A2949',
     },
     historyModes: {
       flexDirection: 'row',

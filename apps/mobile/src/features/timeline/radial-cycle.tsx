@@ -1,3 +1,10 @@
+import { HistoryDialMarkers } from './history-dial-markers';
+import {
+  historyDialView,
+  historyActivityColor,
+  HISTORY_START_ANGLE,
+  HISTORY_SWEEP_ANGLE,
+} from './history-dial-state';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
@@ -26,6 +33,9 @@ interface RadialCycleProps {
   centerStatus: { hint: string; label: string; value: string | null };
   disabled: boolean;
   maxSize?: number;
+  presentation?: 'home' | 'history';
+  onNextCycle?: () => void;
+  nextCycleDisabled?: boolean;
   onPressAnchor?: (recordId: string) => void;
   onPressRecord: (record: ProjectedRadialActivity) => void;
   view: RadialCycleView;
@@ -39,15 +49,17 @@ const LANE_RADIUS = { outer: 135, inner: 126, point: 135 } as const;
 export function RadialCycleSelector({
   onChange,
   selection,
+  compact = false,
 }: {
   onChange: (selection: RadialCycleSelection) => void;
   selection: RadialCycleSelection;
+  compact?: boolean;
 }) {
   const theme = useActivityTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View accessibilityRole="tablist" style={styles.selector}>
-      {(['day', 'night'] as const).map((option) => {
+      {(compact ? (['night', 'day'] as const) : (['day', 'night'] as const)).map((option) => {
         const selected = selection === option;
         const label = option === 'day' ? 'Day' : 'Night';
         return (
@@ -57,7 +69,11 @@ export function RadialCycleSelector({
             accessibilityState={{ selected }}
             key={option}
             onPress={() => onChange(option)}
-            style={[styles.selectorOption, selected && styles.selectorOptionSelected]}
+            style={[
+              styles.selectorOption,
+              compact && { minWidth: 34, minHeight: 38, borderRadius: 19 },
+              selected && styles.selectorOptionSelected,
+            ]}
           >
             <ActivityIcon
               name={option === 'night' ? 'moon' : 'sun'}
@@ -79,9 +95,14 @@ export function RadialCycle({
   onPressRecord,
   onPressAnchor,
   maxSize = 440,
+  presentation = 'home',
+  onNextCycle,
+  nextCycleDisabled = false,
   view,
 }: RadialCycleProps) {
   const theme = useActivityTheme();
+  const history = presentation === 'history';
+  if (history) view = historyDialView(view);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const clusterSheet = useRef<TrueSheet>(null);
   const pendingRecord = useRef<ProjectedRadialActivity | null>(null);
@@ -118,12 +139,14 @@ export function RadialCycle({
       >
         <Path
           d={arcPath(
-            CYCLE_START_ANGLE_DEGREES,
-            CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES,
+            history ? HISTORY_START_ANGLE : CYCLE_START_ANGLE_DEGREES,
+            history
+              ? HISTORY_START_ANGLE + HISTORY_SWEEP_ANGLE
+              : CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES,
             theme.night ? 135 : 126,
           )}
           fill="none"
-          stroke={theme.track}
+          stroke={history ? '#2B294A' : theme.track}
           strokeLinecap="round"
           strokeWidth={theme.night ? 30 : 12}
         />
@@ -178,16 +201,25 @@ export function RadialCycle({
           const start = arc.start.angleDegrees;
           const actualSweep = Math.max(0, arc.end.angleDegrees - start);
           const visualSweep = Math.max(0.8, actualSweep);
+          if (history && record.kind !== 'nap' && actualSweep < 18) return null;
           if (theme.night)
             return (
               <Path
                 key={`arc:${record.id}`}
-                d={bandPath(start, start + Math.max(0.8, actualSweep), radius, 22)}
-                fill={radialActivityColor(record.kind, true)}
+                d={bandPath(start, start + Math.max(0.8, actualSweep), radius, history ? 28 : 22)}
+                fill={
+                  history
+                    ? historyActivityColor(record.kind)
+                    : radialActivityColor(record.kind, true)
+                }
                 fillOpacity={0.12}
-                stroke={radialActivityColor(record.kind, true)}
-                strokeWidth={1.2}
-                strokeOpacity={0.65}
+                stroke={
+                  history
+                    ? historyActivityColor(record.kind)
+                    : radialActivityColor(record.kind, true)
+                }
+                strokeWidth={history ? 1.8 : 1.2}
+                strokeOpacity={history ? 1 : 0.65}
                 strokeDasharray={arc.active ? '2 3' : undefined}
               />
             );
@@ -236,95 +268,110 @@ export function RadialCycle({
         })}
       </Svg>
 
-      {clusterRadialTargets(
-        view.records,
-        (2 * Math.asin(22 / ((theme.night ? 93 : 135) * scale)) * 180) / Math.PI,
-      ).map((group) => {
-        const first = group[0];
-        const token = first.projection.token;
-        const arc = first.projection.arc;
-        const angle = token?.projection.angleDegrees ?? (arc ? arc.start.angleDegrees : 0);
-        const nearAnchor =
-          theme.night &&
-          projection.anchors.some(
-            (anchor) =>
-              anchor.recordId !== null && Math.abs(anchor.projection.angleDegrees - angle) < 28,
-          );
-        // Keep the true time angle. A second radial rail separates nearby anchors and care records.
-        const point = polarPoint(angle, nearAnchor ? 93 : laneRadius(first.projection.lane));
-        return (
-          <RecordTarget
-            disabled={disabled}
-            key={`token:${first.id}`}
-            label={
-              group.length === 1
-                ? activityAccessibilityLabel(first, projection.cycle.timezone)
-                : `${group.length} activities near ${formatClock(first.occurredAt, projection.cycle.timezone)}. Choose a record`
-            }
-            left={point.x * scale - 22}
-            top={point.y * scale - 22}
-            onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
-          >
-            {group.length === 1 ? (
-              <ActivityBadge
-                icon={first.kind}
-                color={radialActivityColor(first.kind, theme.night)}
-                size={36}
-                active={first.status === 'active'}
-              />
-            ) : (
-              <View style={styles.groupTarget}>
-                <ActivityBadge
-                  icon={first.kind}
-                  color={radialActivityColor(first.kind, theme.night)}
-                  size={36}
-                  active={group.some((record) => record.status === 'active')}
-                />
-                {group.some((record) => record.kind !== first.kind) ? (
-                  <View style={styles.groupSecondary}>
+      {history ? (
+        <HistoryDialMarkers
+          view={view}
+          size={size}
+          disabled={disabled}
+          onPressRecord={onPressRecord}
+          onPressAnchor={onPressAnchor}
+        />
+      ) : null}
+      {!history
+        ? clusterRadialTargets(
+            view.records,
+            (2 * Math.asin(22 / ((theme.night ? 93 : 135) * scale)) * 180) / Math.PI,
+          ).map((group) => {
+            const first = group[0];
+            const token = first.projection.token;
+            const arc = first.projection.arc;
+            const angle = token?.projection.angleDegrees ?? (arc ? arc.start.angleDegrees : 0);
+            const nearAnchor =
+              theme.night &&
+              projection.anchors.some(
+                (anchor) =>
+                  anchor.recordId !== null && Math.abs(anchor.projection.angleDegrees - angle) < 28,
+              );
+            // Keep the true time angle. A second radial rail separates nearby anchors and care records.
+            const point = polarPoint(angle, nearAnchor ? 93 : laneRadius(first.projection.lane));
+            return (
+              <RecordTarget
+                disabled={disabled}
+                key={`token:${first.id}`}
+                label={
+                  group.length === 1
+                    ? activityAccessibilityLabel(first, projection.cycle.timezone)
+                    : `${group.length} activities near ${formatClock(first.occurredAt, projection.cycle.timezone)}. Choose a record`
+                }
+                left={point.x * scale - 22}
+                top={point.y * scale - 22}
+                onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
+              >
+                {group.length === 1 ? (
+                  <ActivityBadge
+                    icon={first.kind}
+                    color={radialActivityColor(first.kind, theme.night)}
+                    size={36}
+                    active={first.status === 'active'}
+                  />
+                ) : (
+                  <View style={styles.groupTarget}>
+                    <ActivityBadge
+                      icon={first.kind}
+                      color={radialActivityColor(first.kind, theme.night)}
+                      size={36}
+                      active={group.some((record) => record.status === 'active')}
+                    />
+                    {group.some((record) => record.kind !== first.kind) ? (
+                      <View style={styles.groupSecondary}>
+                        <ActivityIcon
+                          name={
+                            group.find((record) => record.kind !== first.kind)?.kind ?? first.kind
+                          }
+                          color={theme.text}
+                          size={19}
+                        />
+                      </View>
+                    ) : null}
+                    <View style={styles.groupCount}>
+                      <Text style={styles.tokenText}>{group.length}</Text>
+                    </View>
+                  </View>
+                )}
+              </RecordTarget>
+            );
+          })
+        : null}
+      {!history
+        ? projection.anchors
+            .filter((anchor) => anchor.recordId !== null)
+            .map((anchor) => {
+              const point = polarPoint(anchor.projection.angleDegrees, 139);
+              return (
+                <RecordTarget
+                  key={`anchor:${anchor.boundary}:${anchor.at}`}
+                  disabled={disabled}
+                  label={`Edit ${anchorLabel(anchor.kind)}, ${formatClock(anchor.at, projection.cycle.timezone)}`}
+                  left={point.x * scale - 22}
+                  top={point.y * scale - 22}
+                  onPress={() => {
+                    if (anchor.recordId) onPressAnchor?.(anchor.recordId);
+                  }}
+                >
+                  <View style={[styles.anchorTarget, { borderColor: '#D9A36C' }]}>
                     <ActivityIcon
-                      name={group.find((record) => record.kind !== first.kind)?.kind ?? first.kind}
-                      color={theme.text}
-                      size={19}
+                      name={anchor.kind === 'bedtime' ? 'bedtime' : 'wake'}
+                      color="#D9A36C"
+                      size={theme.night ? 30 : 19}
                     />
                   </View>
-                ) : null}
-                <View style={styles.groupCount}>
-                  <Text style={styles.tokenText}>{group.length}</Text>
-                </View>
-              </View>
-            )}
-          </RecordTarget>
-        );
-      })}
-      {projection.anchors
-        .filter((anchor) => anchor.recordId !== null)
-        .map((anchor) => {
-          const point = polarPoint(anchor.projection.angleDegrees, 139);
-          return (
-            <RecordTarget
-              key={`anchor:${anchor.boundary}:${anchor.at}`}
-              disabled={disabled}
-              label={`Edit ${anchorLabel(anchor.kind)}, ${formatClock(anchor.at, projection.cycle.timezone)}`}
-              left={point.x * scale - 22}
-              top={point.y * scale - 22}
-              onPress={() => {
-                if (anchor.recordId) onPressAnchor?.(anchor.recordId);
-              }}
-            >
-              <View style={[styles.anchorTarget, { borderColor: '#D9A36C' }]}>
-                <ActivityIcon
-                  name={anchor.kind === 'bedtime' ? 'bedtime' : 'wake'}
-                  color="#D9A36C"
-                  size={theme.night ? 30 : 19}
-                />
-              </View>
-              <Text numberOfLines={1} style={styles.anchorTime}>
-                {formatClock(anchor.at, projection.cycle.timezone)}
-              </Text>
-            </RecordTarget>
-          );
-        })}
+                  <Text numberOfLines={1} style={styles.anchorTime}>
+                    {formatClock(anchor.at, projection.cycle.timezone)}
+                  </Text>
+                </RecordTarget>
+              );
+            })
+        : null}
       {cluster ? (
         <TrueSheet
           ref={clusterSheet}
@@ -373,21 +420,53 @@ export function RadialCycle({
         </TrueSheet>
       ) : null}
 
-      {controls ? <View style={styles.cycleControls}>{controls}</View> : null}
+      {controls ? (
+        <View style={[styles.cycleControls, history && { top: '60%' }]}>{controls}</View>
+      ) : null}
+      {history && onNextCycle ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Next day in history"
+          disabled={disabled || nextCycleDisabled}
+          onPress={onNextCycle}
+          style={{
+            position: 'absolute',
+            top: '78%',
+            left: '50%',
+            marginLeft: -22,
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: nextCycleDisabled ? 0.4 : 1,
+          }}
+        >
+          <ActivityIcon name="chevron-right" color={theme.muted} size={22} />
+        </Pressable>
+      ) : null}
       <View
         accessible
         accessibilityLabel={`${view.kind} cycle. ${status.replace('\n', ' ')}.`}
         accessibilityRole="summary"
         pointerEvents="none"
-        style={styles.centerStatus}
+        style={[styles.centerStatus, history && { top: '27%' }]}
       >
         <Text style={styles.statusLabel}>{centerStatus.label}</Text>
         {centerStatus.value ? (
-          <Text numberOfLines={1} adjustsFontSizeToFit style={styles.status}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={[
+              styles.status,
+              history && { fontSize: 34, lineHeight: 44, letterSpacing: -0.8 },
+            ]}
+          >
             {centerStatus.value}
           </Text>
         ) : null}
-        <Text style={styles.statusHint}>{centerStatus.hint}</Text>
+        {!history || centerStatus.hint ? (
+          <Text style={styles.statusHint}>{centerStatus.hint}</Text>
+        ) : null}
         {projection.overflow.hasOverflow ? (
           <Text style={styles.overflow}>Cycle exceeds 24 hours</Text>
         ) : null}
