@@ -1,5 +1,8 @@
 # ADR 0004: Use Napper as the phase-one authoritative store
 
+The initial Nursing slice described here is extended by [ADR 0005](0005-shared-care-service.md):
+provider-neutral service/session ports and the connected Day/Night care home.
+
 Status: accepted direction; first Nursing slice implemented, awaiting live/phone acceptance
 Date: 2026-10-13
 

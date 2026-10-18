@@ -1,0 +1,505 @@
+import { TrueSheet } from '@lodev09/react-native-true-sheet';
+import Slider from '@react-native-community/slider';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
+import { formatLiveDuration } from '@/features/naps/nap-clock';
+import { ActivityTimestampField } from '@/features/shared/activity-drawer/activity-timestamp-field';
+import { ActivityIcon } from '@/features/shared/icons/activity-icon';
+import { activityDuration } from './sleep-state';
+import type {
+  ActivityReference,
+  Breast,
+  CareActivity,
+  CareCommand,
+  CareKind,
+  DiaperType,
+  PastActivity,
+} from './contracts';
+
+export const activityLabels: Record<CareKind, string> = {
+  bedtime: 'Night sleep',
+  'wake-up': 'Wake up',
+  nap: 'Nap',
+  'night-waking': 'Night waking',
+  nursing: 'Nursing',
+  diaper: 'Diaper',
+  medicine: 'Medicine',
+};
+export const activityIcons: Record<CareKind, string> = {
+  bedtime: 'night',
+  'wake-up': 'wake',
+  nap: 'nap',
+  'night-waking': 'night-waking',
+  nursing: 'nursing',
+  diaper: 'diaper',
+  medicine: 'medicine',
+};
+export const activityColors: Record<CareKind, string> = {
+  bedtime: '#5B4C94',
+  'wake-up': '#D29B57',
+  nap: '#7367B9',
+  'night-waking': '#52728A',
+  nursing: '#B35D7D',
+  diaper: '#47735A',
+  medicine: '#A65F35',
+};
+type Transition =
+  | 'bedtime'
+  | 'start-nap'
+  | 'wake-up'
+  | 'start-night-waking'
+  | 'stop-nap'
+  | 'fall-asleep';
+export type ActivitySheetIntent =
+  | { type: 'transition'; command: Transition; expected?: ActivityReference }
+  | { type: 'edit'; activity: Exclude<CareActivity, { kind: 'nursing' }> }
+  | { type: 'past'; at: string; kind?: CareKind }
+  | { type: 'care'; kind: 'diaper' | 'medicine'; at: string };
+interface Props {
+  intent: ActivitySheetIntent;
+  now: Date;
+  timezone: string;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onExecute: (command: CareCommand) => void;
+}
+const transitionKind = (type: Transition): CareKind =>
+  type === 'bedtime'
+    ? 'bedtime'
+    : type === 'wake-up'
+      ? 'wake-up'
+      : type === 'start-nap' || type === 'stop-nap'
+        ? 'nap'
+        : 'night-waking';
+
+/** Native drawer for sleep, care records and historical creation; timestamps remain stable while ticking. */
+export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onExecute }: Props) {
+  const record = intent.type === 'edit' ? intent.activity : null;
+  const initial = useRef({
+    start: new Date(record?.startedAt ?? ('at' in intent ? intent.at : now)),
+    end: new Date(
+      record?.endedAt ??
+        (intent.type === 'past' ? Math.min(now.getTime(), Date.parse(intent.at) + 1800000) : now),
+    ),
+  }).current;
+  const [kind, setKind] = useState<CareKind>(
+    record?.kind ??
+      (intent.type === 'transition'
+        ? transitionKind(intent.command)
+        : intent.type === 'care'
+          ? intent.kind
+          : intent.type === 'past'
+            ? (intent.kind ?? 'nap')
+            : 'nap'),
+  );
+  const [start, setStart] = useState(initial.start);
+  const [end, setEnd] = useState(initial.end);
+  const [adjusted, setAdjusted] = useState(false);
+  const [diaper, setDiaper] = useState<DiaperType>(
+    record?.kind === 'diaper' ? (record.diaperType ?? 'wet') : 'wet',
+  );
+  const [note, setNote] = useState(record?.kind === 'medicine' ? (record.note ?? '') : '');
+  const [left, setLeft] = useState(0);
+  const [last, setLast] = useState<Breast | null>(null);
+  const [picker, setPicker] = useState<{ field: 'start' | 'end'; mode: 'date' | 'time' } | null>(
+    null,
+  );
+  const [pickerError, setPickerError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(intent.type === 'past' || intent.type === 'edit');
+  const sheet = useRef<TrueSheet>(null);
+  const opening = useRef(false);
+  const { height } = useWindowDimensions();
+  const timed = kind === 'nap' || kind === 'night-waking' || kind === 'nursing';
+  const active = record !== null && record.status !== 'completed';
+  const total = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+  const interval = timed && !active && intent.type !== 'transition';
+  const valid =
+    start <= now &&
+    (!interval || (end >= start && end <= now)) &&
+    (kind !== 'nursing' ||
+      (last !== null &&
+        left <= total &&
+        (total === 0 || (last === 'LEFT' ? left > 0 : total - left > 0))));
+  const title =
+    intent.type === 'transition' && intent.command === 'fall-asleep'
+      ? 'Fell asleep again'
+      : intent.type === 'past'
+        ? 'Add past activity'
+        : `${intent.type === 'edit' ? 'Edit ' : ''}${activityLabels[kind]}`;
+  const format = (at: Date) =>
+    new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone,
+    }).format(at);
+  const openTime = async () => {
+    if (opening.current || busy) return;
+    opening.current = true;
+    try {
+      await sheet.current?.resize(1);
+      setExpanded(true);
+      setPicker({ field: 'start', mode: 'time' });
+    } catch {
+      setPickerError('The time editor could not be opened. Close and reopen the drawer.');
+    } finally {
+      opening.current = false;
+    }
+  };
+  const pick = (event: DateTimePickerEvent, selected?: Date) => {
+    const current = picker;
+    if (Platform.OS === 'android') setPicker(null);
+    if (!selected || !current || event.type === 'dismissed') return;
+    try {
+      const previous = current.field === 'start' ? start : end;
+      const next =
+        current.mode === 'date'
+          ? mergeDatePart(previous, selected, timezone)
+          : mergeTimePart(previous, selected, timezone);
+      if (current.field === 'start') setStart(next);
+      else setEnd(next);
+      setAdjusted(true);
+      setPickerError(null);
+    } catch {
+      setPickerError('Choose another date or time.');
+    }
+  };
+  const save = () => {
+    if (!valid || busy || pickerError) return;
+    if (intent.type === 'transition') {
+      const at = (adjusted ? start : new Date()).toISOString();
+      if (intent.command === 'bedtime' || intent.command === 'start-nap')
+        onExecute({ type: intent.command, at });
+      else if (intent.expected) onExecute({ type: intent.command, expected: intent.expected, at });
+    } else if (intent.type === 'edit') {
+      onExecute({
+        type: 'edit-activity',
+        expected: intent.activity,
+        startedAt: start.toISOString(),
+        ...(interval ? { endedAt: end.toISOString() } : {}),
+        ...(kind === 'diaper' ? { diaperType: diaper } : {}),
+        ...(kind === 'medicine' ? { note } : {}),
+      });
+    } else {
+      const startedAt = (intent.type === 'care' && !adjusted ? new Date() : start).toISOString();
+      let activity: PastActivity;
+      if (kind === 'nursing') {
+        if (!last) return;
+        activity = {
+          kind,
+          startedAt,
+          endedAt: end.toISOString(),
+          leftSeconds: left,
+          lastBreast: last,
+        };
+      } else if (kind === 'nap' || kind === 'night-waking')
+        activity = { kind, startedAt, endedAt: end.toISOString() };
+      else if (kind === 'diaper') activity = { kind, startedAt, diaperType: diaper };
+      else if (kind === 'medicine') activity = { kind, startedAt, note };
+      else activity = { kind, startedAt };
+      onExecute({ type: 'record-past', activity });
+    }
+  };
+  const activeStop =
+    active && (record.kind === 'nap' || record.kind === 'night-waking')
+      ? () =>
+          onExecute({
+            type: record.kind === 'nap' ? 'stop-nap' : 'fall-asleep',
+            expected: record,
+            at: new Date().toISOString(),
+          })
+      : null;
+  return (
+    <TrueSheet
+      ref={sheet}
+      initialDetentIndex={intent.type === 'past' || intent.type === 'edit' ? 1 : 0}
+      detents={[
+        Math.min(0.6, (kind === 'medicine' ? 400 : 330) / height),
+        Math.min(0.9, 710 / height),
+      ]}
+      scrollable
+      draggable
+      dismissible
+      backgroundColor="#FFFFFF"
+      grabberOptions={{ color: '#C5BBB3', width: 42, adaptive: false }}
+      accessibilityOptions={{ paneTitle: title, grabberLabel: `${title} drawer` }}
+      onDidDismiss={onClose}
+      onDidPresent={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
+      onDetentChange={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
+    >
+      <ScrollView
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.content}
+      >
+        <View style={styles.hero}>
+          <ActivityIcon name={activityIcons[kind]} color={activityColors[kind]} size={32} />
+          <Text accessibilityRole="header" style={styles.title}>
+            {title}
+          </Text>
+          {!expanded && active && (record.kind === 'nap' || record.kind === 'night-waking') ? (
+            <Text style={styles.timer}>{formatLiveDuration(activityDuration(record, now))}</Text>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Set ${activityLabels[kind]} time`}
+              disabled={busy}
+              onPress={() => void openTime()}
+            >
+              <Text style={styles.timer}>{format(start)}</Text>
+            </Pressable>
+          )}
+        </View>
+        {intent.type === 'past' ? (
+          <View style={styles.choices}>
+            {(Object.keys(activityLabels) as CareKind[]).map((choice) => (
+              <Pressable
+                key={choice}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: kind === choice }}
+                disabled={busy}
+                onPress={() => {
+                  setKind(choice);
+                  setPicker(null);
+                }}
+                style={[styles.choice, kind === choice && styles.selected]}
+              >
+                <Text style={styles.choiceText}>{activityLabels[choice]}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {expanded ? (
+          <>
+            <ActivityTimestampField
+              label={intent.type === 'transition' ? 'Time' : 'Start'}
+              value={start}
+              timezone={timezone}
+              maximumDate={now}
+              editable={!busy}
+              pickerMode={picker?.field === 'start' ? picker.mode : null}
+              onPick={(mode) => setPicker({ field: 'start', mode })}
+              onDone={() => setPicker(null)}
+              onPickerChange={pick}
+            />
+            {interval ? (
+              <ActivityTimestampField
+                label="End"
+                value={end}
+                timezone={timezone}
+                maximumDate={now}
+                editable={!busy}
+                pickerMode={picker?.field === 'end' ? picker.mode : null}
+                onPick={(mode) => setPicker({ field: 'end', mode })}
+                onDone={() => setPicker(null)}
+                onPickerChange={pick}
+              />
+            ) : active ? (
+              <Text style={styles.muted}>End · Running</Text>
+            ) : null}
+          </>
+        ) : null}
+        {kind === 'diaper' ? (
+          <View style={styles.choices}>
+            {(['dry', 'wet', 'dirty', 'mixed'] as const).map((choice) => (
+              <Pressable
+                key={choice}
+                accessibilityRole="radio"
+                accessibilityLabel={`${choice} diaper`}
+                accessibilityState={{ checked: diaper === choice }}
+                disabled={busy}
+                onPress={() => setDiaper(choice)}
+                style={[styles.choice, diaper === choice && styles.selected]}
+              >
+                <Text style={styles.choiceText}>{choice[0].toUpperCase() + choice.slice(1)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {kind === 'medicine' ? (
+          <TextInput
+            accessibilityLabel="Medicine note"
+            multiline
+            placeholder="Medicine / note"
+            value={note}
+            editable={!busy}
+            onChangeText={setNote}
+            style={styles.note}
+          />
+        ) : null}
+        {kind === 'nursing' ? (
+          <>
+            <Text style={styles.muted}>
+              Left {formatLiveDuration(left * 1000)} · Right{' '}
+              {formatLiveDuration(Math.max(0, total - left) * 1000)}
+            </Text>
+            <Slider
+              accessibilityLabel="Past Nursing Left seconds"
+              minimumValue={0}
+              maximumValue={total}
+              step={1}
+              value={Math.min(left, total)}
+              disabled={busy}
+              onValueChange={setLeft}
+            />
+            <Text style={styles.muted}>Last breast used</Text>
+            <View style={styles.choices}>
+              {(['LEFT', 'RIGHT'] as const).map((side) => (
+                <Pressable
+                  key={side}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`Last breast ${side}`}
+                  accessibilityState={{ checked: last === side }}
+                  disabled={busy}
+                  onPress={() => setLast(side)}
+                  style={[styles.choice, last === side && styles.selected]}
+                >
+                  <Text style={styles.choiceText}>{side === 'LEFT' ? 'Left' : 'Right'}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : null}
+        {!valid ? (
+          <Text accessibilityRole="alert" style={styles.error}>
+            {kind === 'nursing' && last === null
+              ? 'Choose the last breast used.'
+              : 'Keep Start and End in order and in the past, with a valid breast split.'}
+          </Text>
+        ) : null}
+        {pickerError || error ? (
+          <Text accessibilityRole="alert" style={styles.error}>
+            {pickerError ?? error}
+          </Text>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            active ? 'Save start time' : intent.type === 'transition' ? title : 'Save activity'
+          }
+          disabled={busy || !valid || pickerError !== null}
+          onPress={save}
+          style={[
+            styles.save,
+            { backgroundColor: activityColors[kind] },
+            (busy || !valid) && styles.disabled,
+          ]}
+        >
+          <ActivityIcon
+            name={
+              intent.type === 'transition' &&
+              (intent.command === 'stop-nap' || intent.command === 'fall-asleep')
+                ? 'stop'
+                : 'check'
+            }
+          />
+          <Text style={styles.white}>
+            {active ? 'Save start time' : intent.type === 'transition' ? title : 'Save'}
+          </Text>
+        </Pressable>
+        {record?.kind === 'nap' && active ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
+            disabled={busy}
+            onPress={() =>
+              onExecute({
+                type: record.status === 'paused' ? 'resume-nap' : 'pause-nap',
+                expected: record,
+                at: new Date().toISOString(),
+              })
+            }
+            style={styles.choice}
+          >
+            <Text style={styles.choiceText}>
+              {record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {activeStop ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={record?.kind === 'nap' ? 'Stop Nap' : 'Fell asleep again'}
+            disabled={busy}
+            onPress={activeStop}
+            style={styles.stop}
+          >
+            <ActivityIcon name="stop" color={activityColors[kind]} />
+          </Pressable>
+        ) : null}
+        {record?.kind === 'nap' &&
+        record.status === 'completed' &&
+        record.endedAt &&
+        now.getTime() - Date.parse(record.endedAt) <= 3600000 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Continue Nap"
+            disabled={busy}
+            onPress={() =>
+              onExecute({ type: 'continue-nap', expected: record, at: new Date().toISOString() })
+            }
+            style={styles.choice}
+          >
+            <Text style={styles.choiceText}>Continue Nap</Text>
+          </Pressable>
+        ) : null}
+      </ScrollView>
+    </TrueSheet>
+  );
+}
+const styles = StyleSheet.create({
+  content: { padding: 20, paddingBottom: 32, gap: 16 },
+  hero: { alignItems: 'center', gap: 10 },
+  title: { fontSize: 21, fontWeight: '700', color: '#292724' },
+  timer: { fontSize: 36, color: '#292724', fontWeight: '700', fontVariant: ['tabular-nums'] },
+  choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  choice: {
+    padding: 12,
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: '#F3F1EE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selected: { backgroundColor: '#E6DFF6', borderWidth: 1, borderColor: '#7367B9' },
+  choiceText: { fontSize: 14, color: '#554878', fontWeight: '600' },
+  muted: { color: '#746F68', fontSize: 13 },
+  note: {
+    minHeight: 90,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#F3F1EE',
+    textAlignVertical: 'top',
+    fontSize: 16,
+    color: '#292724',
+  },
+  save: {
+    minHeight: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  white: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  stop: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F1EE',
+    borderRadius: 16,
+  },
+  disabled: { opacity: 0.4 },
+  error: { color: '#A64444', fontSize: 14 },
+});

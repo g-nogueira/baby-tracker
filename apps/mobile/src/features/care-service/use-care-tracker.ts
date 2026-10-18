@@ -1,82 +1,105 @@
-import { randomUUID } from 'expo-crypto';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calendar-day';
-import { NapperClient } from './client';
-import { type Breast, type NapperBaby, NapperError, type WireLog } from './contracts';
-import type { NursingCommand } from './nursing';
-import { napperDeviceId, SecureNapperCredentials } from './secure-credentials';
-import { NapperTracker, type MutationResult } from './tracker';
+import {
+  CareServiceError,
+  emptySnapshot,
+  type CareCommand,
+  type CareProfile,
+  type CareProvider,
+  type CareSnapshot,
+} from './contracts';
+
+export type CareProviderFactory = (timezone: string) => Promise<CareProvider>;
 
 interface State {
   stage: 'loading' | 'email' | 'otp' | 'profiles' | 'ready';
-  babies: NapperBaby[];
-  baby: NapperBaby | null;
-  current: WireLog[];
-  history: WireLog[];
+  babies: CareProfile[];
+  baby: CareProfile | null;
+  current: CareSnapshot;
+  history: CareSnapshot;
   updatedAt: Date | null;
   error: string | null;
   date: string;
   busy: boolean;
   refreshing: boolean;
+  readNeedsRefresh: boolean;
 }
 export const deviceTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 /** Owns asynchronous reads and invalidates responses from an old profile/date/session. */
-export function useNapper() {
+export function useCareTracker(createProvider: CareProviderFactory) {
   const timezone = useRef(deviceTimezone()).current;
   const [state, setState] = useState<State>(() => ({
     stage: 'loading',
     babies: [],
     baby: null,
-    current: [],
-    history: [],
+    current: emptySnapshot(),
+    history: emptySnapshot(),
     updatedAt: null,
     error: null,
     date: calendarDayForInstant(new Date(), timezone),
     busy: false,
     refreshing: false,
+    readNeedsRefresh: false,
   }));
   const stateRef = useRef(state);
   stateRef.current = state;
-  const tracker = useRef<NapperTracker | null>(null);
+  const tracker = useRef<CareProvider | null>(null);
   const busy = useRef(false);
+  const followingToday = useRef(true);
   const generation = useRef(0);
   const mounted = useRef(true);
-  const startup = useRef<Promise<NapperTracker> | null>(null);
+  const startup = useRef<Promise<CareProvider> | null>(null);
   const fail = useCallback((error: unknown) => {
     if (!mounted.current) return;
     setState((s) => ({
       ...s,
+      stage: s.stage === 'loading' ? 'email' : s.stage,
       error:
-        error instanceof NapperError
+        error instanceof CareServiceError
           ? error.message
           : 'This action could not be completed. Try again.',
-      ...(error instanceof NapperError && error.code === 'auth'
-        ? { stage: 'email' as const, baby: null, current: [], history: [], updatedAt: null }
+      ...(error instanceof CareServiceError && error.code === 'auth'
+        ? {
+            stage: 'email' as const,
+            baby: null,
+            current: emptySnapshot(),
+            history: emptySnapshot(),
+            updatedAt: null,
+          }
         : {}),
     }));
   }, []);
   const refresh = useCallback(
-    async (manual = false, baby = stateRef.current.baby, date = stateRef.current.date) => {
+    async (manual = false, baby = stateRef.current.baby, requestedDate?: string) => {
       const service = tracker.current;
       if (!service || !baby || busy.current) return;
+      const date =
+        requestedDate ??
+        (followingToday.current
+          ? calendarDayForInstant(new Date(), timezone)
+          : stateRef.current.date);
       const nonce = ++generation.current;
       setState((s) => ({ ...s, refreshing: true }));
       try {
-        const current = manual ? await service.reconcile(baby.id) : await service.current(baby.id);
+        const current = manual
+          ? await service.care.reconcile(baby.id)
+          : await service.care.current(baby.id);
         const history =
           date === calendarDayForInstant(new Date(), timezone)
             ? current
-            : await service.history(baby.id, date);
+            : await service.care.history(baby.id, date);
         if (mounted.current && nonce === generation.current)
           setState((s) => ({
             ...s,
             current,
             history,
+            date,
             updatedAt: new Date(),
             error: null,
             stage: 'ready',
             refreshing: false,
+            readNeedsRefresh: false,
           }));
       } catch (error) {
         if (mounted.current && nonce === generation.current) {
@@ -91,20 +114,20 @@ export function useNapper() {
     const service = tracker.current;
     if (!service) return;
     const nonce = ++generation.current;
-    const babies = await service.client.babies();
+    const babies = await service.session.profiles();
     if (!mounted.current || nonce !== generation.current) return;
     const baby =
-      babies.find((b) => b.id === service.client.babyId) ??
+      babies.find((b) => b.id === service.session.selectedProfileId) ??
       (babies.length === 1 ? babies[0] : null);
-    if (baby) await service.client.selectBaby(baby.id);
+    if (baby) await service.session.selectProfile(baby.id);
     if (!mounted.current || nonce !== generation.current) return;
     setState((s) => ({
       ...s,
       babies,
       baby,
       stage: baby ? 'ready' : 'profiles',
-      current: [],
-      history: [],
+      current: emptySnapshot(),
+      history: emptySnapshot(),
       updatedAt: null,
       error: null,
     }));
@@ -112,18 +135,13 @@ export function useNapper() {
   }, [refresh]);
   useEffect(() => {
     mounted.current = true;
-    startup.current ??= (async () =>
-      new NapperTracker(
-        new NapperClient(new SecureNapperCredentials(), await napperDeviceId()),
-        randomUUID,
-        timezone,
-      ))();
+    startup.current ??= createProvider(timezone);
     const nonce = ++generation.current;
     void startup.current
       .then(async (service) => {
         if (!mounted.current || nonce !== generation.current) return;
         tracker.current = service;
-        if (await service.client.restore()) {
+        if (await service.session.restore()) {
           if (mounted.current && nonce === generation.current) await profiles();
         } else if (mounted.current && nonce === generation.current)
           setState((s) => ({ ...s, stage: 'email' }));
@@ -133,7 +151,7 @@ export function useNapper() {
       mounted.current = false;
       generation.current++;
     };
-  }, [fail, profiles, timezone]);
+  }, [createProvider, fail, profiles, timezone]);
   useEffect(() => {
     if (state.stage !== 'ready' || !state.baby) return;
     const interval = setInterval(() => void refresh(), 30000);
@@ -145,14 +163,14 @@ export function useNapper() {
       subscription.remove();
     };
   }, [state.stage, state.baby, refresh]);
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: (nonce: number) => Promise<void>) => {
     if (busy.current) return false;
     busy.current = true;
     const nonce = ++generation.current;
     setState((s) => ({ ...s, busy: true, error: null, refreshing: false }));
     try {
-      await action();
-      return true;
+      await action(nonce);
+      return mounted.current && nonce === generation.current;
     } catch (error) {
       if (nonce === generation.current) fail(error);
       return false;
@@ -161,28 +179,45 @@ export function useNapper() {
       if (mounted.current) setState((s) => ({ ...s, busy: false }));
     }
   };
-  const mutate = async (
-    action: (service: NapperTracker, babyId: string) => Promise<MutationResult>,
-  ) => {
+  const execute = async (command: CareCommand) => {
     const service = tracker.current;
     const baby = stateRef.current.baby;
     const date = stateRef.current.date;
     if (!service || !baby) return false;
+    if (stateRef.current.readNeedsRefresh || service.care.needsRefresh) {
+      fail(
+        new CareServiceError(
+          'uncertain',
+          'Refresh and review the last save before making another change.',
+        ),
+      );
+      return false;
+    }
     const nonce = generation.current + 1;
     return run(async () => {
-      const result = await action(service, baby.id);
-      const current = result.current;
+      await service.care.execute(baby.id, command);
+      let current: CareSnapshot;
+      try {
+        current = await service.care.current(baby.id);
+      } catch {
+        if (mounted.current && nonce === generation.current)
+          setState((s) => ({
+            ...s,
+            readNeedsRefresh: true,
+            error:
+              'The activity was saved. Refresh the shared records before making another change.',
+          }));
+        return;
+      }
       let history = stateRef.current.history;
       let readError: string | null = null;
       try {
         history =
           date === calendarDayForInstant(new Date(), timezone)
             ? current
-            : result.source === 'day' && date === result.date
-              ? result.logs
-              : await service.history(baby.id, date);
+            : await service.care.history(baby.id, date);
       } catch {
-        readError = 'The feed was saved. This history view could not be refreshed.';
+        readError = 'The activity was saved. This history view could not be refreshed.';
       }
       if (mounted.current && nonce === generation.current)
         setState((s) => ({ ...s, current, history, updatedAt: new Date(), error: readError }));
@@ -191,7 +226,15 @@ export function useNapper() {
   return {
     ...state,
     timezone,
-    needsRefresh: tracker.current?.writeNeedsRefresh ?? false,
+    providerName: tracker.current?.name ?? 'Shared service',
+    execute,
+    needsRefresh: state.readNeedsRefresh || (tracker.current?.care.needsRefresh ?? false),
+    showProfiles: () => {
+      if (!busy.current) {
+        generation.current++;
+        setState((s) => ({ ...s, stage: 'profiles', refreshing: false }));
+      }
+    },
     refresh: () => refresh(true),
     enterExistingCode: () => {
       if (busy.current || stateRef.current.stage !== 'email') return;
@@ -199,18 +242,20 @@ export function useNapper() {
       setState((s) => ({ ...s, stage: 'otp', error: null }));
     },
     sendOtp: (email: string) =>
-      run(async () => {
+      run(async (nonce) => {
         const service = tracker.current;
-        if (!service) throw new NapperError('network', 'Restart the app and try again.');
-        await service.client.sendOtp(email);
-        setState((s) => ({ ...s, stage: 'otp' }));
+        if (!service) throw new CareServiceError('network', 'Restart the app and try again.');
+        await service.session.sendCode(email);
+        if (mounted.current && nonce === generation.current)
+          setState((s) => ({ ...s, stage: 'otp' }));
       }),
     login: async (email: string, otp: string) => {
-      const success = await run(async () => {
+      const success = await run(async (nonce) => {
         const service = tracker.current;
-        if (!service) throw new NapperError('network', 'Restart the app and try again.');
-        await service.client.login(email, otp);
-        setState((s) => ({ ...s, stage: 'profiles' }));
+        if (!service) throw new CareServiceError('network', 'Restart the app and try again.');
+        await service.session.login(email, otp);
+        if (mounted.current && nonce === generation.current)
+          setState((s) => ({ ...s, stage: 'profiles' }));
       });
       if (success)
         try {
@@ -227,16 +272,18 @@ export function useNapper() {
         fail(error);
       }
     },
-    selectBaby: async (baby: NapperBaby) => {
-      const selected = await run(async () => {
-        await tracker.current?.client.selectBaby(baby.id);
+    selectBaby: async (baby: CareProfile) => {
+      const selected = await run(async (nonce) => {
+        await tracker.current?.session.selectProfile(baby.id);
+        if (!mounted.current || nonce !== generation.current) return;
         setState((s) => ({
           ...s,
           baby,
           stage: 'ready',
-          current: [],
-          history: [],
+          current: emptySnapshot(),
+          history: emptySnapshot(),
           updatedAt: null,
+          readNeedsRefresh: false,
         }));
       });
       if (selected) await refresh(false, baby);
@@ -248,29 +295,27 @@ export function useNapper() {
         stage: 'email',
         babies: [],
         baby: null,
-        current: [],
-        history: [],
+        current: emptySnapshot(),
+        history: emptySnapshot(),
         updatedAt: null,
+        readNeedsRefresh: false,
         error: null,
       }));
       try {
-        await tracker.current?.client.signOut();
+        await tracker.current?.session.signOut();
       } catch (error) {
         fail(error);
       }
     },
     setDate: (date: string) => {
+      if (busy.current) return;
+      followingToday.current = date === calendarDayForInstant(new Date(), timezone);
       generation.current++;
-      setState((s) => ({ ...s, date, history: [], error: null }));
+      setState((s) => ({ ...s, date, history: emptySnapshot(), error: null }));
       void refresh(false, stateRef.current.baby, date);
     },
     today: calendarDayForInstant(new Date(), timezone),
     previousDate: () => shiftCalendarDay(state.date, -1),
-    start: (side: Breast, at: Date) => mutate((service, babyId) => service.start(babyId, side, at)),
-    change: (log: WireLog, command: NursingCommand) =>
-      mutate((service, babyId) => service.change(babyId, log, command)),
-    correct: (log: WireLog, start: Date, end: Date, left: number, last: Breast) =>
-      mutate((service, babyId) => service.correct(babyId, log, start, end, left, last)),
     clearError: () => setState((s) => ({ ...s, error: null })),
   };
 }

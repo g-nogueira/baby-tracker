@@ -125,7 +125,11 @@ type UndoState =
 /**
  * Displays the nap timeline for the selected day and provides controls for navigating, creating, editing, deleting, and restoring naps.
  */
-export function TodayScreen({ onReturnToNapper }: { onReturnToNapper?: () => void } = {}) {
+export function TodayScreen({
+  onReturnToSharedTracker,
+}: {
+  onReturnToSharedTracker?: () => void;
+} = {}) {
   const insets = useSafeAreaInsets();
   const {
     recordCompleted: recordCompletedSleep,
@@ -609,16 +613,16 @@ export function TodayScreen({ onReturnToNapper }: { onReturnToNapper?: () => voi
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}>
-        {onReturnToNapper ? (
+        {onReturnToSharedTracker ? (
           <View style={styles.localNotice}>
             <Text style={styles.localNoticeTitle}>On-device tracker</Text>
-            <Text>These records are separate from Napper.</Text>
+            <Text>These on-device records are separate from the shared tracker.</Text>
             <Pressable
               accessibilityRole="button"
-              onPress={onReturnToNapper}
+              onPress={onReturnToSharedTracker}
               style={styles.localReturn}
             >
-              <Text>Return to shared Napper records</Text>
+              <Text>Return to shared records</Text>
             </Pressable>
           </View>
         ) : null}
