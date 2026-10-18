@@ -1,3 +1,4 @@
+import { Text } from '@/features/shared/tracking-text';
 import { ActivityMenuSheet } from './activity-menu-sheet';
 import { shortDuration } from './presentation';
 import { minimumLiveControllerStackHeight } from '@/features/shared/live-controller/activity-live-controller-layout';
@@ -17,7 +18,6 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -186,7 +186,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
       id: 'night',
       label: state.night ? 'Wake up' : 'Night sleep',
       meta: state.night ? focusElapsed(state.night.startedAt) : recency('bedtime'),
-      icon: state.night ? 'wake' : 'night',
+      icon: state.night ? 'wake' : 'bedtime',
       color: '#5B4C94',
       disabled: blocked || Boolean(state.nap),
       disabledReason: state.nap ? 'Stop the nap before starting Night sleep.' : null,

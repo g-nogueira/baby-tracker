@@ -1,3 +1,4 @@
+import { Text } from '@/features/shared/tracking-text';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import {
@@ -8,7 +9,7 @@ import {
 import { type ReactNode, useMemo, useRef, useState } from 'react';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import {
@@ -154,7 +155,8 @@ export function RadialCycle({
                 <SvgText
                   fill={theme.muted}
                   fontSize={tick.label === 'Midnight' ? 8 : 7}
-                  fontWeight="500"
+                  fontWeight={theme.night ? 'normal' : '500'}
+                  fontFamily={theme.night ? 'Saans-Medium' : undefined}
                   textAnchor="middle"
                   x={label.x}
                   y={label.y + 3}
@@ -202,7 +204,8 @@ export function RadialCycle({
                 <SvgText
                   fill={theme.muted}
                   fontSize={9}
-                  fontWeight="800"
+                  fontWeight={theme.night ? 'normal' : '800'}
+                  fontFamily={theme.night ? 'Saans-Medium' : undefined}
                   textAnchor="middle"
                   x={label.x}
                   y={label.y + 3}
@@ -275,7 +278,7 @@ export function RadialCycle({
                 <ActivityIcon
                   name={anchor.kind === 'bedtime' ? 'bedtime' : 'wake'}
                   color="#D9A36C"
-                  size={19}
+                  size={theme.night ? 30 : 19}
                 />
               </View>
               <Text numberOfLines={1} style={styles.anchorTime}>

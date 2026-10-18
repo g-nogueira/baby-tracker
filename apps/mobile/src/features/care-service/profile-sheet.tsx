@@ -1,7 +1,8 @@
+import { Text } from '@/features/shared/tracking-text';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { Link } from 'expo-router';
 import { useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 import { SheetToolbar } from './sheet-toolbar';
 import type { useCareTracker } from './use-care-tracker';

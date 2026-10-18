@@ -1,6 +1,7 @@
+import { Text } from '@/features/shared/tracking-text';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { homeQuickActionsLayout } from './home-quick-actions-layout';
 

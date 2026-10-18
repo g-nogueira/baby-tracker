@@ -1,6 +1,7 @@
+import { Text } from '@/features/shared/tracking-text';
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import type { useCareTracker } from './use-care-tracker';
 

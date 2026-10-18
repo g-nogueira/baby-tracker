@@ -1,8 +1,9 @@
+import { Text } from '@/features/shared/tracking-text';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 export type ActivityTimestampPickerMode = 'date' | 'time';
 

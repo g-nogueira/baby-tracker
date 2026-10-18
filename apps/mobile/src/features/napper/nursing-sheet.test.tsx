@@ -235,9 +235,12 @@ it('reports native expansion failures and leaves the time picker closed', async 
   });
   await act(async () => press('Set Nursing start time')?.props.onPress());
   expect(renderer.root.findAllByType('DateTimePicker' as never)).toHaveLength(0);
-  expect(renderer.root.findByProps({ accessibilityRole: 'alert' }).children.join('')).toContain(
-    'Close and reopen Nursing',
-  );
+  expect(
+    renderer.root
+      .findAllByType('Text' as never)
+      .find((node) => node.props.accessibilityRole === 'alert')
+      ?.children.join(''),
+  ).toContain('Close and reopen Nursing');
 });
 it('waits for native expansion and ignores repeated time taps during that transition', async () => {
   let finish: () => void = () => undefined;

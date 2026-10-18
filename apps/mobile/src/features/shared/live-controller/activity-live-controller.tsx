@@ -1,7 +1,8 @@
+import { Text } from '@/features/shared/tracking-text';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { LIVE_CONTROLLER_MIN_HEIGHT } from './activity-live-controller-layout';
 
@@ -59,7 +60,7 @@ export function ActivityLiveController({
             onPress={onOpen}
             style={styles.openIcon}
           >
-            <ActivityIcon name={icon} color={accentColor} size={26} />
+            <ActivityIcon name={icon} color={accentColor} size={34} />
           </Pressable>
           {(['LEFT', 'RIGHT'] as const).map((side) => (
             <Pressable
@@ -99,7 +100,12 @@ export function ActivityLiveController({
               { backgroundColor: theme.night ? 'transparent' : accentColor },
             ]}
           >
-            <ActivityIcon name={icon} color={theme.night ? accentColor : '#FFFFFF'} />
+            <ActivityIcon
+              name={icon}
+              color={theme.night ? accentColor : '#FFFFFF'}
+              size={34}
+              monochrome
+            />
           </View>
           <View style={styles.copy}>
             {!theme.night ? <Text style={styles.title}>{activityLabel}</Text> : null}

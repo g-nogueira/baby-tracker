@@ -1,5 +1,6 @@
+import { Text } from '@/features/shared/tracking-text';
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 

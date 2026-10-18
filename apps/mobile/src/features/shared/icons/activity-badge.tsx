@@ -2,7 +2,7 @@ import { StyleSheet, View } from 'react-native';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityIcon } from './activity-icon';
 
-/** Original line artwork with a quiet ring, shared by actions, records and drawers. */
+/** Supplied activity artwork with the running/completed record ring. */
 export function ActivityBadge({
   icon,
   color,
@@ -25,14 +25,18 @@ export function ActivityBadge({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: `${color}${theme.night ? '20' : '12'}`,
+          backgroundColor: theme.night ? 'transparent' : `${color}12`,
           borderColor: active ? color : `${color}70`,
           borderStyle: active ? 'dotted' : 'solid',
           borderWidth: active ? 2 : outlined ? 1.5 : 0,
+          shadowColor: color,
+          shadowOpacity: theme.night && active ? 0.55 : 0,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 0 },
         },
       ]}
     >
-      <ActivityIcon name={icon} color={color} size={size * 0.45} />
+      <ActivityIcon name={icon} color={color} size={size * (theme.night ? 0.82 : 0.45)} />
     </View>
   );
 }

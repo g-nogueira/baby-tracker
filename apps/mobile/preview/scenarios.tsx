@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CareHome } from '../src/features/care-service/care-screen';
+import { TrackingFontsContext } from '../src/features/shared/tracking-text';
 import type {
   CareActivity,
   CareSnapshot,
@@ -101,13 +102,15 @@ export function Preview({
     },
   } as unknown as ReturnType<typeof useCareTracker>;
   return (
-    <SafeAreaProvider
-      initialMetrics={{
-        frame: { x: 0, y: 0, width: 390, height: 844 },
-        insets: { top: 0, left: 0, right: 0, bottom: 16 },
-      }}
-    >
-      <CareHome model={model} />
-    </SafeAreaProvider>
+    <TrackingFontsContext.Provider value={true}>
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 0, left: 0, right: 0, bottom: 16 },
+        }}
+      >
+        <CareHome model={model} />
+      </SafeAreaProvider>
+    </TrackingFontsContext.Provider>
   );
 }

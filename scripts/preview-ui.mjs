@@ -64,6 +64,7 @@ if (process.argv.includes('--static')) {
     ...config,
     ssr: { noExternal: true },
     build: {
+      assetsInlineLimit: 1000000,
       ssr: path.join(mobile, 'preview/static-render.tsx'),
       outDir,
       emptyOutDir: true,
@@ -82,6 +83,7 @@ if (process.argv.includes('--static')) {
     ...config,
     base: './',
     build: {
+      assetsInlineLimit: 1000000,
       outDir,
       emptyOutDir: true,
       rolldownOptions: {

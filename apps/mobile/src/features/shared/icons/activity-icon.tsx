@@ -1,15 +1,21 @@
 import Svg, { Path } from 'react-native-svg';
+import { Image } from 'react-native';
+import { useActivityTheme } from '../activity-theme';
+import { activityArtwork, monochromeArtwork } from './activity-artwork';
 
-/** Small, consistent line icons; all actions retain explicit accessibility labels. */
+/** Activity artwork on connected surfaces; vector glyphs for universal controls. */
 export function ActivityIcon({
   name,
   color = '#FFFFFF',
   size = 24,
+  monochrome = false,
 }: {
   name: string;
   color?: string;
   size?: number;
+  monochrome?: boolean;
 }) {
+  const theme = useActivityTheme();
   const paths: Record<string, string> = {
     nap: 'M3 18V9 M3 14H21V18 M3 11H8V14 M8 11H18Q21 11 21 14 M13 3H18L13 8H18',
     bedtime: 'M3 16H21 M6 13A6 6 0 0 1 18 13 M6 19H18 M9 22H15',
@@ -40,6 +46,7 @@ export function ActivityIcon({
     z: 'nap',
     '☾': 'night',
     '☀': 'wake',
+    'wake-up': 'wake',
     '↯': 'night-waking',
     N: 'nursing',
     D: 'diaper',
@@ -49,6 +56,22 @@ export function ActivityIcon({
     '✓': 'check',
   };
   const kind = aliases[name] ?? name;
+  const artwork = monochrome
+    ? (monochromeArtwork[kind as keyof typeof monochromeArtwork] ??
+      activityArtwork[kind as keyof typeof activityArtwork])
+    : activityArtwork[kind as keyof typeof activityArtwork];
+  if (theme.night && artwork) {
+    return (
+      <Image
+        source={typeof artwork === 'string' ? { uri: artwork } : artwork}
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      />
+    );
+  }
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path

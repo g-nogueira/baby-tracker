@@ -1,6 +1,7 @@
+import { Text } from '@/features/shared/tracking-text';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { useRef } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import type { HomeQuickAction } from '@/features/shared/home-actions/home-quick-actions';

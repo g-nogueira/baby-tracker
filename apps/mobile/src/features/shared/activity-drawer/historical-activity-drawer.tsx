@@ -1,7 +1,8 @@
+import { Text } from '@/features/shared/tracking-text';
 import type { NursingSide } from '@baby-tracker/domain';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
 
 import { mergeDatePart, mergeTimePart } from '@/features/naps/nap-editor-state';
 import { NursingSplitSlider } from '@/features/nursing/nursing-split-slider';

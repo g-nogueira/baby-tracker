@@ -95,6 +95,7 @@ vi.mock('react-native', () => ({
       return { panHandlers: {} };
     },
   },
+  Image: 'Image',
   View: 'View',
   StatusBar: 'StatusBar',
   Text: 'Text',

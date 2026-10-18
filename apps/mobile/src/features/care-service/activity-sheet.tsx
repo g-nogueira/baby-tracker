@@ -1,3 +1,4 @@
+import { Text } from '@/features/shared/tracking-text';
 import { clockLabel, shortDuration } from './presentation';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
@@ -11,7 +12,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   useWindowDimensions,
   View,
@@ -41,7 +41,7 @@ export const activityLabels: Record<CareKind, string> = {
   medicine: 'Medicine',
 };
 export const activityIcons: Record<CareKind, string> = {
-  bedtime: 'night',
+  bedtime: 'bedtime',
   'wake-up': 'wake',
   nap: 'nap',
   'night-waking': 'night-waking',
