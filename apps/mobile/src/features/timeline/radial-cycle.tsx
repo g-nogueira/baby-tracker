@@ -1,3 +1,4 @@
+import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import {
   CYCLE_START_ANGLE_DEGREES,
@@ -20,6 +21,7 @@ import {
 export type RadialCycleSelection = 'day' | 'night';
 
 interface RadialCycleProps {
+  controls?: ReactNode;
   centerStatus: { hint: string; label: string; value: string | null };
   disabled: boolean;
   maxSize?: number;
@@ -30,7 +32,7 @@ interface RadialCycleProps {
 
 const VIEWBOX_SIZE = 320;
 const CENTER = VIEWBOX_SIZE / 2;
-const LANE_RADIUS = { outer: 126, inner: 101, point: 76 } as const;
+const LANE_RADIUS = { outer: 135, inner: 126, point: 135 } as const;
 
 /** Selects Day or Night without changing the selected calendar day. */
 export function RadialCycleSelector({
@@ -50,14 +52,17 @@ export function RadialCycleSelector({
         return (
           <Pressable
             accessibilityRole="tab"
+            accessibilityLabel={label}
             accessibilityState={{ selected }}
             key={option}
             onPress={() => onChange(option)}
             style={[styles.selectorOption, selected && styles.selectorOptionSelected]}
           >
-            <Text style={[styles.selectorText, selected && styles.selectorTextSelected]}>
-              {label}
-            </Text>
+            <ActivityIcon
+              name={option === 'night' ? 'night' : 'wake'}
+              color={selected ? theme.text : theme.muted}
+              size={22}
+            />
           </Pressable>
         );
       })}
@@ -68,6 +73,7 @@ export function RadialCycleSelector({
 /** Renders time-faithful arcs with bounded, selectable clusters for crowded records. */
 export function RadialCycle({
   centerStatus,
+  controls,
   disabled,
   onPressRecord,
   onPressAnchor,
@@ -95,6 +101,7 @@ export function RadialCycle({
           {view.emptyLabel}
         </Text>
         <Text style={styles.emptyText}>Start Night sleep to create a real Bedtime anchor.</Text>
+        {controls}
       </View>
     );
   }
@@ -112,22 +119,23 @@ export function RadialCycle({
           d={arcPath(
             CYCLE_START_ANGLE_DEGREES,
             CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES,
-            126,
+            theme.night ? 135 : 126,
           )}
           fill="none"
           stroke={theme.track}
           strokeLinecap="round"
-          strokeWidth={theme.night ? 22 : 12}
+          strokeWidth={theme.night ? 30 : 12}
         />
         {view.ticks
           .filter(
             (tick) =>
-              tick.label === 'Midnight' ||
-              !projection.anchors.some(
-                (anchor) =>
-                  anchor.recordId !== null &&
-                  Math.abs(anchor.projection.angleDegrees - tick.angleDegrees) < 8,
-              ),
+              (!theme.night || tick.label === 'Midnight') &&
+              (tick.label === 'Midnight' ||
+                !projection.anchors.some(
+                  (anchor) =>
+                    anchor.recordId !== null &&
+                    Math.abs(anchor.projection.angleDegrees - tick.angleDegrees) < 8,
+                )),
           )
           .map((tick) => {
             const inner = polarPoint(tick.angleDegrees, 136);
@@ -171,7 +179,7 @@ export function RadialCycle({
               opacity={arc.active ? 1 : 0.82}
               stroke={radialActivityColor(record.kind, theme.night)}
               strokeLinecap="round"
-              strokeWidth={record.projection.lane === 'outer' ? 12 : 7}
+              strokeWidth={theme.night ? (record.projection.lane === 'outer' ? 24 : 16) : 7}
             />
           );
         })}
@@ -207,15 +215,13 @@ export function RadialCycle({
         })}
       </Svg>
 
-      {clusterRadialTargets(view.records, (2 * Math.asin(22 / (102 * scale)) * 180) / Math.PI).map(
+      {clusterRadialTargets(view.records, (2 * Math.asin(22 / (135 * scale)) * 180) / Math.PI).map(
         (group) => {
           const first = group[0];
           const token = first.projection.token;
           const arc = first.projection.arc;
-          const angle =
-            token?.projection.angleDegrees ??
-            (arc ? (arc.start.angleDegrees + arc.end.angleDegrees) / 2 : 0);
-          const point = polarPoint(angle, 102);
+          const angle = token?.projection.angleDegrees ?? (arc ? arc.start.angleDegrees : 0);
+          const point = polarPoint(angle, laneRadius(first.projection.lane));
           return (
             <RecordTarget
               disabled={disabled}
@@ -229,18 +235,23 @@ export function RadialCycle({
               top={point.y * scale - 22}
               onPress={() => (group.length === 1 ? onPressRecord(first) : setCluster(group))}
             >
-              <View
-                style={[
-                  styles.token,
-                  { backgroundColor: radialActivityColor(first.kind, theme.night) },
-                ]}
-              >
-                {group.length === 1 ? (
-                  <ActivityIcon name={first.kind} size={18} />
-                ) : (
+              {group.length === 1 ? (
+                <ActivityBadge
+                  icon={first.kind}
+                  color={radialActivityColor(first.kind, theme.night)}
+                  size={36}
+                  active={first.status === 'active'}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.token,
+                    { backgroundColor: radialActivityColor(first.kind, theme.night) },
+                  ]}
+                >
                   <Text style={styles.tokenText}>{group.length}</Text>
-                )}
-              </View>
+                </View>
+              )}
             </RecordTarget>
           );
         },
@@ -262,7 +273,7 @@ export function RadialCycle({
             >
               <View style={[styles.anchorTarget, { borderColor: '#D9A36C' }]}>
                 <ActivityIcon
-                  name={anchor.kind === 'bedtime' ? 'night' : 'wake'}
+                  name={anchor.kind === 'bedtime' ? 'bedtime' : 'wake'}
                   color="#D9A36C"
                   size={19}
                 />
@@ -321,6 +332,7 @@ export function RadialCycle({
         </TrueSheet>
       ) : null}
 
+      {controls ? <View style={styles.cycleControls}>{controls}</View> : null}
       <View
         accessible
         accessibilityLabel={`${view.kind} cycle. ${status.replace('\n', ' ')}.`}
@@ -428,12 +440,12 @@ function formatClock(instant: string, timezone: string): string {
 export function radialActivityColor(kind: RadialActivityKind, night = false): string {
   if (night)
     return {
-      nap: '#B5A7EE',
+      nap: '#8587FF',
       night: '#7770B5',
       'night-waking': '#F09C8C',
-      nursing: '#9DD7BC',
+      nursing: '#8EEBBE',
       diaper: '#A3CCB0',
-      medicine: '#DBAC85',
+      medicine: '#DDE876',
     }[kind];
   switch (kind) {
     case 'nap':
@@ -463,11 +475,11 @@ const createStyles = (theme: ActivityTheme) =>
       flexDirection: 'row',
       alignSelf: 'center',
       padding: 3,
-      borderRadius: 18,
+      borderRadius: 26,
       backgroundColor: theme.raised,
     },
     selectorOption: {
-      minWidth: 92,
+      minWidth: 42,
       minHeight: 44,
       alignItems: 'center',
       justifyContent: 'center',
@@ -488,6 +500,7 @@ const createStyles = (theme: ActivityTheme) =>
     emptyTitle: { color: theme.text, fontSize: 19, fontWeight: '800', textAlign: 'center' },
     emptyText: { color: theme.muted, fontSize: 13, textAlign: 'center' },
     target: {
+      zIndex: 2,
       position: 'absolute',
       width: 44,
       height: 44,
@@ -505,12 +518,19 @@ const createStyles = (theme: ActivityTheme) =>
     },
     tokenText: { color: theme.surface, fontSize: 13, fontWeight: '900' },
     continuation: { width: 20, height: 6, borderRadius: 3 },
+    cycleControls: {
+      position: 'absolute',
+      top: '70%',
+      left: '36%',
+      width: '28%',
+      alignItems: 'center',
+    },
     centerStatus: {
       position: 'absolute',
       left: '19%',
-      top: '32%',
+      top: '29%',
       width: '62%',
-      height: '36%',
+      height: '35%',
       minHeight: '30%',
       alignItems: 'center',
       justifyContent: 'center',
@@ -518,7 +538,7 @@ const createStyles = (theme: ActivityTheme) =>
       borderRadius: 999,
       backgroundColor: 'transparent',
     },
-    statusLabel: { color: theme.muted, fontSize: 14, textAlign: 'center' },
+    statusLabel: { color: theme.muted, fontSize: 17, textAlign: 'center' },
     anchorTarget: {
       width: 32,
       height: 32,
@@ -551,9 +571,9 @@ const createStyles = (theme: ActivityTheme) =>
     clusterText: { flex: 1, fontSize: 14, color: theme.text },
     status: {
       color: theme.text,
-      fontSize: 50,
+      fontSize: 52,
       fontWeight: '500',
-      letterSpacing: -2,
+      letterSpacing: -1.8,
       lineHeight: 62,
       textAlign: 'center',
       fontVariant: ['tabular-nums'],

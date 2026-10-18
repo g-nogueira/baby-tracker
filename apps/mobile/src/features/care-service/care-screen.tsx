@@ -1,3 +1,5 @@
+import { ActivityMenuSheet } from './activity-menu-sheet';
+import { shortDuration } from './presentation';
 import { minimumLiveControllerStackHeight } from '@/features/shared/live-controller/activity-live-controller-layout';
 import { liveControllerReservedSpace } from '@/features/shared/live-controller/activity-live-controller-stack-state';
 import {
@@ -10,6 +12,7 @@ import { ProfileSheet } from './profile-sheet';
 import Svg, { Circle } from 'react-native-svg';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  PanResponder,
   Pressable,
   ScrollView,
   StatusBar,
@@ -52,16 +55,8 @@ import { useCareTracker, type CareProviderFactory } from './use-care-tracker';
 type Drawer =
   | { type: 'nursing'; id: string | null; snapshot?: NursingActivity }
   | { type: 'activity'; intent: ActivitySheetIntent }
-  | { type: 'profile' };
-// Keep this pure formatter outside the component: React Compiler memoizes nested
-// declarations at their source position, after action recency has already called it.
-function focusDuration(ms: number) {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor(seconds / 60) % 60;
-  return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m` : `${seconds}s`;
-}
-
+  | { type: 'profile' }
+  | { type: 'actions' };
 export function CareScreen({ createProvider }: { createProvider: CareProviderFactory }) {
   const model = useCareTracker(createProvider);
   if (model.stage !== 'ready' || !model.baby)
@@ -91,11 +86,30 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
   const history = model.history.activities;
   const state = sleepContext(current);
   const [selection, setSelection] = useState<RadialCycleSelection>(state.night ? 'night' : 'day');
-  const theme = selection === 'night' ? nightTheme : dayTheme;
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const theme = nightTheme;
+  const [historyMode, setHistoryMode] = useState(false);
+  const styles = connectedStyles;
   const [selectedManually, setSelectedManually] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
   const [reserved, setReserved] = useState(0);
+  const navigationGesture = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          !model.busy &&
+          Math.abs(gesture.dy) > 24 &&
+          Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.5,
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dy > 60) setHistoryMode(true);
+          else if (gesture.dy < -60) {
+            setHistoryMode(false);
+            setSelectedManually(false);
+            if (model.date !== model.today) model.setDate(model.today);
+          }
+        },
+      }),
+    [model.busy, model.date, model.today, model.setDate],
+  );
   const activeFeeds = current.filter(
     (a): a is NursingActivity => a.kind === 'nursing' && a.status !== 'completed',
   );
@@ -223,7 +237,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
     })),
   ];
   function focusElapsed(at: string | null) {
-    return at ? focusDuration(now.getTime() - Date.parse(at)) : '—';
+    return at ? shortDuration(now.getTime() - Date.parse(at)) : '—';
   }
   const projection = view?.projection;
   const projectedIds = new Set([
@@ -233,7 +247,7 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
   const rows = history.filter((a) => projectedIds.has(a.id)).sort(byStart);
   let center = {
     label: selection === 'night' ? 'Night sleep' : 'Day sleep',
-    value: focusDuration(
+    value: shortDuration(
       rows
         .filter((a) => a.kind === 'nap')
         .reduce((sum, a) => sum + (a.kind === 'nap' ? activityDuration(a, now) : 0), 0),
@@ -248,22 +262,23 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
     );
     center = {
       label: 'Night sleep',
-      value: focusDuration(length - awake),
+      value: shortDuration(length - awake),
       hint: projection.cycle.endedAt ? 'Recorded sleep' : 'Night in progress',
     };
   }
   if (model.date === model.today) {
     if (selection === 'night' && state.night)
       center = {
-        label: state.waking ? 'Awake tonight' : 'Asleep for',
+        label: state.waking ? 'Awake for' : 'Asleep for',
         value: focusElapsed(state.phaseStartedAt),
         hint: state.waking ? 'Night waking' : 'Night sleep',
       };
     else if (selection === 'day' && !state.night)
       center = {
-        label: state.nap ? 'Asleep for' : 'Awake for',
+        label:
+          state.nap?.status === 'paused' ? 'Nap paused' : state.nap ? 'Asleep for' : 'Awake for',
         value: state.nap
-          ? focusDuration(activityDuration(state.nap, now))
+          ? shortDuration(activityDuration(state.nap, now))
           : focusElapsed(state.latestEnd),
         hint: state.nap ? 'Nap' : state.latestEnd ? 'Since the last sleep' : 'No sleep logged yet',
       };
@@ -306,7 +321,8 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
         minimumLiveControllerStackHeight(controllerCount),
       )
     : Math.max(8, insets.bottom) + 84;
-  const dialMaxSize = Math.max(240, viewport.height - (insets.top ?? 0) - bottomSpace - 274);
+  const dialMaxSize = Math.min(440, viewport.width - 32);
+  const homeHeight = Math.max(0, viewport.height - (insets.top ?? 0) - bottomSpace);
   return (
     <ActivityThemeContext.Provider value={theme}>
       <SafeAreaView style={styles.safe}>
@@ -328,21 +344,6 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <View>
-              <Text style={styles.eyebrow}>
-                {model.date === model.today ? 'TODAY' : model.date}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Choose baby profile"
-                disabled={model.babies.length < 2 || model.busy}
-                onPress={() => model.showProfiles()}
-              >
-                <Text accessibilityRole="header" style={styles.title}>
-                  {model.baby?.name}
-                </Text>
-              </Pressable>
-            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Profile and sync"
@@ -350,76 +351,101 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
               onPress={() => setDrawer({ type: 'profile' })}
               style={styles.profileButton}
             >
+              <ActivityIcon name="baby" color={theme.muted} size={24} />
+            </Pressable>
+            {historyMode ? (
+              <View style={styles.dates}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous day"
+                  disabled={model.busy}
+                  onPress={() => model.setDate(shiftCalendarDay(model.date, -1))}
+                  style={styles.dateButton}
+                >
+                  <Text style={styles.arrow}>‹</Text>
+                </Pressable>
+                <Text style={styles.muted}>
+                  {model.date === model.today ? 'Today' : model.date}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Next day"
+                  disabled={model.busy || model.date >= model.today}
+                  onPress={() => model.setDate(shiftCalendarDay(model.date, 1))}
+                  style={styles.dateButton}
+                >
+                  <Text style={styles.arrow}>›</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text style={styles.cycleHint}>{selection === 'night' ? 'Night' : 'Day'}</Text>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Choose baby profile"
+              disabled={model.busy}
+              onPress={() =>
+                model.babies.length > 1 ? model.showProfiles() : setDrawer({ type: 'profile' })
+              }
+              style={styles.dateButton}
+            >
               <ActivityIcon name="settings" color={theme.muted} size={22} />
             </Pressable>
           </View>
-
-          <RadialCycleSelector
-            selection={selection}
-            onChange={(next) => {
-              setSelectedManually(true);
-              setSelection(next);
-            }}
-          />
-          <View style={styles.dates}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Previous day"
-              disabled={model.busy}
-              onPress={() => model.setDate(shiftCalendarDay(model.date, -1))}
-              style={styles.dateButton}
-            >
-              <Text style={styles.arrow}>‹</Text>
-            </Pressable>
-            <Text style={styles.muted}>{model.date === model.today ? 'Today' : model.date}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Next day"
-              disabled={model.busy || model.date >= model.today}
-              onPress={() => model.setDate(shiftCalendarDay(model.date, 1))}
-              style={styles.dateButton}
-            >
-              <Text style={styles.arrow}>›</Text>
-            </Pressable>
+          <View
+            {...navigationGesture.panHandlers}
+            style={[styles.home, { minHeight: Math.max(0, homeHeight - 60) }]}
+          >
+            {view ? (
+              <RadialCycle
+                view={view}
+                maxSize={dialMaxSize}
+                centerStatus={{ ...center, hint: historyMode ? center.hint : '' }}
+                controls={
+                  <RadialCycleSelector
+                    selection={selection}
+                    onChange={(next) => {
+                      setSelectedManually(true);
+                      setSelection(next);
+                    }}
+                  />
+                }
+                disabled={blocked}
+                onPressRecord={(record) => {
+                  const a = history.find((a) => a.id === record.id);
+                  if (a) open(a);
+                }}
+                onPressAnchor={(id) => {
+                  const a = history.find((a) => a.id === id);
+                  if (a) open(a);
+                }}
+              />
+            ) : (
+              <Text accessibilityRole="alert" style={styles.error}>
+                The timeline could not be displayed. Valid activity controls remain available.
+              </Text>
+            )}
+            <View style={styles.quickActions}>
+              <HomeQuickActions
+                actions={actions.map((action) => ({
+                  ...action,
+                  color: theme.night
+                    ? nightActivityColors[
+                        action.id === 'night'
+                          ? state.night
+                            ? 'wake-up'
+                            : 'bedtime'
+                          : action.id === 'sleep'
+                            ? state.night
+                              ? 'night-waking'
+                              : 'nap'
+                            : (action.id as CareKind)
+                      ]
+                    : action.color,
+                }))}
+              />
+            </View>
           </View>
-          {view ? (
-            <RadialCycle
-              view={view}
-              maxSize={dialMaxSize}
-              centerStatus={center}
-              disabled={blocked}
-              onPressRecord={(record) => {
-                const a = history.find((a) => a.id === record.id);
-                if (a) open(a);
-              }}
-              onPressAnchor={(id) => {
-                const a = history.find((a) => a.id === id);
-                if (a) open(a);
-              }}
-            />
-          ) : (
-            <Text accessibilityRole="alert" style={styles.error}>
-              The timeline could not be displayed. Valid activity controls remain available.
-            </Text>
-          )}
-          <HomeQuickActions
-            actions={actions.map((action) => ({
-              ...action,
-              color: theme.night
-                ? nightActivityColors[
-                    action.id === 'night'
-                      ? state.night
-                        ? 'wake-up'
-                        : 'bedtime'
-                      : action.id === 'sleep'
-                        ? state.night
-                          ? 'night-waking'
-                          : 'nap'
-                        : (action.id as CareKind)
-                  ]
-                : action.color,
-            }))}
-          />
           {state.problem || activeFeeds.length > 1 || blockingIssue ? (
             <Text accessibilityRole="alert" style={styles.error}>
               {state.problem ??
@@ -443,105 +469,135 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
               {issue.message}
             </Text>
           ))}
-          <View
-            style={styles.logHeader}
-            onLayout={(event) => {
-              logOffset.current = event.nativeEvent.layout.y;
-            }}
-          >
-            <Text style={styles.sectionTitle}>
-              {selection === 'night' ? 'Night log' : 'Day log'}
-            </Text>
-            <Text style={styles.muted}>{rows.length} records</Text>
-          </View>
-          {!rows.length && !model.refreshing ? (
-            <Text style={styles.empty}>No activity in this cycle.</Text>
-          ) : null}
-          {rows.map((a) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${activityLabels[a.kind]} at ${format(a.startedAt)}`}
-              key={a.id}
-              disabled={blocked}
-              onPress={() => open(a)}
-              style={styles.row}
-            >
-              <ActivityIcon name={activityIcons[a.kind]} color={activityColors[a.kind]} />
-              <View style={styles.rowText}>
-                <Text style={styles.rowTitle}>
-                  {activityLabels[a.kind]} · {format(a.startedAt)}
-                  {a.status !== 'completed' ? ' · Running' : ''}
+          {historyMode ? (
+            <>
+              <View
+                style={styles.logHeader}
+                onLayout={(event) => {
+                  logOffset.current = event.nativeEvent.layout.y;
+                }}
+              >
+                <Text style={styles.sectionTitle}>
+                  {selection === 'night' ? 'Night log' : 'Day log'}
                 </Text>
-                <Text style={styles.muted}>
-                  {a.kind === 'nursing'
-                    ? (() => {
-                        const t = nursingTimes(a, now);
-                        return `${duration(t.total * 1000)} · L ${duration(t.left * 1000)} · R ${duration(t.right * 1000)}`;
-                      })()
-                    : a.kind === 'nap' || a.kind === 'night-waking'
-                      ? duration(activityDuration(a, now))
-                      : a.kind === 'diaper'
-                        ? a.diaperType
-                        : a.kind === 'medicine'
-                          ? a.note || 'No note'
-                          : 'Tap to edit time'}
-                </Text>
+                <Text style={styles.muted}>{rows.length} records</Text>
               </View>
-            </Pressable>
-          ))}
-          <View style={styles.sync}>
-            <Text style={styles.source}>
-              {model.updatedAt
-                ? `Updated ${format(model.updatedAt.toISOString())}`
-                : 'Loading shared records…'}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Refresh shared records"
-              disabled={model.refreshing || model.busy}
-              onPress={() => void model.refresh()}
-              style={styles.link}
-            >
-              <Text style={styles.pastText}>{model.refreshing ? 'Refreshing…' : 'Refresh'}</Text>
-            </Pressable>
-          </View>
+              {!rows.length && !model.refreshing ? (
+                <Text style={styles.empty}>No activity in this cycle.</Text>
+              ) : null}
+              {rows.map((a) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${activityLabels[a.kind]} at ${format(a.startedAt)}`}
+                  key={a.id}
+                  disabled={blocked}
+                  onPress={() => open(a)}
+                  style={styles.row}
+                >
+                  <ActivityIcon name={activityIcons[a.kind]} color={activityColors[a.kind]} />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>
+                      {activityLabels[a.kind]} · {format(a.startedAt)}
+                      {a.status !== 'completed' ? ' · Running' : ''}
+                    </Text>
+                    <Text style={styles.muted}>
+                      {a.kind === 'nursing'
+                        ? (() => {
+                            const t = nursingTimes(a, now);
+                            return `${duration(t.total * 1000)} · L ${duration(t.left * 1000)} · R ${duration(t.right * 1000)}`;
+                          })()
+                        : a.kind === 'nap' || a.kind === 'night-waking'
+                          ? duration(activityDuration(a, now))
+                          : a.kind === 'diaper'
+                            ? a.diaperType
+                            : a.kind === 'medicine'
+                              ? a.note || 'No note'
+                              : 'Tap to edit time'}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+              <View style={styles.sync}>
+                <Text style={styles.source}>
+                  {model.updatedAt
+                    ? `Updated ${format(model.updatedAt.toISOString())}`
+                    : 'Loading shared records…'}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh shared records"
+                  disabled={model.refreshing || model.busy}
+                  onPress={() => void model.refresh()}
+                  style={styles.link}
+                >
+                  <Text style={styles.pastText}>
+                    {model.refreshing ? 'Refreshing…' : 'Refresh'}
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
         </ScrollView>
         <View style={[styles.dockHost, { bottom: Math.max(8, insets.bottom) }]}>
           <View style={styles.dock}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Scroll to timeline"
-              onPress={() => scroll.current?.scrollTo({ y: 0, animated: false })}
+              accessibilityLabel="Home"
+              accessibilityState={{ selected: !historyMode }}
+              onPress={() => {
+                setHistoryMode(false);
+                setSelectedManually(false);
+                if (model.date !== model.today) model.setDate(model.today);
+                scroll.current?.scrollTo({ y: 0, animated: false });
+              }}
               style={styles.dockTarget}
             >
-              <ActivityIcon name="home" color={theme.muted} size={24} />
+              <ActivityIcon name="home" color={!historyMode ? theme.text : theme.muted} size={24} />
             </Pressable>
+            <View
+              accessibilityLabel="Sleep sounds unavailable"
+              style={[styles.dockTarget, { opacity: 0.35 }]}
+            >
+              <ActivityIcon name="music" color={theme.muted} size={25} />
+            </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Add past activity"
+              accessibilityLabel={model.date === model.today ? 'Add activity' : 'Add past activity'}
               disabled={blocked || model.refreshing}
               onPress={() =>
-                show({
-                  type: 'activity',
-                  intent: {
-                    type: 'past',
-                    at: pastAt(),
-                    kind: selection === 'night' ? 'night-waking' : 'nap',
-                  },
-                })
+                model.date === model.today
+                  ? show({ type: 'actions' })
+                  : show({
+                      type: 'activity',
+                      intent: {
+                        type: 'past',
+                        at: pastAt(),
+                        kind: selection === 'night' ? 'night-waking' : 'nap',
+                      },
+                    })
               }
               style={styles.pastButton}
             >
-              <ActivityIcon name="plus" color={theme.accent} size={28} />
+              <ActivityIcon name="plus" color={theme.text} size={30} />
             </Pressable>
 
+            <View
+              accessibilityLabel="Sleep library unavailable"
+              style={[styles.dockTarget, { opacity: 0.35 }]}
+            >
+              <ActivityIcon name="books" color={theme.muted} size={24} />
+            </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Scroll to activity log"
-              onPress={() => scroll.current?.scrollTo({ y: logOffset.current, animated: false })}
+              accessibilityLabel="History"
+              accessibilityState={{ selected: historyMode }}
+              onPress={() => {
+                setHistoryMode(true);
+                scroll.current?.scrollTo({ y: logOffset.current, animated: false });
+              }}
               style={styles.dockTarget}
             >
-              <ActivityIcon name="log" color={theme.muted} size={24} />
+              <ActivityIcon name="chart" color={historyMode ? theme.text : theme.muted} size={24} />
             </Pressable>
           </View>
         </View>
@@ -570,12 +626,45 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
             ) : null}
             {nursing ? (
               <ActivityLiveController
-                accentColor={theme.night ? '#9DD7BC' : '#B35D7D'}
+                accentColor={theme.night ? '#8EEBBE' : '#B35D7D'}
                 accessibilityLabel="Open running Nursing"
                 activityLabel={nursing.status === 'paused' ? 'Nursing paused' : 'Nursing'}
                 disabled={blocked}
                 elapsedLabel={duration(nursingTimes(nursing, now).total * 1000)}
                 icon="nursing"
+                nursingSides={{
+                  left: duration(nursingTimes(nursing, now).left * 1000),
+                  right: duration(nursingTimes(nursing, now).right * 1000),
+                  active: nursing.status === 'paused' ? null : nursing.lastBreast,
+                  onLeft: () =>
+                    void execute(
+                      {
+                        type: 'change-nursing',
+                        expected: nursing,
+                        command:
+                          nursing.status === 'paused'
+                            ? { kind: 'resume', side: 'LEFT' }
+                            : nursing.lastBreast === 'LEFT'
+                              ? { kind: 'pause' }
+                              : { kind: 'switch', side: 'LEFT' },
+                      },
+                      false,
+                    ),
+                  onRight: () =>
+                    void execute(
+                      {
+                        type: 'change-nursing',
+                        expected: nursing,
+                        command:
+                          nursing.status === 'paused'
+                            ? { kind: 'resume', side: 'RIGHT' }
+                            : nursing.lastBreast === 'RIGHT'
+                              ? { kind: 'pause' }
+                              : { kind: 'switch', side: 'RIGHT' },
+                      },
+                      false,
+                    ),
+                }}
                 onOpen={() => open(nursing)}
                 onStop={() =>
                   void execute({
@@ -588,6 +677,36 @@ export function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }
               />
             ) : null}
           </ActivityLiveControllerStack>
+        ) : null}
+        {drawer?.type === 'actions' ? (
+          <ActivityMenuSheet
+            actions={actions.map((action) => ({
+              ...action,
+              color:
+                nightActivityColors[
+                  action.id === 'night'
+                    ? state.night
+                      ? 'wake-up'
+                      : 'bedtime'
+                    : action.id === 'sleep'
+                      ? state.night
+                        ? 'night-waking'
+                        : 'nap'
+                      : (action.id as CareKind)
+                ],
+            }))}
+            onClose={() => setDrawer(null)}
+            onPast={() =>
+              show({
+                type: 'activity',
+                intent: {
+                  type: 'past',
+                  at: pastAt(),
+                  kind: selection === 'night' ? 'night-waking' : 'nap',
+                },
+              })
+            }
+          />
         ) : null}
         {drawer?.type === 'profile' ? (
           <ProfileSheet model={model} onClose={() => setDrawer(null)} />
@@ -680,12 +799,21 @@ const createStyles = (theme: ActivityTheme) =>
     content: {
       paddingHorizontal: 16,
       paddingTop: 12,
-      gap: 10,
+      gap: 0,
       width: '100%',
       maxWidth: 480,
       alignSelf: 'center',
     },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    header: {
+      width: '100%',
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    home: { paddingTop: 36 },
+    quickActions: { marginTop: 24, marginBottom: 24 },
+    cycleHint: { fontSize: 14, color: theme.muted },
     eyebrow: { color: theme.muted, fontSize: 10, fontWeight: '600', letterSpacing: 2 },
     profileButton: {
       width: 44,
@@ -693,12 +821,14 @@ const createStyles = (theme: ActivityTheme) =>
       borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.raised,
+      borderWidth: 2,
+      borderColor: theme.accent,
+      backgroundColor: 'transparent',
     },
     title: { fontSize: 24, fontWeight: '500', color: theme.text },
     source: { color: theme.muted, fontSize: 11 },
     muted: { color: theme.muted, fontSize: 13 },
-    dates: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    dates: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1 },
     dateButton: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
     arrow: { fontSize: 26, color: theme.muted },
     link: { minHeight: 44, paddingVertical: 12 },
@@ -710,19 +840,23 @@ const createStyles = (theme: ActivityTheme) =>
       alignSelf: 'center',
       borderRadius: 34,
       backgroundColor: theme.night ? theme.raised : theme.surface,
-      borderWidth: 1,
-      borderColor: theme.border,
+      borderWidth: 0,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-around',
     },
-    dockTarget: { minHeight: 48, minWidth: 64, alignItems: 'center', justifyContent: 'center' },
+    dockTarget: { minHeight: 48, width: 44, alignItems: 'center', justifyContent: 'center' },
     pastButton: {
       alignSelf: 'center',
       width: 58,
       height: 58,
       borderRadius: 29,
-      backgroundColor: theme.accentSoft,
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      shadowColor: '#C2C3FF',
+      shadowRadius: 6,
+      shadowOpacity: 0.4,
       alignItems: 'center',
       justifyContent: 'center',
       marginVertical: 0,
@@ -754,3 +888,4 @@ const createStyles = (theme: ActivityTheme) =>
   });
 
 const styles = createStyles(dayTheme);
+const connectedStyles = createStyles(nightTheme);

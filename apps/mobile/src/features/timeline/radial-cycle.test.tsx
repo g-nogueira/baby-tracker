@@ -32,6 +32,54 @@ function SheetBoundary(props: Record<string, unknown>) {
 }
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
+it('keeps the activity marker at its start when only its duration changes', async () => {
+  const wake: CareActivity = {
+    id: 'wake',
+    revision: 'v1',
+    kind: 'wake-up',
+    status: 'completed',
+    startedAt: '2026-10-18T07:00:00.000Z',
+    endedAt: '2026-10-18T07:00:00.000Z',
+  };
+  const nap = (endedAt: string): CareActivity => ({
+    id: 'nap',
+    revision: endedAt,
+    kind: 'nap',
+    status: 'completed',
+    startedAt: '2026-10-18T08:00:00.000Z',
+    endedAt,
+    pauseSeconds: 0,
+    measuredAt: '2026-10-18T12:00:00.000Z',
+  });
+  const screen = (endedAt: string) => (
+    <RadialCycle
+      view={
+        careCycleViews(
+          [wake, nap(endedAt)],
+          '2026-10-18',
+          'UTC',
+          new Date('2026-10-18T12:00:00.000Z'),
+          true,
+        ).day
+      }
+      centerStatus={{ label: 'Awake for', value: '2h', hint: '' }}
+      disabled={false}
+      onPressRecord={() => {}}
+    />
+  );
+  await act(async () => {
+    renderer = create(screen('2026-10-18T09:00:00.000Z'));
+  });
+  const target = () =>
+    renderer.root
+      .findAllByType('Pressable' as never)
+      .find((node) => String(node.props.accessibilityLabel).startsWith('Nap started'));
+  expect(target()).toBeDefined();
+  const initialPosition = target()?.props.style;
+  await act(async () => renderer.update(screen('2026-10-18T11:00:00.000Z')));
+  expect(target()?.props.style).toEqual(initialPosition);
+  await act(async () => renderer.unmount());
+});
 it('waits for the nearby-record sheet to finish dismissing before opening the exact editor', async () => {
   const records: CareActivity[] = [
     {

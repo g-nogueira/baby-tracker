@@ -614,9 +614,7 @@ it('adds a completed waking to the selected historical Night without a live tran
   const selector = renderer.root
     .findAllByType('Pressable' as never)
     .find(
-      (node) =>
-        node.props.accessibilityRole === 'tab' &&
-        node.findByType('Text' as never).children[0] === 'Night',
+      (node) => node.props.accessibilityRole === 'tab' && node.props.accessibilityLabel === 'Night',
     );
   await act(async () => selector?.props.onPress());
   await act(async () => pressable('Add past activity')?.props.onPress());

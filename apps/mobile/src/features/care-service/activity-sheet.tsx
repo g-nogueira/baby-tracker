@@ -1,3 +1,4 @@
+import { clockLabel, shortDuration } from './presentation';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { SheetToolbar } from './sheet-toolbar';
@@ -58,13 +59,13 @@ export const activityColors: Record<CareKind, string> = {
   medicine: '#A65F35',
 };
 export const nightActivityColors: Record<CareKind, string> = {
-  bedtime: '#B5A7EE',
-  'wake-up': '#E9B67F',
-  nap: '#B5A7EE',
+  bedtime: '#E9A26E',
+  'wake-up': '#F1C764',
+  nap: '#8587FF',
   'night-waking': '#F09C8C',
-  nursing: '#9DD7BC',
+  nursing: '#8EEBBE',
   diaper: '#A3CCB0',
-  medicine: '#DBAC85',
+  medicine: '#DDE876',
 };
 type Transition =
   | 'bedtime'
@@ -240,7 +241,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       ref={sheet}
       initialDetentIndex={intent.type === 'past' ? 1 : 0}
       detents={[
-        Math.min(0.6, (kind === 'medicine' ? 430 : 380) / height),
+        Math.min(0.6, (kind === 'medicine' ? 490 : 450) / height),
         Math.min(0.9, 710 / height),
       ]}
       scrollable
@@ -262,6 +263,14 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           label={activityLabels[kind]}
           busy={busy}
           onClose={() => void sheet.current?.dismiss()}
+          onExpand={() => {
+            void sheet.current
+              ?.resize(1)
+              .then(() => setExpanded(true))
+              .catch(() => {
+                setPickerError('Close and reopen the activity drawer to view its details.');
+              });
+          }}
           onRemove={
             record && record.kind !== 'bedtime' && record.kind !== 'wake-up'
               ? () => onExecute({ type: 'remove-activity', expected: record })
@@ -269,7 +278,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           }
         />
         <View style={styles.hero}>
-          <ActivityBadge icon={activityIcons[kind]} color={color} size={56} active={active} />
+          <ActivityBadge icon={activityIcons[kind]} color={color} size={72} active={active} />
           <Text accessibilityRole="header" style={styles.title}>
             {title}
           </Text>
@@ -288,11 +297,17 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
                 style={[styles.timer, record?.status === 'completed' && timed && styles.range]}
               >
                 {record?.status === 'completed' && timed
-                  ? `${format(start)} – ${format(end)}`
+                  ? `${clockLabel(start, timezone, false)} – ${clockLabel(end, timezone, false)}`
                   : format(start)}
               </Text>
             </Pressable>
           )}
+          {record?.status === 'completed' && timed ? (
+            <Text style={styles.summary}>
+              {shortDuration(end.getTime() - start.getTime())} long ·{' '}
+              {shortDuration(now.getTime() - end.getTime())} ago
+            </Text>
+          ) : null}
         </View>
         {intent.type === 'past' ? (
           <View style={styles.choices}>
@@ -424,7 +439,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             }
             disabled={busy || !valid || pickerError !== null}
             onPress={save}
-            style={[styles.save, { backgroundColor: color }, (busy || !valid) && styles.disabled]}
+            style={[styles.save, (busy || !valid) && styles.disabled]}
           >
             <ActivityIcon
               name={
@@ -463,7 +478,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             onPress={activeStop}
             style={styles.stop}
           >
-            <ActivityIcon name="stop" color={color} />
+            <ActivityIcon name="stop" color="#F9F8F6" />
           </Pressable>
         ) : null}
         {record?.kind === 'nap' &&
@@ -488,10 +503,11 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
 }
 const createStyles = (theme: ActivityTheme) =>
   StyleSheet.create({
-    content: { padding: 22, paddingBottom: 36, gap: 16 },
-    hero: { alignItems: 'center', gap: 12, marginTop: -42, paddingHorizontal: 42 },
-    title: { fontSize: 20, fontWeight: '500', color: theme.text },
-    range: { fontSize: 24, lineHeight: 34, letterSpacing: -0.5, textAlign: 'center' },
+    content: { padding: 16, paddingBottom: 32, gap: 20 },
+    hero: { alignItems: 'center', gap: 20, marginTop: -28, paddingHorizontal: 32 },
+    title: { fontSize: 20, fontWeight: '500', color: theme.muted },
+    summary: { marginTop: 4, fontSize: 14, color: theme.muted, opacity: 0.65, textAlign: 'center' },
+    range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },
     timer: { fontSize: 38, color: theme.text, fontWeight: '500', fontVariant: ['tabular-nums'] },
     choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
     choice: {
@@ -515,10 +531,14 @@ const createStyles = (theme: ActivityTheme) =>
       color: theme.text,
     },
     save: {
-      width: 70,
-      height: 70,
+      width: 80,
+      height: 80,
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      marginTop: 16,
       alignSelf: 'center',
-      borderRadius: 35,
+      borderRadius: 40,
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'row',
@@ -526,11 +546,16 @@ const createStyles = (theme: ActivityTheme) =>
     },
     white: { color: theme.onAccent, fontSize: 16, fontWeight: '700' },
     stop: {
+      alignSelf: 'center',
+      width: 80,
+      height: 80,
       minHeight: 48,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.field,
-      borderRadius: 16,
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      borderRadius: 40,
     },
     disabled: { opacity: 0.4 },
     error: { color: theme.error, fontSize: 14 },

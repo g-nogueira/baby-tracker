@@ -8,11 +8,13 @@ export function SheetToolbar({
   label,
   busy,
   onClose,
+  onExpand,
   onRemove,
 }: {
   label: string;
   busy: boolean;
   onClose: () => void;
+  onExpand?: () => void;
   onRemove?: () => void;
 }) {
   const theme = useActivityTheme();
@@ -39,12 +41,12 @@ export function SheetToolbar({
         )}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Close ${label} drawer`}
+          accessibilityLabel={onExpand ? `More ${label} options` : `Close ${label} drawer`}
           disabled={busy}
-          onPress={onClose}
+          onPress={onExpand ?? onClose}
           style={[styles.icon, { backgroundColor: theme.raised }]}
         >
-          <ActivityIcon name="close" color={theme.muted} size={20} />
+          <ActivityIcon name={onExpand ? 'more' : 'close'} color={theme.muted} size={20} />
         </Pressable>
       </View>
       {confirming ? (

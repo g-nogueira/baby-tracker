@@ -82,7 +82,19 @@ beforeAll(async () => {
 const hooks = vi.hoisted(() => ({ model: {} as Record<string, unknown> }));
 vi.mock('./use-care-tracker', () => ({ useCareTracker: () => ({ ...hooks.model }) }));
 vi.mock('expo-router', () => ({ Link: 'Link' }));
+const gestures = vi.hoisted(() => ({
+  current: null as null | {
+    onMoveShouldSetPanResponder: (event: unknown, move: { dx: number; dy: number }) => boolean;
+    onPanResponderRelease: (event: unknown, move: { dx: number; dy: number }) => void;
+  },
+}));
 vi.mock('react-native', () => ({
+  PanResponder: {
+    create: (config: NonNullable<typeof gestures.current>) => {
+      gestures.current = config;
+      return { panHandlers: {} };
+    },
+  },
   View: 'View',
   StatusBar: 'StatusBar',
   Text: 'Text',
@@ -108,7 +120,10 @@ vi.mock('react-native-svg', () => ({
 }));
 vi.mock('@lodev09/react-native-true-sheet', () => ({
   TrueSheet: forwardRef((props: Record<string, unknown>, ref) => {
-    useImperativeHandle(ref, () => ({ resize: async () => undefined }));
+    useImperativeHandle(ref, () => ({
+      resize: async () => undefined,
+      dismiss: async () => (props.onDidDismiss as (() => void) | undefined)?.(),
+    }));
     return <>{props.children as import('react').ReactNode}</>;
   }),
 }));
@@ -213,7 +228,71 @@ it('renders action recency with the production native compiler', async () => {
   await act(async () => {
     renderer = create(<ProductionCareScreen createProvider={factory} />);
   });
-  expect(press('Nursing, 3m')).toBeDefined();
+  expect(press('Nursing, 3 min')).toBeDefined();
+});
+it('uses the dark surface for both cycles and keeps navigation available on an empty Night', async () => {
+  hooks.model.current = snapshot([]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(renderer.root.findByType('StatusBar' as never).props.barStyle).toBe('light-content');
+  await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
+  expect(text()).toContain('No night sleep logged');
+  expect(press('Day')).toBeDefined();
+  await act(async () => press('Day')?.props.onPress());
+  expect(renderer.root.findByType(RadialCycleSelector).props.selection).toBe('day');
+});
+it('opens history separately and returns Home to the current day', async () => {
+  hooks.model.date = '2026-10-14';
+  await render();
+  expect(text()).not.toContain('Day log');
+  await act(async () => press('History')?.props.onPress());
+  expect(text()).toContain('Day log');
+  expect(press('Previous day')).toBeDefined();
+  await act(async () => press('Home')?.props.onPress());
+  expect(hooks.model.setDate).toHaveBeenCalledWith(hooks.model.today);
+  expect(text()).not.toContain('Day log');
+});
+it('swipes between the tracking dial and history without taking horizontal gestures', async () => {
+  await render();
+  expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 80, dy: 10 })).toBe(false);
+  expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 5, dy: 80 })).toBe(true);
+  await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: 80 }));
+  expect(text()).toContain('Day log');
+  await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: -80 }));
+  expect(text()).not.toContain('Day log');
+});
+it('opens the activity menu from plus and hands off to Nursing after dismissal', async () => {
+  await render();
+  await act(async () => press('Add activity')?.props.onPress());
+  expect(press('Track Nursing')).toBeDefined();
+  await act(async () => press('Track Nursing')?.props.onPress());
+  expect(renderer.root.findByType(NursingSheet).props.log).toEqual(active);
+  expect(press('Track Nursing')).toBeUndefined();
+});
+it('switches, pauses and resumes Nursing directly from the persistent side controls', async () => {
+  await render();
+  await act(async () => press('Switch to Left breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: active,
+    command: { kind: 'switch', side: 'LEFT' },
+  });
+  await act(async () => press('Pause Right breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: active,
+    command: { kind: 'pause' },
+  });
+  const paused = { ...active, status: 'paused' as const };
+  hooks.model.current = snapshot([paused]);
+  hooks.model.history = hooks.model.current;
+  await update();
+  await act(async () => press('Resume Left breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: paused,
+    command: { kind: 'resume', side: 'LEFT' },
+  });
 });
 it('renders shared canonical Nursing on the dial and keeps live controls available without a Napper dependency', async () => {
   await render();
@@ -246,7 +325,7 @@ it('renders Night waking with Nursing concurrently, and distinguishes falling as
   hooks.model.history = hooks.model.current;
   await render();
   expect(renderer.root.findByType(RadialCycleSelector).props.selection).toBe('night');
-  expect(text()).toContain('Awake tonight');
+  expect(text()).toContain('Awake for');
   expect(press('Fell asleep again')?.props.disabled).toBe(false);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   await act(async () => press('Wake up,')?.props.onPress());

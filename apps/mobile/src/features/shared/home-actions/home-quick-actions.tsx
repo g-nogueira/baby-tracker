@@ -1,5 +1,4 @@
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
-import { useActivityTheme } from '@/features/shared/activity-theme';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
@@ -20,7 +19,6 @@ export interface HomeQuickAction {
 /** Renders ordered Home action slots without owning activity state. */
 export function HomeQuickActions({ actions }: { actions: readonly HomeQuickAction[] }) {
   const { width } = useWindowDimensions();
-  const theme = useActivityTheme();
   const [containerWidth, setContainerWidth] = useState(Math.min(440, width - 32));
   const layout = homeQuickActionsLayout(containerWidth, actions.length);
   return (
@@ -55,12 +53,13 @@ export function HomeQuickActions({ actions }: { actions: readonly HomeQuickActio
             color={action.color}
             size={layout.circleSize}
             active={action.active}
+            outlined={Boolean(action.active)}
           />
 
           <Text
             numberOfLines={1}
             adjustsFontSizeToFit
-            style={[styles.meta, { color: theme.muted }]}
+            style={[styles.meta, { color: action.color }]}
           >
             {action.meta}
           </Text>

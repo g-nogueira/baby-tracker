@@ -1,3 +1,4 @@
+import { clockLabel, shortDuration } from './presentation';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { SheetToolbar } from './sheet-toolbar';
@@ -51,7 +52,7 @@ export function NursingSheet({
   onRemove,
 }: Props) {
   const theme = useActivityTheme();
-  const color = theme.night ? '#9DD7BC' : '#B35D7D';
+  const color = theme.night ? '#8EEBBE' : '#B35D7D';
   const styles = useMemo(() => createStyles(theme, color), [theme, color]);
   const nursing = log;
   const completed = nursing !== null && nursing.status === 'completed';
@@ -144,7 +145,7 @@ export function NursingSheet({
     <TrueSheet
       ref={sheet}
       initialDetentIndex={0}
-      detents={[Math.min(0.5, 410 / height), Math.min(0.84, 730 / height)]}
+      detents={[Math.min(0.7, (completed ? 450 : 540) / height), Math.min(0.9, 760 / height)]}
       scrollable
       draggable
       dismissible
@@ -165,13 +166,21 @@ export function NursingSheet({
           label="Nursing"
           busy={busy}
           onClose={() => void sheet.current?.dismiss()}
+          onExpand={() => {
+            void sheet.current
+              ?.resize(1)
+              .then(() => setExpanded(true))
+              .catch(() => {
+                setPickerError('Close and reopen the Nursing drawer to view its details.');
+              });
+          }}
           onRemove={nursing && onRemove ? () => onRemove(nursing) : undefined}
         />
         <View style={styles.hero}>
           <ActivityBadge
             icon="nursing"
             color={color}
-            size={56}
+            size={72}
             active={nursing?.status === 'active'}
           />
           <Text accessibilityRole="header" style={styles.title}>
@@ -187,7 +196,7 @@ export function NursingSheet({
                   onPress={() => void expandStartPicker()}
                 >
                   <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.time, styles.range]}>
-                    {format(start)} – {format(end)}
+                    {clockLabel(start, timezone, false)} – {clockLabel(end, timezone, false)}
                   </Text>
                 </Pressable>
               ) : (
@@ -202,6 +211,17 @@ export function NursingSheet({
                 <Text style={styles.time}>{format(start)}</Text>
               </Pressable>
             )
+          ) : (
+            <Text style={[styles.time, styles.range]}>
+              {clockLabel(start, timezone, false)} –{' '}
+              {completed ? clockLabel(end, timezone, false) : '…'}
+            </Text>
+          )}
+          {completed ? (
+            <Text style={styles.muted}>
+              {shortDuration(total * 1000)} long · {shortDuration(now.getTime() - end.getTime())}{' '}
+              ago
+            </Text>
           ) : null}
           {nursing && nursing.status !== 'completed' ? (
             <Text style={styles.muted}>
@@ -238,7 +258,11 @@ export function NursingSheet({
                   styles.side,
                   {
                     backgroundColor:
-                      nursing && !paused && nursing.lastBreast === side ? color : theme.field,
+                      nursing && !paused && nursing.lastBreast === side
+                        ? theme.night
+                          ? '#999BFF'
+                          : color
+                        : theme.field,
                   },
                   busy && styles.disabled,
                 ]}
@@ -423,32 +447,36 @@ export function NursingSheet({
 const createStyles = (theme: ActivityTheme, color: string) =>
   StyleSheet.create({
     scroll: { flex: 1 },
-    content: { padding: 20, paddingBottom: 38, gap: 14 },
-    hero: { alignItems: 'center', gap: 10, marginTop: -42, paddingHorizontal: 42 },
-    title: { fontSize: 20, fontWeight: '500', color: theme.text },
-    range: { fontSize: 24, lineHeight: 34, letterSpacing: -0.5, textAlign: 'center' },
+    content: { padding: 16, paddingBottom: 32, gap: 20 },
+    hero: { alignItems: 'center', gap: 20, marginTop: -28, paddingHorizontal: 32 },
+    title: { fontSize: 20, fontWeight: '500', color: theme.muted },
+    range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },
     time: { fontSize: 38, fontWeight: '500', color: theme.text, fontVariant: ['tabular-nums'] },
     muted: { color: theme.muted, fontSize: 13, textAlign: 'center' },
     sides: { flexDirection: 'row', justifyContent: 'center', gap: 22 },
     side: {
-      width: 112,
-      minHeight: 86,
+      width: 96,
+      minHeight: 96,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
-      borderRadius: 30,
+      borderRadius: 48,
+      borderWidth: 1.5,
+      borderColor: theme.accent,
       backgroundColor: color,
     },
     sideLabel: { fontSize: 20, color: theme.onAccent, fontWeight: '700' },
     sideMeta: { color: theme.onAccent, fontSize: 12 },
     stop: {
-      width: 56,
-      height: 48,
+      width: 80,
+      height: 80,
       alignSelf: 'center',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.text,
-      borderRadius: 14,
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      borderRadius: 40,
     },
     hint: { color: theme.muted, fontSize: 12, textAlign: 'center' },
     split: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
@@ -465,11 +493,14 @@ const createStyles = (theme: ActivityTheme, color: string) =>
     lastSelected: { backgroundColor: theme.accentSoft, borderColor: color },
     label: { fontWeight: '600', color: theme.text },
     save: {
-      backgroundColor: color,
-      width: 70,
-      height: 70,
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      marginTop: 16,
+      width: 80,
+      height: 80,
       alignSelf: 'center',
-      borderRadius: 35,
+      borderRadius: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },

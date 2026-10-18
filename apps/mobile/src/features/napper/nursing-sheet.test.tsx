@@ -90,7 +90,9 @@ it('opens the proposed time, keeps the picker stable across ticks, and starts at
   expect(sheet.props.dismissible).toBe(true);
   expect(sheet.props.draggable).toBe(true);
   expect(sheet.props.scrollable).toBe(true);
-  expect(sheet.props.detents).toEqual([0.5, 0.84]);
+  expect(sheet.props.detents[0]).toBeGreaterThan(0.5);
+  expect(sheet.props.detents[1]).toBeGreaterThan(sheet.props.detents[0]);
+  expect(sheet.props.detents[1]).toBeLessThan(1);
   expect(renderer.root.findByType('ScrollView' as never).props.nestedScrollEnabled).toBe(true);
 });
 it('updates the split before finger release and preserves an edit through remote/timer rerenders', async () => {

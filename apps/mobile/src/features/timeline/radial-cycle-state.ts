@@ -289,9 +289,8 @@ export function clusterRadialTargets(
 ): ProjectedRadialActivity[][] {
   const angle = (record: ProjectedRadialActivity) =>
     record.projection.token?.projection.angleDegrees ??
-    ((record.projection.arc?.start.angleDegrees ?? 0) +
-      (record.projection.arc?.end.angleDegrees ?? 0)) /
-      2;
+    record.projection.arc?.start.angleDegrees ??
+    0;
   const targets = records
     .filter(
       (record) =>
