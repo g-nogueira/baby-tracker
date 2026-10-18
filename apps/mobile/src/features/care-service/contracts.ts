@@ -60,6 +60,7 @@ export interface SleepActivity extends ActivityBase {
   pauseSeconds: number;
 }
 export interface PointActivity extends ActivityBase {
+  /** Bedtime may span a settling routine; its end is the start of night sleep. */
   kind: 'bedtime' | 'wake-up' | 'diaper' | 'medicine';
   diaperType?: DiaperType;
   note?: string;
@@ -80,7 +81,8 @@ export type NursingCommand =
   | { kind: 'pause' | 'stop' };
 export type PastActivity = (
   | { kind: 'nap' | 'night-waking'; startedAt: string; endedAt: string }
-  | { kind: 'bedtime' | 'wake-up'; startedAt: string }
+  | { kind: 'bedtime'; startedAt: string; endedAt?: string }
+  | { kind: 'wake-up'; startedAt: string }
   | { kind: 'diaper'; startedAt: string; diaperType: DiaperType }
   | { kind: 'medicine'; startedAt: string; note: string }
   | {

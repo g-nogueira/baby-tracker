@@ -75,6 +75,8 @@ if (process.argv.includes('--static')) {
   for (const scenario of [
     'day',
     'night',
+    'night-asleep',
+    'bedtime-range',
     'history',
     'bedtime',
     'new-nap',

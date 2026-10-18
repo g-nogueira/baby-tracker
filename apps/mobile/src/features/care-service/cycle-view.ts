@@ -12,7 +12,7 @@ import {
   type RadialActivityRecord,
   type RadialCycleView,
 } from '@/features/timeline/radial-cycle-state';
-import { byStart, sleepContext } from './sleep-state';
+import { byStart, sleepBoundaryAt, sleepContext } from './sleep-state';
 import type { CareActivity, PointActivity } from './contracts';
 
 /** Provider-neutral projection. Anchors retain the IDs of the exact editable source activities. */
@@ -46,11 +46,11 @@ export function careCycleViews(
         precedingNightSessionId: wake.id,
         nextNightSessionId: nextBed?.id ?? null,
         startedAt: wake.startedAt,
-        endedAt: nextBed?.startedAt ?? null,
+        endedAt: nextBed ? sleepBoundaryAt(nextBed) : null,
         timezone,
         startAnchor: { kind: 'wake_up', recordId: wake.id, at: wake.startedAt },
         endAnchor: nextBed
-          ? { kind: 'bedtime', recordId: nextBed.id, at: nextBed.startedAt }
+          ? { kind: 'bedtime', recordId: nextBed.id, at: sleepBoundaryAt(nextBed) }
           : null,
       } satisfies DayCycle)
     : createUnanchoredDayCycle(date, timezone);
@@ -78,10 +78,10 @@ export function careCycleViews(
           identity: { kind: 'night', nightSessionId: bed.id },
           kind: 'night',
           sourceNightSessionId: bed.id,
-          startedAt: bed.startedAt,
+          startedAt: sleepBoundaryAt(bed),
           endedAt: end?.startedAt ?? null,
           timezone,
-          startAnchor: { kind: 'bedtime', recordId: bed.id, at: bed.startedAt },
+          startAnchor: { kind: 'bedtime', recordId: bed.id, at: sleepBoundaryAt(bed) },
           endAnchor: end ? { kind: 'wake_up', recordId: end.id, at: end.startedAt } : null,
         }
       : null;
@@ -119,14 +119,14 @@ export function careCycleViews(
       type: 'interval',
       id: bed.id,
       lane: 'outer',
-      startedAt: bed.startedAt,
+      startedAt: sleepBoundaryAt(bed),
       endedAt: end?.startedAt ?? null,
     });
     metadata.set(bed.id, {
       id: bed.id,
       editorRecordId: bed.id,
       kind: 'night',
-      occurredAt: bed.startedAt,
+      occurredAt: sleepBoundaryAt(bed),
       endedAt: end?.startedAt ?? null,
       status: end ? 'completed' : 'active',
       diaperType: null,

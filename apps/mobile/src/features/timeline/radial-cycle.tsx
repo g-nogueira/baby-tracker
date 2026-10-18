@@ -182,7 +182,7 @@ export function RadialCycle({
             return (
               <Path
                 key={`arc:${record.id}`}
-                d={bandPath(start, start + Math.max(5, actualSweep), radius, 22)}
+                d={bandPath(start, start + Math.max(0.8, actualSweep), radius, 22)}
                 fill={radialActivityColor(record.kind, true)}
                 fillOpacity={0.12}
                 stroke={radialActivityColor(record.kind, true)}
@@ -273,13 +273,25 @@ export function RadialCycle({
                 active={first.status === 'active'}
               />
             ) : (
-              <View
-                style={[
-                  styles.token,
-                  { backgroundColor: radialActivityColor(first.kind, theme.night) },
-                ]}
-              >
-                <Text style={styles.tokenText}>{group.length}</Text>
+              <View style={styles.groupTarget}>
+                <ActivityBadge
+                  icon={first.kind}
+                  color={radialActivityColor(first.kind, theme.night)}
+                  size={36}
+                  active={group.some((record) => record.status === 'active')}
+                />
+                {group.some((record) => record.kind !== first.kind) ? (
+                  <View style={styles.groupSecondary}>
+                    <ActivityIcon
+                      name={group.find((record) => record.kind !== first.kind)?.kind ?? first.kind}
+                      color={theme.text}
+                      size={19}
+                    />
+                  </View>
+                ) : null}
+                <View style={styles.groupCount}>
+                  <Text style={styles.tokenText}>{group.length}</Text>
+                </View>
               </View>
             )}
           </RecordTarget>
@@ -548,16 +560,33 @@ const createStyles = (theme: ActivityTheme) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    token: {
-      width: 28,
-      height: 28,
+    groupTarget: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+    groupSecondary: {
+      position: 'absolute',
+      right: -2,
+      bottom: -2,
+      width: 23,
+      height: 23,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 2,
-      borderColor: theme.surface,
-      borderRadius: 14,
     },
-    tokenText: { color: theme.surface, fontSize: 13, fontWeight: '900' },
+    groupCount: {
+      position: 'absolute',
+      right: -3,
+      top: -3,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 3,
+      borderRadius: 9,
+      backgroundColor: theme.raised,
+      borderWidth: 1,
+      borderColor: theme.muted,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tokenText: { color: theme.text, fontSize: 10, fontWeight: '500' },
     continuation: { width: 20, height: 6, borderRadius: 3 },
     cycleControls: {
       position: 'absolute',

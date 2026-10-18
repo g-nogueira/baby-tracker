@@ -146,7 +146,12 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   const sheet = useRef<TrueSheet>(null);
   const opening = useRef(false);
   const { height } = useWindowDimensions();
-  const timed = kind === 'nap' || kind === 'night-waking' || kind === 'nursing';
+  const timed =
+    kind === 'bedtime' || kind === 'nap' || kind === 'night-waking' || kind === 'nursing';
+  const completedRange =
+    record?.status === 'completed' &&
+    timed &&
+    (kind !== 'bedtime' || start.getTime() !== end.getTime());
   const active = record !== null && record.status !== 'completed';
   const total = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
   const interval = timed && !active && (intent.type !== 'transition' || ending);
@@ -199,7 +204,11 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   };
   const save = () => {
     if (!valid || busy || pickerError) return;
-    if (intent.type === 'transition' && ending && (kind === 'nap' || kind === 'night-waking')) {
+    if (
+      intent.type === 'transition' &&
+      ending &&
+      (kind === 'bedtime' || kind === 'nap' || kind === 'night-waking')
+    ) {
       onExecute({
         type: 'record-past',
         activity: {
@@ -237,7 +246,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           leftSeconds: left,
           lastBreast: last,
         };
-      } else if (kind === 'nap' || kind === 'night-waking')
+      } else if (kind === 'bedtime' || kind === 'nap' || kind === 'night-waking')
         activity = { kind, startedAt, endedAt: end.toISOString() };
       else if (kind === 'diaper') activity = { kind, startedAt, diaperType: diaper };
       else if (kind === 'medicine') activity = { kind, startedAt, note };
@@ -342,7 +351,9 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       ref={sheet}
       initialDetentIndex={intent.type === 'past' ? 1 : 0}
       detents={[
-        kind === 'bedtime' ? 0.74 : Math.min(0.62, (kind === 'medicine' ? 490 : 450) / height),
+        kind === 'bedtime' && !record
+          ? 0.74
+          : Math.min(0.62, (kind === 'medicine' ? 490 : 450) / height),
         0.94,
       ]}
       scrollable
@@ -393,14 +404,20 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               accessibilityLabel={`Set ${activityLabels[kind]} time`}
               disabled={busy}
               onPress={() => void openTime()}
-              style={{ width: '100%', alignItems: 'center' }}
+              style={{
+                width: '100%',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: completedRange ? 60 : 52,
+                flexShrink: 0,
+              }}
             >
               <Text
                 numberOfLines={1}
                 adjustsFontSizeToFit
-                style={[styles.timer, record?.status === 'completed' && timed && styles.range]}
+                style={[styles.timer, completedRange && styles.range]}
               >
-                {record?.status === 'completed' && timed
+                {completedRange
                   ? `${clockLabel(start, timezone, false)} – ${clockLabel(end, timezone, false)}`
                   : expanded && timed
                     ? `${clockLabel(start, timezone, false)} – ${ending ? clockLabel(end, timezone, false) : active ? '…' : 'Set time'}`
@@ -419,18 +436,20 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               <Text style={styles.muted}>{active ? 'End · Running' : 'Set end time'}</Text>
             </Pressable>
           ) : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Set activity date"
-            disabled={busy}
-            onPress={() => void openTime('start', 'date')}
-            style={styles.date}
-          >
-            <Text style={[styles.muted, { width: '100%', textAlign: 'center' }]}>
-              {dayLabel(start, now, timezone)}
-            </Text>
-          </Pressable>
-          {record?.status === 'completed' && timed ? (
+          {!completedRange || expanded ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Set activity date"
+              disabled={busy}
+              onPress={() => void openTime('start', 'date')}
+              style={styles.date}
+            >
+              <Text style={[styles.muted, { width: '100%', textAlign: 'center' }]}>
+                {dayLabel(start, now, timezone)}
+              </Text>
+            </Pressable>
+          ) : null}
+          {completedRange ? (
             <Text style={styles.summary}>
               {shortDuration(end.getTime() - start.getTime())} long ·{' '}
               {shortDuration(now.getTime() - end.getTime())} ago
@@ -487,7 +506,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             ) : null}
           </>
         ) : null}
-        {sleepDetails && (expanded || kind === 'bedtime') ? (
+        {sleepDetails && (expanded || (kind === 'bedtime' && !record)) ? (
           <SleepDetailsFields
             kind={kind as 'bedtime' | 'nap' | 'night-waking' | 'wake-up'}
             details={details}
@@ -614,7 +633,7 @@ const createStyles = (theme: ActivityTheme) =>
       borderRadius: 12,
       paddingHorizontal: 16,
     },
-    hero: { alignItems: 'center', gap: 16, marginTop: -28, paddingHorizontal: 24 },
+    hero: { alignItems: 'center', gap: 16, marginTop: -28, paddingHorizontal: 24, flexShrink: 0 },
     title: { fontSize: 20, fontWeight: '500', color: theme.muted },
     summary: { marginTop: 4, fontSize: 14, color: theme.muted, opacity: 0.65, textAlign: 'center' },
     range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },

@@ -142,6 +142,8 @@ export function readCareRecord(wire: WireLog, revision: string, now: Date): Care
   const timed = kind === 'nap' || kind === 'night-waking';
   if (!timed && wire.isOpen)
     throw invalid('An unfinished bedtime routine or point activity must be reviewed in Napper.');
+  if (kind === 'bedtime' && Date.parse(end) > now.getTime())
+    throw invalid('A bedtime routine ends in the future.');
   if (Date.parse(startedAt) > now.getTime()) throw invalid('An activity starts in the future.');
   if (!wire.isOpen && Date.parse(end) < Date.parse(startedAt))
     throw invalid('An activity ends before it starts.');

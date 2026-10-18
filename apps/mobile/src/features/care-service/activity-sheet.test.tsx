@@ -410,3 +410,36 @@ it('edits an active Nursing start without silently adopting a newer remote revis
     revision: 'feed-v1',
   });
 });
+it('shows the Bedtime routine range and duration, and edits the sleep-start endpoint independently', async () => {
+  const activity: PointActivity = {
+    id: 'bed-routine',
+    revision: 'routine-v1',
+    kind: 'bedtime',
+    startedAt: '2026-10-14T19:45:00.000Z',
+    endedAt: '2026-10-14T19:55:00.000Z',
+    status: 'completed',
+  };
+  await render({ type: 'edit', activity });
+  const texts = () =>
+    renderer.root
+      .findAllByType('Text' as never)
+      .map((node) => node.children.join(''))
+      .join('|');
+  expect(texts()).toContain('7:45 – 7:55');
+  expect(texts()).toContain('10 min long');
+  expect(press('Long time to fall asleep')).toBeUndefined();
+  await act(async () => press('Set Night sleep time')?.props.onPress());
+  await act(async () => press('End time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-14T20:00:00Z')),
+  );
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: activity.startedAt,
+    endedAt: '2026-10-14T20:00:00.000Z',
+  });
+});

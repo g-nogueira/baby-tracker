@@ -177,7 +177,9 @@ export class NapperCareService implements CareService {
           const additional =
             command.type === 'edit-activity'
               ? [day(command.startedAt), ...(command.endedAt ? [day(command.endedAt)] : [])]
-              : command.type === 'record-past' && 'endedAt' in command.activity
+              : command.type === 'record-past' &&
+                  'endedAt' in command.activity &&
+                  command.activity.endedAt !== undefined
                 ? [day(command.activity.endedAt)]
                 : [];
           // The tracker may replan the remaining steps after confirming a dependent write.

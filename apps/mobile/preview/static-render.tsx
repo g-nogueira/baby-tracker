@@ -50,8 +50,8 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
         <View style={{ width, height, overflow: 'hidden' }}>
           <Preview
             scenario={
-              scenario === 'history'
-                ? 'history'
+              scenario === 'history' || scenario === 'night-asleep' || scenario === 'bedtime-range'
+                ? scenario
                 : dark
                   ? 'night'
                   : scenario === 'first-nursing'
@@ -67,6 +67,23 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
                 intent={{
                   type: 'transition',
                   command: scenario === 'bedtime' ? 'bedtime' : 'start-nap',
+                }}
+                onExecute={() => {}}
+              />
+            ) : null}
+            {scenario === 'bedtime-range' ? (
+              <ActivitySheet
+                {...callbacks}
+                intent={{
+                  type: 'edit',
+                  activity: {
+                    id: 'routine',
+                    revision: 'v1',
+                    kind: 'bedtime',
+                    startedAt: at(-119),
+                    endedAt: at(-109),
+                    status: 'completed',
+                  },
                 }}
                 onExecute={() => {}}
               />

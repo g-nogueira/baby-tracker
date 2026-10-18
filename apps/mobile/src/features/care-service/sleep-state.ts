@@ -6,6 +6,12 @@ import {
 } from './contracts';
 
 export const sleepKinds = new Set(['bedtime', 'wake-up', 'nap', 'night-waking']);
+/** A completed bedtime routine ends when night sleep begins; instant bedtimes remain valid. */
+export function sleepBoundaryAt(activity: CareActivity): string {
+  return activity.kind === 'bedtime'
+    ? (activity.endedAt ?? activity.startedAt)
+    : activity.startedAt;
+}
 export const byStart = (a: CareActivity, b: CareActivity) =>
   a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id);
 export function sleepContext(activities: readonly CareActivity[]) {
@@ -25,7 +31,7 @@ export function sleepContext(activities: readonly CareActivity[]) {
   const problem =
     naps.length > 1 || wakings.length > 1 || (nap && (night || waking))
       ? 'More than one sleep activity is running. Review the shared records before changing sleep.'
-      : waking && (!night || waking.startedAt <= night.startedAt)
+      : waking && (!night || waking.startedAt <= sleepBoundaryAt(night))
         ? 'A running night waking has no valid bedtime. Review the shared records before changing sleep.'
         : null;
   const latestEnd =
@@ -36,7 +42,7 @@ export function sleepContext(activities: readonly CareActivity[]) {
       .at(-1) ?? null;
   const lastWaking = night
     ? activities
-        .filter((a) => a.kind === 'night-waking' && a.startedAt >= night.startedAt)
+        .filter((a) => a.kind === 'night-waking' && a.startedAt >= sleepBoundaryAt(night))
         .sort(byStart)
         .at(-1)
     : null;
@@ -49,7 +55,7 @@ export function sleepContext(activities: readonly CareActivity[]) {
     latestEnd,
     phaseStartedAt:
       waking?.startedAt ??
-      (night ? (lastWaking?.endedAt ?? night.startedAt) : (nap?.startedAt ?? latestEnd)),
+      (night ? (lastWaking?.endedAt ?? sleepBoundaryAt(night)) : (nap?.startedAt ?? latestEnd)),
   };
 }
 /** Reject ambiguous state at the service boundary as well as disabling unsafe UI actions. */

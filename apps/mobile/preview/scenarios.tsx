@@ -64,22 +64,49 @@ export function Preview({
     measuredAt: at(0),
   };
 
+  const routine: CareActivity = {
+    ...bed,
+    startedAt: at(-119),
+    endedAt: at(-109),
+  };
+  const historyRows: CareActivity[] = [
+    { ...wake, startedAt: at(-827), endedAt: at(-827) },
+    { ...nap, startedAt: at(-660), endedAt: at(-610) },
+    { ...nursing, startedAt: at(-510), endedAt: at(-498), status: 'completed' },
+    { ...nursing, id: 'feed-2', startedAt: at(-495), endedAt: at(-483), status: 'completed' },
+    {
+      id: 'diaper',
+      revision: 'v1',
+      kind: 'diaper',
+      startedAt: at(-489),
+      endedAt: at(-489),
+      status: 'completed',
+      diaperType: 'wet',
+    },
+    routine,
+  ];
   const [date, setDate] = useState(at(0).slice(0, 10));
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CareActivity[]>(
-    scenario === 'first-nursing'
-      ? [wake]
-      : scenario === 'day' || scenario === 'history'
-        ? [wake, nap, nursing]
-        : [bed, waking, nursing],
+    scenario === 'night-asleep' || scenario === 'bedtime-range'
+      ? [routine]
+      : scenario === 'first-nursing'
+        ? [wake]
+        : scenario === 'day' || scenario === 'history'
+          ? scenario === 'history'
+            ? [wake, nap]
+            : [wake, nap, nursing]
+          : [bed, waking, nursing],
   );
   const snapshot: CareSnapshot = { activities: rows, issues: [] };
+  const historySnapshot =
+    scenario === 'history' ? { activities: historyRows, issues: [] } : snapshot;
   const model = {
     stage: 'ready',
     baby: { id: 'preview', name: 'Arthur' },
     babies: [{ id: 'preview', name: 'Arthur' }],
     current: snapshot,
-    history: snapshot,
+    history: historySnapshot,
     date,
     today: at(0).slice(0, 10),
     timezone: 'Europe/Lisbon',

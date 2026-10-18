@@ -566,3 +566,23 @@ it('opens care logging on the shared screen instead of routing to the separate l
     kind: 'medicine',
   });
 });
+it('counts Night sleep and Wake-up recency from the end of the Bedtime routine', async () => {
+  vi.setSystemTime(new Date('2026-10-18T20:44:00.000Z'));
+  const routine = {
+    ...bed,
+    startedAt: '2026-10-18T18:45:00.000Z',
+    endedAt: '2026-10-18T18:55:00.000Z',
+  };
+  hooks.model = {
+    ...hooks.model,
+    current: snapshot([routine]),
+    history: snapshot([routine]),
+    date: '2026-10-18',
+    today: '2026-10-18',
+  };
+  await render();
+  expect(text()).toContain('1h 49m');
+  expect(text()).not.toContain('1h 59m');
+  expect(press('Wake up, 1h 49m')).toBeDefined();
+  expect(press('Edit Bedtime, 07:55 PM')).toBeDefined();
+});

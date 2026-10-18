@@ -53,7 +53,7 @@ import type { CareActivity, CareCommand, CareKind, NursingActivity } from './con
 import { careCycleViews } from './cycle-view';
 import { nursingTimes } from './nursing';
 import { NursingSheet } from './nursing-sheet';
-import { activityDuration, byStart, sleepContext } from './sleep-state';
+import { activityDuration, byStart, sleepBoundaryAt, sleepContext } from './sleep-state';
 import { useCareTracker, type CareProviderFactory } from './use-care-tracker';
 
 type Drawer =
@@ -208,7 +208,7 @@ export function CareHome({
     {
       id: 'night',
       label: state.night ? 'Wake up' : 'Night sleep',
-      meta: state.night ? focusElapsed(state.night.startedAt) : recency('bedtime'),
+      meta: state.night ? focusElapsed(sleepBoundaryAt(state.night)) : recency('bedtime'),
       icon: state.night ? 'wake' : 'bedtime',
       color: '#5B4C94',
       disabled: blocked || Boolean(state.nap),
@@ -348,7 +348,7 @@ export function CareHome({
   const dialMaxSize = Math.min(
     440,
     viewport.width - 32,
-    Math.max(250, homeHeight - (historyMode ? 210 : 210)),
+    Math.max(250, homeHeight - (historyMode ? 200 : 210)),
   );
   const homeTop = historyMode
     ? 4
@@ -537,6 +537,9 @@ export function CareHome({
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>
                       {activityLabels[a.kind]} · {format(a.startedAt)}
+                      {a.kind === 'bedtime' && a.endedAt && a.endedAt !== a.startedAt
+                        ? ` – ${format(a.endedAt)}`
+                        : ''}
                       {a.status !== 'completed' ? ' · Running' : ''}
                     </Text>
                     <Text style={styles.muted}>
@@ -547,11 +550,13 @@ export function CareHome({
                           })()
                         : a.kind === 'nap' || a.kind === 'night-waking'
                           ? duration(activityDuration(a, now))
-                          : a.kind === 'diaper'
-                            ? a.diaperType
-                            : a.kind === 'medicine'
-                              ? a.note || 'No note'
-                              : 'Tap to edit time'}
+                          : a.kind === 'bedtime' && a.endedAt
+                            ? `${shortDuration(Date.parse(a.endedAt) - Date.parse(a.startedAt))} routine`
+                            : a.kind === 'diaper'
+                              ? a.diaperType
+                              : a.kind === 'medicine'
+                                ? a.note || 'No note'
+                                : 'Tap to edit time'}
                     </Text>
                   </View>
                 </Pressable>

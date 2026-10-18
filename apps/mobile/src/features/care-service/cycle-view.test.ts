@@ -108,3 +108,24 @@ it('keeps an unanchored day visible without inventing a bedtime or wake-up', () 
   expect(views.day.projection?.cycle.kind).toBe('unanchored_day');
   expect(views.night.projection).toBeNull();
 });
+it('uses the end of a Bedtime routine for Night sleep and fits completed Day history to that boundary', () => {
+  const routine = {
+    ...point('bedtime', '2026-10-18T18:45:00.000Z'),
+    endedAt: '2026-10-18T18:55:00.000Z',
+  };
+  const morning = point('wake-up', '2026-10-18T05:57:00.000Z');
+  const now = new Date('2026-10-18T20:44:00.000Z');
+  const views = careCycleViews([morning, routine], '2026-10-18', 'Europe/Lisbon', now, true);
+  expect(views.day.projection?.cycle.endedAt).toBe(routine.endedAt);
+  expect(views.day.projection?.anchors.at(-1)).toMatchObject({
+    recordId: routine.id,
+    at: routine.endedAt,
+    projection: { angleDegrees: CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES },
+  });
+  expect(views.day.ticks.some((tick) => tick.label === 'Midnight')).toBe(false);
+  expect(views.night.projection?.cycle.startedAt).toBe(routine.endedAt);
+  expect(
+    views.night.records.find((r) => r.id === routine.id)?.projection.arc?.actualDurationMs,
+  ).toBe(109 * 60000);
+  expect(views.day.records.some((r) => r.id === routine.id)).toBe(false);
+});

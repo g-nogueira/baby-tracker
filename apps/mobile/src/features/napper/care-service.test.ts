@@ -1074,3 +1074,105 @@ describe('bedtime and timezone wire conversion', () => {
     expect(Date.parse(zonedTimestamp(new Date(at), 'Europe/Lisbon'))).toBe(Date.parse(at));
   });
 });
+
+describe('Bedtime routine ranges', () => {
+  const start = '2026-10-18T18:45:00.000Z';
+  const end = '2026-10-18T18:55:00.000Z';
+  const now = '2026-10-18T20:44:00.000Z';
+  const routine = {
+    ...point('bedtime', start),
+    ...bedtimeFields(new Date(start), 'Europe/Lisbon'),
+    end,
+  };
+  it('decodes the original routine separately from the actual asleep phase', async () => {
+    const h = await careHarness([routine], now);
+    const record = await h.find('bedtime');
+    expect(record).toMatchObject({ startedAt: start, endedAt: end });
+    const state = sleepContext([record]);
+    expect(state.phaseStartedAt).toBe(end);
+    expect(Date.parse(now) - Date.parse(state.phaseStartedAt ?? '')).toBe(109 * 60000);
+  });
+  it('edits both routine endpoints, confirms readback and rejects an outdated revision', async () => {
+    const h = await careHarness([routine], now);
+    const expected = await h.find('bedtime');
+    const command: CareCommand = {
+      type: 'edit-activity',
+      expected,
+      startedAt: '2026-10-18T18:40:00.000Z',
+      endedAt: '2026-10-18T19:00:00.000Z',
+    };
+    await h.care.execute('test-baby', command);
+    expect(await h.find('bedtime')).toMatchObject({
+      startedAt: command.startedAt,
+      endedAt: command.endedAt,
+    });
+    expect(sleepContext((await h.care.current('test-baby')).activities).phaseStartedAt).toBe(
+      command.endedAt,
+    );
+    await expect(h.care.execute('test-baby', command)).rejects.toThrow(/changed/);
+    expect(h.sent).toHaveLength(1);
+  });
+  it('rejects waking and morning transitions inside the routine before writing', async () => {
+    const h = await careHarness([routine], now);
+    const expected = await h.find('bedtime');
+    for (const type of ['start-night-waking', 'wake-up'] as const)
+      await expect(
+        h.care.execute('test-baby', { type, expected, at: '2026-10-18T18:50:00.000Z' }),
+      ).rejects.toThrow(/follow bedtime/);
+    expect(h.sent).toHaveLength(0);
+  });
+  it('rejects an edited routine that would swallow a recorded night waking', async () => {
+    const h = await careHarness(
+      [
+        routine,
+        {
+          id: 'waking-after-routine',
+          category: 'NIGHT_WAKING',
+          start: '2026-10-18T19:00:00Z',
+          end: '2026-10-18T19:05:00Z',
+          isOpen: false,
+          pauses: [],
+        },
+      ],
+      now,
+    );
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'edit-activity',
+        expected: await h.find('bedtime'),
+        startedAt: start,
+        endedAt: '2026-10-18T19:02:00.000Z',
+      }),
+    ).rejects.toThrow(/after its bedtime/);
+    expect(h.sent).toHaveLength(0);
+  });
+  it.each([
+    ['2026-10-25T23:50:00.000Z', '2026-10-26T00:10:00.000Z'],
+    ['2026-10-25T00:50:00.000Z', '2026-10-25T01:10:00.000Z'],
+  ])(
+    'retains both endpoints across midnight or the Lisbon clock rollback (%s → %s)',
+    async (startedAt, endedAt) => {
+      const h = await careHarness([], '2026-10-26T02:00:00.000Z');
+      await h.care.execute('test-baby', {
+        type: 'record-past',
+        activity: { kind: 'bedtime', startedAt, endedAt },
+      });
+      expect(await h.find('bedtime')).toMatchObject({ startedAt, endedAt });
+    },
+  );
+  it.each(['2026-10-18T18:40:00.000Z', '2026-10-18T20:45:00.000Z'])(
+    'rejects a routine end before its start or after now (%s) before writing',
+    async (endedAt) => {
+      const h = await careHarness([routine], now);
+      await expect(
+        h.care.execute('test-baby', {
+          type: 'edit-activity',
+          expected: await h.find('bedtime'),
+          startedAt: start,
+          endedAt,
+        }),
+      ).rejects.toThrow();
+      expect(h.sent).toHaveLength(0);
+    },
+  );
+});
