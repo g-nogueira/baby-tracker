@@ -76,6 +76,7 @@ export class NapperTracker {
     date: string,
     prepare: (logs: WireLog[]) => WireLog[],
     additionalDates: string[] = [],
+    validateSaved?: (before: WireLog[], saved: WireLog[], requests: WireLog[]) => void,
   ) {
     if (this.mutationInFlight)
       throw new NapperError('conflict', 'A change is already being saved.');
@@ -92,20 +93,34 @@ export class NapperTracker {
       requests = prepare(before).map(nursingRequest);
       if (requests.length === 0)
         throw new NapperError('invalid', 'No activity change was prepared.');
+      const days = new Set([
+        date,
+        ...additionalDates,
+        ...requests.map((r) => calendarDayForInstant(new Date(String(r.start)), this.timezone)),
+      ]);
+      const confirm = (saved: WireLog[], expected: WireLog[]) => {
+        for (const request of expected) {
+          const actual = saved.find((log) => log.id === request.id);
+          if (!actual || !matchesCareWrite(actual, request))
+            throw new NapperError('uncertain', 'The saved activity could not be confirmed.');
+        }
+      };
       for (const request of requests) {
         await this.client.put(babyId, request);
         accepted++;
+        if (accepted < requests.length) {
+          const current = await this.windows(babyId, [...days]);
+          confirm(current, requests.slice(0, accepted));
+          // Recheck dependencies (including the reviewed bedtime) before the next PUT.
+          // Preparation must retain IDs across calls; accepted steps must not be repeated.
+          const pending = prepare(current).map(nursingRequest);
+          if (fingerprint(pending) !== fingerprint(requests.slice(accepted)))
+            throw new NapperError('conflict', 'The shared transition changed before completion.');
+        }
       }
-      const days = new Set([
-        date,
-        ...requests.map((r) => calendarDayForInstant(new Date(String(r.start)), this.timezone)),
-      ]);
       const saved = await this.windows(babyId, [...days]);
-      for (const request of requests) {
-        const actual = saved.find((log) => log.id === request.id);
-        if (!actual || !matchesCareWrite(actual, request))
-          throw new NapperError('uncertain', 'The saved activity could not be confirmed.');
-      }
+      confirm(saved, requests);
+      validateSaved?.(before, saved, requests);
     } catch (error) {
       if (
         requests.length &&
@@ -120,7 +135,7 @@ export class NapperTracker {
         throw new NapperError(
           'uncertain',
           accepted > 0 && accepted < requests.length
-            ? 'Only part of this transition was saved. Refresh and review the shared activities before continuing.'
+            ? 'The transition stopped before completion. Refresh and review the shared activities before continuing.'
             : 'The saved activity could not be confirmed. Refresh before making another change.',
         );
       }

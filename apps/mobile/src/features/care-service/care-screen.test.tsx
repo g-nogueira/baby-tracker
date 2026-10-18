@@ -237,6 +237,35 @@ it.each(['current', 'history'])(
     expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   },
 );
+it('shows an imported sleep collision once while leaving completed records editable and Nursing usable', async () => {
+  const wake: PointActivity = {
+    id: 'wake',
+    revision: 'wake-v1',
+    kind: 'wake-up',
+    startedAt: '2026-10-15T01:00:00.000Z',
+    endedAt: '2026-10-15T01:00:00.000Z',
+    status: 'completed',
+  };
+  const completed = {
+    ...waking,
+    endedAt: '2026-10-15T01:24:00.000Z',
+    status: 'completed' as const,
+  };
+  const message = 'A night waking must finish by the morning Wake up.';
+  hooks.model.current = {
+    activities: [bed, wake, completed, active],
+    issues: [{ id: 'collision', message, blocksWrites: false }],
+  };
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(text().split(message)).toHaveLength(2);
+  expect(press('Stop running Nursing')?.props.disabled).toBe(false);
+  await act(async () => press('Edit Wake up')?.props.onPress());
+  expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
+    type: 'edit',
+    activity: wake,
+  });
+});
 it('blocks writes and displays a fixed validation reason for an unsupported running record', async () => {
   hooks.model.current = {
     activities: [previous],

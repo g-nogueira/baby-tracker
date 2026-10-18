@@ -9,7 +9,8 @@ import {
 import { calendarDayForInstant } from '@/features/naps/calendar-day';
 import type { NapperClient } from './client';
 import { fingerprint, NapperError, type WireLog } from './contracts';
-import { prepareCareWrites } from './care-commands';
+import { prepareCareWrites, validateCareSleep } from './care-commands';
+import { sleepConflicts } from '@/features/care-service/sleep-conflicts';
 import { instant, kindForCategory, readCareRecord } from './care-records';
 import { NapperTracker } from './tracker';
 
@@ -76,6 +77,16 @@ export class NapperCareService implements CareService {
           blocksWrites: wire.isOpen !== false || kind === 'bedtime' || kind === 'wake-up',
         });
       }
+    }
+    for (const conflict of sleepConflicts(result.activities)) {
+      // A missing anchor at the left edge of the window is not evidence of a collision.
+      if (conflict.rule === 'waking-start' && conflict.ids.length === 1) continue;
+      result.issues.push({
+        id: conflict.key,
+        message: conflict.message,
+        // Keep records editable so a caregiver can repair a known, completed conflict.
+        blocksWrites: false,
+      });
     }
     // Retain bounded old revisions so an open draft cannot silently adopt a remote edit.
     while (this.revisions.size > 2048)
@@ -159,20 +170,36 @@ export class NapperCareService implements CareService {
               : command.type === 'record-past' && 'endedAt' in command.activity
                 ? [day(command.activity.endedAt)]
                 : [];
+          // The tracker may replan the remaining steps after confirming a dependent write.
+          const ids: string[] = [];
           await this.tracker.apply(
             profileId,
             date,
-            (logs) =>
-              prepareCareWrites(
+            (logs) => {
+              let index = 0;
+              return prepareCareWrites(
                 logs,
                 command,
                 expected,
                 this.now(),
-                this.newId,
+                () => {
+                  const id = ids[index] ?? this.newId();
+                  ids[index++] = id;
+                  return id;
+                },
                 user,
                 this.tracker.timezone,
-              ),
+              );
+            },
             additional,
+            (before, saved, requests) => {
+              if (
+                requests.some((r) =>
+                  ['BED_TIME', 'WOKE_UP', 'NAP', 'NIGHT_WAKING'].includes(String(r.category)),
+                )
+              )
+                validateCareSleep(before, saved, requests, this.now());
+            },
           );
         }
       } finally {

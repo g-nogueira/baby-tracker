@@ -71,6 +71,13 @@ function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }) {
     .sort(byStart)
     .at(-1);
   const blockingIssue = model.current.issues.find((i) => i.blocksWrites);
+  const reviewIssues = [
+    ...new Map(
+      [...model.current.issues, ...model.history.issues]
+        .filter((issue) => !issue.blocksWrites)
+        .map((issue) => [issue.id, issue]),
+    ).values(),
+  ];
   const blocked =
     model.busy ||
     model.needsRefresh ||
@@ -378,11 +385,11 @@ function CareHome({ model }: { model: ReturnType<typeof useCareTracker> }) {
             {model.error}
           </Text>
         ) : null}
-        {model.history.issues.length ? (
-          <Text style={styles.muted}>
-            Review {model.history.issues.length} unsupported activities in {model.providerName}.
+        {reviewIssues.map((issue) => (
+          <Text key={issue.id} accessibilityRole="alert" style={styles.error}>
+            {issue.message}
           </Text>
-        ) : null}
+        ))}
         <View style={styles.logHeader}>
           <Text style={styles.sectionTitle}>{selection === 'night' ? 'Night log' : 'Day log'}</Text>
           <Text style={styles.muted}>{rows.length} records</Text>

@@ -471,6 +471,233 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     expect(h.sent.filter((r) => r.category === 'NIGHT_WAKING').at(-1)?.isOpen).toBe(false);
     expect((await h.find('nursing')).status).toBe('completed');
   });
+  it('confirms the two-step morning transition while another caregiver changes concurrent Nursing', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('04:41:00'),
+      isOpen: true,
+    };
+    const feed: WireLog = {
+      id: 'feed',
+      category: 'NURSING',
+      start: stamp('05:50:00'),
+      end: stamp('05:50:00'),
+      isOpen: true,
+      activeBreast: 'RIGHT',
+      breastLeftMinutes: 0,
+      breastRightMinutes: 0,
+    };
+    const h = await careHarness([bed, waking, feed], stamp('05:57:00'));
+    h.afterPut(() => {
+      if (h.sent.length === 1)
+        h.setRows(
+          h
+            .rows()
+            .map((r) =>
+              r.id === feed.id ? { ...r, activeBreast: 'LEFT', breastRightMinutes: 420 } : r,
+            ),
+        );
+    });
+    await h.care.execute('test-baby', {
+      type: 'wake-up',
+      expected: await h.find('bedtime'),
+      at: h.now().toISOString(),
+    });
+    expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING', 'WOKE_UP']);
+    expect(h.rows().find((r) => r.id === waking.id)).toMatchObject({
+      isOpen: false,
+      end: '2026-10-15T06:57:00.000+01:00',
+    });
+    expect(h.rows().find((r) => r.id === feed.id)).toMatchObject({
+      isOpen: true,
+      activeBreast: 'LEFT',
+      breastRightMinutes: 420,
+    });
+    expect((await h.care.current('test-baby')).issues).toEqual([]);
+    expect(h.care.needsRefresh).toBe(false);
+  });
+  it('does not send Wake up when the preceding night-waking closure is acknowledged but unconfirmed', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('04:41:00'),
+      isOpen: true,
+    };
+    const h = await careHarness([bed, waking], stamp('05:57:00'));
+    const command: CareCommand = {
+      type: 'wake-up',
+      expected: await h.find('bedtime'),
+      at: h.now().toISOString(),
+    };
+    // A stale read or ignored closure must not be followed by the dependent boundary write.
+    h.afterPut(() => h.setRows([bed, waking]));
+    await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({ code: 'uncertain' });
+    expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING']);
+    expect(h.rows().some((r) => r.category === 'WOKE_UP')).toBe(false);
+    await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({ code: 'uncertain' });
+    expect(h.sent).toHaveLength(1);
+    h.afterPut(() => undefined);
+    await h.care.reconcile('test-baby');
+    await h.care.execute('test-baby', { ...command, expected: await h.find('bedtime') });
+    expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING', 'NIGHT_WAKING', 'WOKE_UP']);
+    expect((await h.care.current('test-baby')).issues).toEqual([]);
+  });
+  it('rechecks the reviewed bedtime between closing a waking and adding Wake up', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('04:41:00'),
+      isOpen: true,
+    };
+    const h = await careHarness([bed, waking], stamp('05:57:00'));
+    const expected = await h.find('bedtime');
+    h.afterPut(() =>
+      h.setRows(
+        h
+          .rows()
+          .map((r) =>
+            r.id === bed.id ? { ...r, comment: 'another caregiver edited bedtime' } : r,
+          ),
+      ),
+    );
+    await expect(
+      h.care.execute('test-baby', { type: 'wake-up', expected, at: h.now().toISOString() }),
+    ).rejects.toMatchObject({ code: 'uncertain' });
+    expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING']);
+    expect(h.rows().some((r) => r.category === 'WOKE_UP')).toBe(false);
+  });
+  it('stops a transition if another waking appears before the dependent Wake up write', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('04:41:00'),
+      isOpen: true,
+    };
+    const h = await careHarness([bed, waking], stamp('06:00:00'));
+    const expected = await h.find('bedtime');
+    h.afterPut(() =>
+      h.setRows([
+        ...h.rows(),
+        { ...waking, id: 'other-waking', start: stamp('05:58:00'), end: stamp('05:58:00') },
+      ]),
+    );
+    await expect(
+      h.care.execute('test-baby', { type: 'wake-up', expected, at: stamp('05:57:00') }),
+    ).rejects.toMatchObject({ code: 'uncertain' });
+    expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING']);
+  });
+  it('reports a remotely introduced collision after the boundary PUT even when both requested records match', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('04:41:00'),
+      isOpen: true,
+    };
+    const h = await careHarness([bed, waking], stamp('06:03:00'));
+    const expected = await h.find('bedtime');
+    h.afterPut(() => {
+      if (h.sent.length === 2)
+        h.setRows([
+          ...h.rows(),
+          {
+            ...waking,
+            id: 'remote-waking',
+            start: stamp('05:58:00'),
+            end: stamp('06:03:00'),
+            isOpen: false,
+          },
+        ]);
+    });
+    await expect(
+      h.care.execute('test-baby', { type: 'wake-up', expected, at: stamp('05:57:00') }),
+    ).rejects.toMatchObject({ code: 'uncertain' });
+    expect(h.sent).toHaveLength(2);
+    expect(h.care.needsRefresh).toBe(true);
+    const snapshot = await h.care.reconcile('test-baby');
+    expect(snapshot.issues.some((i) => i.message.includes('after its bedtime'))).toBe(true);
+    expect(h.care.needsRefresh).toBe(false);
+    expect(h.sent).toHaveLength(2);
+  });
+  it('shows a waking crossing Wake up on reads and allows an explicit correction without touching concurrent Nursing', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const wake = point('wake-up', stamp('05:57:00'));
+    const waking: WireLog = {
+      id: 'waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('04:41:00'),
+      end: stamp('06:03:00'),
+      isOpen: false,
+    };
+    const feed: WireLog = {
+      id: 'feed',
+      category: 'NURSING',
+      start: stamp('05:57:00'),
+      end: stamp('05:57:00'),
+      isOpen: true,
+      activeBreast: 'RIGHT',
+      breastLeftMinutes: 0,
+      breastRightMinutes: 0,
+    };
+    const h = await careHarness([bed, wake, waking, feed], stamp('06:04:00'));
+    const snapshot = await h.care.current('test-baby');
+    expect(snapshot.issues).toEqual([
+      expect.objectContaining({
+        message: 'A night waking must finish by the morning Wake up.',
+        blocksWrites: false,
+      }),
+    ]);
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'edit-activity',
+        expected: await h.find('night-waking'),
+        startedAt: stamp('04:41:00'),
+        endedAt: stamp('06:02:00'),
+      }),
+    ).rejects.toThrow('finish by');
+    expect(h.sent).toEqual([]);
+    await h.care.execute('test-baby', {
+      type: 'edit-activity',
+      expected: await h.find('night-waking'),
+      startedAt: stamp('04:41:00'),
+      endedAt: stamp('05:57:00'),
+    });
+    expect((await h.care.current('test-baby')).issues).toEqual([]);
+    expect(h.rows().find((r) => r.id === feed.id)).toEqual(feed);
+    expect(h.sent).toHaveLength(1);
+  });
+  it('does not mistake an unanchored historical waking for a known collision or allow a Nap to overlap it', async () => {
+    const waking: WireLog = {
+      id: 'old-waking',
+      category: 'NIGHT_WAKING',
+      start: '2026-10-13T01:00:00Z',
+      end: '2026-10-13T01:10:00Z',
+      isOpen: false,
+    };
+    const h = await careHarness([waking]);
+    expect((await h.care.current('test-baby')).issues).toEqual([]);
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'record-past',
+        activity: {
+          kind: 'nap',
+          startedAt: '2026-10-13T01:05:00Z',
+          endedAt: '2026-10-13T01:15:00Z',
+        },
+      }),
+    ).rejects.toThrow('overlap a night waking');
+    expect(h.sent).toEqual([]);
+  });
   it('closes an active night waking before morning Wake up, and blocks retry after a partial transition', async () => {
     const bed = point('bedtime', '2026-10-14T19:00:00Z');
     const waking: WireLog = {

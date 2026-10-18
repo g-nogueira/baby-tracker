@@ -77,11 +77,22 @@ non-final, future or out-of-bounds pauses remain invalid. Nursing can run concur
 records remain read-only with fixed explanations that contain no raw response data.
 
 Morning wake-up during an active waking needs two ordered PUTs: close that waking, then add
-`WOKE_UP`. No atomic batch or conditional-write contract was observed. If a later step or
-confirmation fails, accepted records are retained, the transition is marked uncertain and
-another write is blocked until manual refresh/review. No blind retry or compensating delete
+`WOKE_UP`. The first closure is reread and confirmed before the dependent boundary PUT. The
+remaining command is replanned against that fresh window, retaining its originally allocated
+IDs and reviewed bedtime revision. A changed bedtime, another waking, or an unconfirmed first
+save stops the transition before creating Wake up. After the final write, requested fields and
+the resulting sleep timeline are both verified, including newly introduced remote collisions.
+No atomic batch or conditional-write contract was observed. If a later step or confirmation
+fails, accepted records are retained, the transition is marked uncertain and another write is
+blocked until manual refresh/review. No blind retry or compensating delete
 is attempted. Another caregiver can still write between preflight GET and PUT; this adapter
-cannot provide the server-side CAS/atomicity that our own service should implement.
+cannot provide the server-side CAS/atomicity that our own service should implement. A stale
+Napper client can still overwrite records after confirmation; no client-only guard can prevent
+that remote write. Refresh exposes known sleep collisions as fixed read issues, including a
+closed night waking crossing morning Wake up. The UI displays those reasons and leaves completed
+records editable for an explicit correction; it does not silently shorten or remove real data.
+Nursing remains independent of sleep collision checks. A missing bedtime alone at the left edge
+of a bounded history is not presented as a confirmed collision.
 
 ## Connected home behavior
 
@@ -112,7 +123,10 @@ Migration/backfill of existing Napper records is a separate explicit operation, 
 Synthetic HTTP tests cover complete nights, concurrent Nursing, both kinds of waking completion,
 reopened and paused naps, frozen paused clocks, stopping during a pause, time edits, truncated
 night history, neighboring-boundary conflicts, unknown state, stale/forged revisions, double taps
-and partial transitions. Hook tests verify provider substitution, midnight rollover and confirmed-save/read
+and partial transitions. Regression fixtures cover acknowledged-but-unconfirmed closures,
+changes between the two morning writes, remote collisions introduced after the final PUT, and
+explicit correction of a closed waking that crosses Wake up without changing concurrent Nursing.
+Hook tests verify provider substitution, midnight rollover and confirmed-save/read
 failure handling. Native-boundary tests cover stable pickers, proposed times, continuous sliders,
 explicit Last, active-start revisions and dismissal without an implicit write.
 
@@ -121,5 +135,6 @@ requires a test profile on both phones: run bedtime → night waking → fell as
 with concurrent Nursing; confirm changes in Napper and in the other phone. Also edit a morning
 wake-up, log past-night care, pause/resume a nap in both apps, stop it while paused, and continue
 an accidentally stopped nap. Night read synchronization has been reported working on a phone;
-night write acceptance remains outstanding. Existing native dependencies
+night writes have been reported working with a collision caveat. The new guarded transition and
+collision warning/correction flow still require phone acceptance. Existing native dependencies
 are unchanged; this delivery does not require adding another native module.
