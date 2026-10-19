@@ -41,6 +41,8 @@ export function ActivityIcon({
     plus: 'M12 4V20 M4 12H20',
     settings: 'M4 7H20 M4 17H20 M8 4V10 M16 14V20',
     more: 'M4 12H4.1 M12 12H12.1 M20 12H20.1',
+    'more-filled':
+      'M6 12A1.5 1.5 0 1 1 3 12A1.5 1.5 0 1 1 6 12Z M13.5 12A1.5 1.5 0 1 1 10.5 12A1.5 1.5 0 1 1 13.5 12Z M21 12A1.5 1.5 0 1 1 18 12A1.5 1.5 0 1 1 21 12Z',
     close: 'M6 6L18 18 M18 6L6 18',
     stop: 'M6 6H18V18H6Z',
     pause: 'M8 5V19 M16 5V19',

@@ -6,6 +6,8 @@ import {
   HISTORY_START_ANGLE,
   HISTORY_SWEEP_ANGLE,
   historyDialGroups,
+  historyDialGroupBadge,
+  historyTargetDetails,
   historyDialView,
 } from './history-dial-state';
 
@@ -160,4 +162,84 @@ it('still offers exact record selection for a tightly overlapping diaper and fee
       .find((group) => group.some((target) => target.id === 'diaper'))
       ?.map((target) => target.id),
   ).toEqual(['diaper', 'feeding']);
+});
+
+it('places an overlapping feed/Nap group at the latest exact marker and retains both source IDs', () => {
+  const view = history([
+    feed('feeding', '09:16', '09:51'),
+    {
+      id: 'nap',
+      revision: 'v1',
+      kind: 'nap',
+      startedAt: at('09:26'),
+      endedAt: at('09:51'),
+      status: 'completed',
+      pauseSeconds: 0,
+      measuredAt: at('10:57'),
+    },
+  ]);
+  const group = historyDialGroups(view, 358, 'start').find((targets) => targets.length === 2);
+  if (!group) throw new Error('Expected overlapping feed/Nap group');
+  const badge = historyDialGroupBadge(group);
+  expect(badge.front.id).toBe('nap');
+  expect(badge.back?.id).toBe('feeding');
+  expect(badge.angle).toBe(
+    view.records.find((record) => record.id === 'nap')?.projection.arc?.start.angleDegrees,
+  );
+  expect(group.map((target) => target.record?.editorRecordId)).toEqual(['feeding', 'nap']);
+});
+it('shows chooser ordinals, full interval bounds and active time excluding Nursing pauses', () => {
+  const feeding = {
+    ...feed('feeding', '09:16', '09:51'),
+    leftSeconds: 120,
+    rightSeconds: 1800,
+    pauseSeconds: 180,
+  };
+  const view = history([
+    feeding,
+    {
+      id: 'nap',
+      revision: 'v1',
+      kind: 'nap',
+      startedAt: at('09:26'),
+      endedAt: at('09:51'),
+      status: 'completed',
+      pauseSeconds: 0,
+      measuredAt: at('10:57'),
+    },
+  ]);
+  const targets = historyDialGroups(view, 358, 'start').flat();
+  const feedingTarget = targets.find((target) => target.id === 'feeding');
+  const napTarget = targets.find((target) => target.id === 'nap');
+  if (!feedingTarget || !napTarget) throw new Error('Expected both chooser targets');
+  expect(historyTargetDetails(feedingTarget, view)).toMatchObject({
+    title: 'Nursing',
+    subtitle: '32m 00s',
+    start: feeding.startedAt,
+    end: feeding.endedAt,
+  });
+  expect(historyTargetDetails(napTarget, view)).toMatchObject({
+    title: 'First nap',
+    subtitle: '25m 00s',
+    start: at('09:26'),
+    end: at('09:51'),
+  });
+});
+
+it('collapses a chain of tight overlaps into one selectable group instead of overlapping two badges', () => {
+  const view = history([
+    feed('one', '14:00', '14:05'),
+    feed('two', '14:12', '14:17'),
+    feed('three', '14:24', '14:29'),
+  ]);
+  const groups = historyDialGroups(view, 358, 'start');
+  expect(
+    groups.find((group) => group.some((target) => target.id === 'one'))?.map((target) => target.id),
+  ).toEqual(['one', 'two', 'three']);
+  expect(
+    groups
+      .flat()
+      .map((target) => target.record?.editorRecordId)
+      .filter(Boolean),
+  ).toEqual(['one', 'two', 'three']);
 });

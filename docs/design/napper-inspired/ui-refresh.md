@@ -43,8 +43,16 @@ sets the connected client's appearance. The separate local tracker remains avail
   play/pause glyphs to the supplied Nursing comparison. The bar is narrower, with smaller artwork.
 - Reduced Diaper/Nursing artwork within dial badges, brightened the pink outline and added the active
   Nursing dotted mint ring. Partially overlapping badges remain individually visible at their real
-  time angles; only tighter overlaps open the exact-record chooser. Badge-sized tap areas keep a
+  time angles; tighter overlap chains collapse into one opaque ellipsis badge with one backing ring,
+  centered on the final member’s real angle. Short grouped intervals omit the extra capsule under
+  the badge; the chooser retains every full interval and source ID. Badge-sized tap areas keep a
   neighboring target from covering the center of another badge.
+- Replaced the full-height Nearby activities list with a compact, scrollable sheet of cards, ordered
+  from the latest dial marker. Cards show Nap ordinal, measured active duration and full Start–End
+  range. Nursing totals exclude pauses; selecting a card waits for dismissal before opening its editor.
+- Kept all four Diaper types in the native floating footer above Save at both drawer sizes, with
+  measured footer clearance for scrolling content. The compact drawer has room for the clock/age
+  and choices; four equal-width buttons avoid wrapping/cropping on a narrow phone.
 - Removed the extra artwork rings in drawers and enlarged the symbols. Clock ranges omit repeated AM/PM.
 - Moved primary actions and Nursing side controls into TrueSheet native floating footers.
   Bedtime initially opens at 74% with contextual fields; expanded drawers reach 94%.
@@ -66,8 +74,8 @@ sets the connected client's appearance. The separate local tracker remains avail
   anchor and Wake-up recency start at the routine's end. A 19:45–19:55 routine gives 1h 49m asleep at 21:44.
   Completed Bedtime opens as a compact range/duration drawer; its contextual fields appear on expansion.
 - Fitted completed Day history to its real Wake-up → sleep-start bounds, keeping editable source IDs.
-  Ticks outside those bounds disappear. Nearby groups show activity artwork, a count and a secondary
-  symbol when they contain different activity kinds; short duration bands use a smaller visual minimum.
+  Ticks outside those bounds disappear. Nearby groups retain their individual source activities
+  behind the ellipsis badge; ungrouped short duration bands use a smaller visual minimum.
 
 Individual Wake-up, Nap, Night waking, Nursing, Diaper and Medicine removal still requires confirmation
 of the reviewed revision. The adapter rereads before DELETE and confirms absence afterwards;
@@ -125,8 +133,12 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 
 ![Nearby Diaper/Nursing badges and active Nursing bar](ui-refresh/feeding-dial.png)
 
-Validation passed: `pnpm check` (487 tests), the Lisbon timezone care/timeline suite
-(182 tests), Android/iOS JavaScript exports and the standalone preview build.
+| Grouped dial | Nearby activity cards | Compact Diaper controls |
+| --- | --- | --- |
+| ![Grouped dial](ui-refresh/overlapping-dial.png) | ![Nearby cards](ui-refresh/nearby-activities.png) | ![Diaper controls](ui-refresh/diaper.png) |
+
+Validation passed: `pnpm check` (492 tests), the Lisbon timezone care/timeline suite
+(187 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -136,7 +148,9 @@ interval entry, annotation draft retention and the dependent Wake-up mood write.
 cover readback and revision conflicts, independent endpoints, overnight and Lisbon clock rollback,
 invalid ranges, transitions inside the routine and routine edits that overlap a recorded waking.
 Dial regressions keep a Diaper and feed 23 minutes apart individually visible without changing their
-angles, while tighter overlaps still retain exact record selection. History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
+angles, while tighter overlap chains retain exact record selection under a single badge. Additional
+checks cover chooser duration/ranges and exact Nursing handoff after dismissal, plus Diaper category
+selection surviving drawer expansion/collapse and retaining the reviewed revision on Save. History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
 chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
 also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
 outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.

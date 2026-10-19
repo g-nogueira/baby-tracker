@@ -10,6 +10,54 @@ import type {
 import type { useCareTracker } from '../src/features/care-service/use-care-tracker';
 // Synthetic, browser-only scenarios. This file is outside the Expo app/router and never calls HTTP.
 
+export function overlapActivities(now: number): CareActivity[] {
+  const at = (minutes: number) => new Date(now + minutes * 60000).toISOString();
+  return [
+    {
+      id: 'wake',
+      revision: 'v1',
+      kind: 'wake-up',
+      startedAt: at(-307),
+      endedAt: at(-307),
+      status: 'completed',
+    },
+    ...[-222, -127].map(
+      (minutes, index): CareActivity => ({
+        id: `diaper-${index}`,
+        revision: 'v1',
+        kind: 'diaper',
+        diaperType: 'wet',
+        startedAt: at(minutes),
+        endedAt: at(minutes),
+        status: 'completed',
+      }),
+    ),
+    {
+      id: 'feed',
+      revision: 'v1',
+      kind: 'nursing',
+      startedAt: at(-101),
+      endedAt: at(-65 - 23 / 60),
+      status: 'completed',
+      leftSeconds: 0,
+      rightSeconds: 2137,
+      pauseSeconds: 0,
+      measuredAt: at(0),
+      lastBreast: 'RIGHT',
+    },
+    {
+      id: 'nap',
+      revision: 'v1',
+      kind: 'nap',
+      startedAt: at(-91),
+      endedAt: at(-66),
+      status: 'completed',
+      pauseSeconds: 0,
+      measuredAt: at(0),
+    },
+  ];
+}
+
 export function Preview({
   scenario = 'night',
   now = Date.now(),
@@ -102,63 +150,65 @@ export function Preview({
   const [date, setDate] = useState(scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10));
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CareActivity[]>(
-    scenario === 'feeding-dial'
-      ? [
-          { ...wake, startedAt: at(-216), endedAt: at(-216) },
-          {
-            id: 'early-diaper',
-            revision: 'v1',
-            kind: 'diaper',
-            diaperType: 'wet',
-            startedAt: at(-90),
-            endedAt: at(-90),
-            status: 'completed',
-          },
-          {
-            id: 'near-feed-diaper',
-            revision: 'v1',
-            kind: 'diaper',
-            diaperType: 'wet',
-            startedAt: at(-33),
-            endedAt: at(-33),
-            status: 'completed',
-          },
-          { ...nursing, startedAt: at(-10), leftSeconds: 0, rightSeconds: 600 },
-        ]
-      : scenario === 'night-forecast'
+    ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
+      ? overlapActivities(now)
+      : scenario === 'feeding-dial'
         ? [
+            { ...wake, startedAt: at(-216), endedAt: at(-216) },
             {
-              ...routine,
-              startedAt: '2026-10-18T18:45:00.000Z',
-              endedAt: '2026-10-18T18:55:00.000Z',
+              id: 'early-diaper',
+              revision: 'v1',
+              kind: 'diaper',
+              diaperType: 'wet',
+              startedAt: at(-90),
+              endedAt: at(-90),
+              status: 'completed',
             },
+            {
+              id: 'near-feed-diaper',
+              revision: 'v1',
+              kind: 'diaper',
+              diaperType: 'wet',
+              startedAt: at(-33),
+              endedAt: at(-33),
+              status: 'completed',
+            },
+            { ...nursing, startedAt: at(-10), leftSeconds: 0, rightSeconds: 600 },
           ]
-        : scenario === 'day-markers' || scenario === 'wake-up'
+        : scenario === 'night-forecast'
           ? [
               {
-                ...wake,
-                startedAt: '2026-10-19T04:30:00.000Z',
-                endedAt: '2026-10-19T04:30:00.000Z',
-              },
-              {
-                id: 'day-diaper',
-                revision: 'v1',
-                kind: 'diaper',
-                diaperType: 'wet',
-                startedAt: '2026-10-19T06:14:00.000Z',
-                endedAt: '2026-10-19T06:14:00.000Z',
-                status: 'completed',
+                ...routine,
+                startedAt: '2026-10-18T18:45:00.000Z',
+                endedAt: '2026-10-18T18:55:00.000Z',
               },
             ]
-          : scenario === 'night-asleep' || scenario === 'bedtime-range'
-            ? [routine]
-            : scenario === 'first-nursing'
-              ? [wake]
-              : scenario === 'day' || scenario === 'history'
-                ? scenario === 'history'
-                  ? [wake, nap]
-                  : [wake, nap, nursing]
-                : [bed, waking, nursing],
+          : scenario === 'day-markers' || scenario === 'wake-up'
+            ? [
+                {
+                  ...wake,
+                  startedAt: '2026-10-19T04:30:00.000Z',
+                  endedAt: '2026-10-19T04:30:00.000Z',
+                },
+                {
+                  id: 'day-diaper',
+                  revision: 'v1',
+                  kind: 'diaper',
+                  diaperType: 'wet',
+                  startedAt: '2026-10-19T06:14:00.000Z',
+                  endedAt: '2026-10-19T06:14:00.000Z',
+                  status: 'completed',
+                },
+              ]
+            : scenario === 'night-asleep' || scenario === 'bedtime-range'
+              ? [routine]
+              : scenario === 'first-nursing'
+                ? [wake]
+                : scenario === 'day' || scenario === 'history'
+                  ? scenario === 'history'
+                    ? [wake, nap]
+                    : [wake, nap, nursing]
+                  : [bed, waking, nursing],
   );
   const snapshot: CareSnapshot = { activities: rows, issues: [] };
   const historySnapshot =

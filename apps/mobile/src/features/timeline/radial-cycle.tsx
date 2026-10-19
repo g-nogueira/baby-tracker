@@ -2,6 +2,7 @@ import { homeCycleView } from './home-cycle-view';
 import { HistoryDialMarkers } from './history-dial-markers';
 import {
   historyDialView,
+  historyDialGroups,
   historyActivityColor,
   DIAL_MARKER_RADIUS,
   HISTORY_START_ANGLE,
@@ -114,6 +115,15 @@ export function RadialCycle({
   const size = Math.min(maxSize, width - 32);
   const scale = size / VIEWBOX_SIZE;
   const projection = view.projection;
+  const groupedIds = new Set(
+    connected
+      ? historyDialGroups(view, size, history ? 'middle' : 'start')
+          .filter((targets) => targets.length > 1)
+          .flatMap((targets) =>
+            targets.flatMap((target) => (target.record ? [target.record.id] : [])),
+          )
+      : [],
+  );
   const status =
     centerStatus.value === null
       ? centerStatus.label
@@ -215,7 +225,9 @@ export function RadialCycle({
           const start = arc.start.angleDegrees;
           const actualSweep = Math.max(0, arc.end.angleDegrees - start);
           const visualSweep = Math.max(0.8, actualSweep);
-          if (connected && record.kind !== 'nap' && actualSweep < 18) return null;
+          // A short grouped interval is represented by its cluster badge and chooser range.
+          if (connected && actualSweep < 18 && (record.kind !== 'nap' || groupedIds.has(record.id)))
+            return null;
           if (theme.night)
             return (
               <Path

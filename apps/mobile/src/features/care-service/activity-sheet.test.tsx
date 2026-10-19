@@ -466,3 +466,36 @@ it('removes Wake up only after confirming the reviewed revision and supports min
   await act(async () => press('Confirm remove Wake up')?.props.onPress());
   expect(base.onExecute).toHaveBeenCalledWith({ type: 'remove-activity', expected: activity });
 });
+
+it('keeps all diaper choices in the native footer through expansion and preserves the selected draft', async () => {
+  const activity: PointActivity = {
+    id: 'diaper',
+    revision: 'reviewed-v1',
+    kind: 'diaper',
+    startedAt: '2026-10-15T09:00:00.000Z',
+    endedAt: '2026-10-15T09:00:00.000Z',
+    status: 'completed',
+    diaperType: 'wet',
+  };
+  await render({ type: 'edit', activity });
+  expect(renderer.root.findByType(SheetBoundary).props.footer).toBeDefined();
+  const scroll = renderer.root.findByType('ScrollView' as never);
+  expect(scroll.findAllByProps({ accessibilityRole: 'radio' })).toHaveLength(0);
+  for (const type of ['dry', 'wet', 'dirty', 'mixed'])
+    expect(press(`${type} diaper`)).toBeDefined();
+  await act(async () => press('mixed diaper')?.props.onPress());
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
+  expect(press('mixed diaper')?.props.accessibilityState.checked).toBe(true);
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 0 } }),
+  );
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: activity.startedAt,
+    diaperType: 'mixed',
+  });
+});

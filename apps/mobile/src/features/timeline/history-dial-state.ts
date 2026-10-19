@@ -74,13 +74,15 @@ export function historyDialGroups(
   }
   targets.sort((a, b) => a.angle - b.angle || a.id.localeCompare(b.id));
   // Allow partially overlapping badges like Napper; group only centers too close to select.
+  // Join touching neighbors transitively so a third nearby record cannot overlap a group.
   // Neither grouping nor overlap changes the authoritative timestamp/angle.
   const minimumAngle =
     (2 * Math.asin(Math.min(1, 9 / ((DIAL_MARKER_RADIUS * size) / 320))) * 180) / Math.PI;
   const groups: HistoryDialTarget[][] = [];
   for (const target of targets) {
     const previous = groups.at(-1);
-    if (previous && target.angle - previous[0].angle < minimumAngle) previous.push(target);
+    if (previous && target.angle - previous[previous.length - 1].angle < minimumAngle)
+      previous.push(target);
     else groups.push([target]);
   }
   return groups;
@@ -100,4 +102,57 @@ export function historyActivityColor(kind: string): string {
 }
 export function historyTargetIcon(target: HistoryDialTarget): string {
   return target.record?.kind ?? (target.anchor?.kind === 'bedtime' ? 'bedtime' : 'wake');
+}
+
+/** The final marker sits on its actual rail angle, with one quiet backing ring. */
+export function historyDialGroupBadge(targets: readonly HistoryDialTarget[]) {
+  const front = targets[targets.length - 1];
+  return {
+    front,
+    back: targets.length > 1 ? targets[targets.length - 2] : null,
+    angle: front.angle,
+  };
+}
+
+/** Compact chooser metadata retains full, unclipped intervals and measured active time. */
+export function historyTargetDetails(target: HistoryDialTarget, view: RadialCycleView) {
+  const record = target.record;
+  const napIndex =
+    record?.kind === 'nap'
+      ? [...view.records]
+          .filter((item) => item.kind === 'nap')
+          .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id))
+          .findIndex((item) => item.id === record.id)
+      : -1;
+  const title =
+    record?.kind === 'nap'
+      ? (['First nap', 'Second nap', 'Third nap', 'Fourth nap'][napIndex] ?? `Nap ${napIndex + 1}`)
+      : record?.kind === 'nursing'
+        ? 'Nursing'
+        : record?.kind === 'diaper'
+          ? 'Diaper change'
+          : record?.kind === 'medicine'
+            ? 'Medicine'
+            : record?.kind === 'night-waking'
+              ? 'Night waking'
+              : target.anchor?.kind === 'bedtime'
+                ? 'Bedtime'
+                : 'Wake-up';
+  const durationMs = record?.durationMs ?? record?.projection.arc?.actualDurationMs;
+  const seconds = durationMs === undefined ? null : Math.max(0, Math.floor(durationMs / 1000));
+  const duration =
+    seconds === null
+      ? null
+      : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+  const subtitle =
+    duration ??
+    (record?.diaperType ? record.diaperType[0].toUpperCase() + record.diaperType.slice(1) : null);
+  return {
+    title,
+    subtitle,
+    start: target.record ? target.record.occurredAt : target.anchor.at,
+    end: record?.endedAt ?? null,
+    running: record?.status === 'active',
+    paused: record?.status === 'paused',
+  };
 }

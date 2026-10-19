@@ -12,7 +12,8 @@ import {
   type RadialActivityRecord,
   type RadialCycleView,
 } from '@/features/timeline/radial-cycle-state';
-import { byStart, sleepBoundaryAt, sleepContext } from './sleep-state';
+import { nursingTimes } from './nursing';
+import { activityDuration, byStart, sleepBoundaryAt, sleepContext } from './sleep-state';
 import type { CareActivity, PointActivity } from './contracts';
 
 /** Provider-neutral projection. Anchors retain the IDs of the exact editable source activities. */
@@ -111,6 +112,11 @@ export function careCycleViews(
       occurredAt: a.startedAt,
       endedAt: point ? null : a.endedAt,
       status: a.status,
+      ...(a.kind === 'nursing'
+        ? { durationMs: nursingTimes(a, now).total * 1000 }
+        : a.kind === 'nap' || a.kind === 'night-waking'
+          ? { durationMs: activityDuration(a, now) }
+          : {}),
       diaperType: a.kind === 'diaper' ? (a.diaperType ?? null) : null,
     });
   }

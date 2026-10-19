@@ -15,6 +15,7 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: (v: unknown) => v, hairlineWidth: 1 },
   useWindowDimensions: () => ({ width: 390, height: 844 }),
 }));
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 16 }) }));
 vi.mock('react-native-svg', () => ({
   default: 'Svg',
   Circle: 'Circle',
@@ -256,5 +257,77 @@ it('lets a history group open its exact Wake-up boundary after the chooser dismi
   await act(async () => renderer.root.findByType(SheetBoundary).props.onDidDismiss());
   expect(openAnchor).toHaveBeenCalledWith('wake');
   expect(openRecord).not.toHaveBeenCalled();
+  await act(async () => renderer.unmount());
+});
+it('opens a grouped Nap/Nursing card with measured duration and hands off the exact feed after dismissal', async () => {
+  const at = (time: string) => `2026-10-19T${time}:00.000Z`;
+  const view = careCycleViews(
+    [
+      {
+        id: 'wake',
+        revision: 'v1',
+        kind: 'wake-up',
+        startedAt: at('05:50'),
+        endedAt: at('05:50'),
+        status: 'completed',
+      },
+      {
+        id: 'feeding',
+        revision: 'feed-v1',
+        kind: 'nursing',
+        startedAt: at('09:16'),
+        endedAt: '2026-10-19T09:51:37.000Z',
+        status: 'completed',
+        leftSeconds: 0,
+        rightSeconds: 2137,
+        lastBreast: 'RIGHT',
+        pauseSeconds: 0,
+        measuredAt: at('10:57'),
+      },
+      {
+        id: 'nap',
+        revision: 'nap-v1',
+        kind: 'nap',
+        startedAt: at('09:26'),
+        endedAt: at('09:51'),
+        status: 'completed',
+        pauseSeconds: 0,
+        measuredAt: at('10:57'),
+      },
+    ],
+    '2026-10-19',
+    'UTC',
+    new Date(at('10:57')),
+    true,
+  ).day;
+  const openRecord = vi.fn();
+  await act(async () => {
+    renderer = create(
+      <ActivityThemeContext.Provider value={nightTheme}>
+        <RadialCycle
+          view={view}
+          centerStatus={{ label: 'Awake for', value: '1h 6m', hint: '' }}
+          disabled={false}
+          onPressRecord={openRecord}
+        />
+      </ActivityThemeContext.Provider>,
+    );
+  });
+  const button = (prefix: string) =>
+    renderer.root
+      .findAllByType('Pressable' as never)
+      .find((node) => String(node.props.accessibilityLabel).startsWith(prefix));
+  await act(async () => button('2 nearby activities')?.props.onPress());
+  const text = renderer.root.findAllByType('Text' as never).map((node) => node.children.join(''));
+  expect(text).toContain('First nap');
+  expect(text).toContain('25m 00s');
+  expect(text).toContain('35m 37s');
+  await act(async () => button('Edit Nursing')?.props.onPress());
+  expect(openRecord).not.toHaveBeenCalled();
+  await act(async () => renderer.root.findByType(SheetBoundary).props.onDidDismiss());
+  expect(openRecord).toHaveBeenCalledOnce();
+  expect(openRecord).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'feeding', editorRecordId: 'feeding' }),
+  );
   await act(async () => renderer.unmount());
 });

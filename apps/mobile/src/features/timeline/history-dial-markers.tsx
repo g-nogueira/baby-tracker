@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
-import { TrueSheet } from '@lodev09/react-native-true-sheet';
+import { useState } from 'react';
+import { Pressable, View } from 'react-native';
+import { NearbyActivitiesSheet } from './nearby-activities-sheet';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { useActivityTheme } from '@/features/shared/activity-theme';
@@ -9,6 +9,7 @@ import {
   DIAL_MARKER_RADIUS,
   historyActivityColor,
   historyDialGroups,
+  historyDialGroupBadge,
   historyTargetIcon,
   type HistoryDialTarget,
 } from './history-dial-state';
@@ -30,9 +31,7 @@ export function HistoryDialMarkers({
   onPressAnchor?: (id: string) => void;
 }) {
   const theme = useActivityTheme();
-  const sheet = useRef<TrueSheet>(null);
   const [group, setGroup] = useState<HistoryDialTarget[] | null>(null);
-  const pending = useRef<HistoryDialTarget | null>(null);
   const clock = (at: string) =>
     new Intl.DateTimeFormat(undefined, {
       hour: 'numeric',
@@ -50,9 +49,9 @@ export function HistoryDialMarkers({
   return (
     <>
       {historyDialGroups(view, size, napPosition).map((targets) => {
-        const first = targets[0];
+        const { front: first, back, angle } = historyDialGroupBadge(targets);
         const boundary = targets.find((target) => target.anchor);
-        const radians = ((first.angle - 90) * Math.PI) / 180;
+        const radians = ((angle - 90) * Math.PI) / 180;
         const color = historyActivityColor(historyTargetIcon(first));
         const grouped = targets.length > 1;
         // Keep neighboring centers tappable when their badge edges overlap.
@@ -90,32 +89,32 @@ export function HistoryDialMarkers({
                 <View
                   style={{
                     position: 'absolute',
-                    left: -1,
-                    top: 0,
-                    width: 34,
-                    height: 34,
-                    borderRadius: 17,
+                    left: 0,
+                    top: 9,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
                     borderWidth: 2,
-                    borderColor: color,
-                    backgroundColor: theme.track,
+                    borderColor: historyActivityColor(historyTargetIcon(back ?? first)),
+                    backgroundColor: theme.field,
                   }}
                 />
                 <View
                   style={{
                     position: 'absolute',
-                    left: 7,
-                    top: 6,
+                    left: 4,
+                    top: 4,
                     width: 36,
                     height: 36,
                     borderRadius: 18,
                     borderWidth: 2,
-                    borderColor: historyActivityColor(historyTargetIcon(targets.at(-1) ?? first)),
-                    backgroundColor: '#263B40',
+                    borderColor: color,
+                    backgroundColor: theme.field,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <ActivityIcon name="more" color={theme.text} size={25} />
+                  <ActivityIcon name="more-filled" color={theme.muted} size={24} />
                 </View>
               </>
             ) : (
@@ -169,50 +168,13 @@ export function HistoryDialMarkers({
         );
       })}
       {group ? (
-        <TrueSheet
-          ref={sheet}
-          initialDetentIndex={0}
-          detents={['auto', 0.8]}
-          scrollable
-          draggable
-          dismissible
-          backgroundColor={theme.surface}
-          accessibilityOptions={{ paneTitle: 'Nearby activities' }}
-          onDidDismiss={() => {
-            setGroup(null);
-            const target = pending.current;
-            pending.current = null;
-            if (target) open(target);
-          }}
-        >
-          <ScrollView nestedScrollEnabled contentContainerStyle={{ padding: 24 }}>
-            <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 18 }}>
-              Nearby activities
-            </Text>
-            {group.map((target) => (
-              <Pressable
-                key={target.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit ${label(target)}`}
-                disabled={disabled}
-                onPress={() => {
-                  if (pending.current) return;
-                  pending.current = target;
-                  void sheet.current?.dismiss().catch(() => {
-                    pending.current = null;
-                  });
-                }}
-                style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12 }}
-              >
-                <ActivityIcon
-                  name={historyTargetIcon(target)}
-                  color={historyActivityColor(historyTargetIcon(target))}
-                />
-                <Text style={{ color: theme.text, fontSize: 14 }}>{label(target)}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </TrueSheet>
+        <NearbyActivitiesSheet
+          targets={group}
+          view={view}
+          disabled={disabled}
+          onDismiss={() => setGroup(null)}
+          onSelect={open}
+        />
       ) : null}
     </>
   );

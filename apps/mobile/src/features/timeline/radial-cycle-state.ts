@@ -36,6 +36,8 @@ export interface RadialActivityRecord {
   id: string;
   kind: RadialActivityKind;
   medicineNote?: string;
+  /** Recorded active time, excluding pauses; supplied by the connected read model. */
+  durationMs?: number;
   occurredAt: string;
   status: 'active' | 'completed' | NursingStatus;
   diaperType: DiaperType | null;

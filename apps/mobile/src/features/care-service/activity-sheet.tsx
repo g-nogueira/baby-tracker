@@ -144,6 +144,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(intent.type === 'past');
   const sheet = useRef<TrueSheet>(null);
+  const [footerHeight, setFooterHeight] = useState(160);
   const opening = useRef(false);
   const { height } = useWindowDimensions();
   const timed =
@@ -265,7 +266,28 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           })
       : null;
   const footer = (
-    <View pointerEvents="box-none" style={[styles.footer, { width: '100%' }]}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.footer, { width: '100%' }]}
+      onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
+    >
+      {kind === 'diaper' ? (
+        <View accessibilityLabel="Diaper content" style={styles.diaperChoices}>
+          {(['dry', 'wet', 'dirty', 'mixed'] as const).map((choice) => (
+            <Pressable
+              key={choice}
+              accessibilityRole="radio"
+              accessibilityLabel={`${choice} diaper`}
+              accessibilityState={{ checked: diaper === choice }}
+              disabled={busy}
+              onPress={() => setDiaper(choice)}
+              style={[styles.choice, styles.diaperChoice, diaper === choice && styles.selected]}
+            >
+              <Text style={styles.choiceText}>{choice[0].toUpperCase() + choice.slice(1)}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       <View style={[styles.footerActions, { width: '100%' }]}>
         {(intent.type === 'transition' || record?.kind === 'wake-up') && !active ? (
           <Pressable
@@ -351,9 +373,11 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       ref={sheet}
       initialDetentIndex={intent.type === 'past' ? 1 : 0}
       detents={[
-        kind === 'bedtime' && !record
-          ? 0.74
-          : Math.min(0.62, (kind === 'medicine' ? 490 : 450) / height),
+        kind === 'diaper'
+          ? Math.min(0.8, 510 / height)
+          : kind === 'bedtime' && !record
+            ? 0.74
+            : Math.min(0.62, (kind === 'medicine' ? 490 : 450) / height),
         0.94,
       ]}
       scrollable
@@ -371,7 +395,10 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
       <ScrollView
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(160, footerHeight + 20) },
+        ]}
       >
         <SheetToolbar
           label={activityLabels[kind]}
@@ -391,10 +418,14 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               : undefined
           }
         />
-        <View style={styles.hero}>
-          <ActivityIcon name={activityIcons[kind]} color={color} size={88} />
+        <View style={[styles.hero, kind === 'diaper' && !expanded && styles.diaperHero]}>
+          <ActivityIcon
+            name={activityIcons[kind]}
+            color={color}
+            size={kind === 'diaper' && !expanded ? 72 : 88}
+          />
           <Text accessibilityRole="header" style={styles.title}>
-            {kind === 'bedtime' ? 'Bedtime' : title}
+            {kind === 'bedtime' ? 'Bedtime' : kind === 'diaper' ? 'Diaper change' : title}
           </Text>
           {!expanded && active && (record.kind === 'nap' || record.kind === 'night-waking') ? (
             <Text style={styles.timer}>{formatLiveDuration(activityDuration(record, now))}</Text>
@@ -436,7 +467,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               <Text style={styles.muted}>{active ? 'End · Running' : 'Set end time'}</Text>
             </Pressable>
           ) : null}
-          {(!completedRange && record?.kind !== 'wake-up') || expanded ? (
+          {(!completedRange && record?.kind !== 'wake-up' && kind !== 'diaper') || expanded ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Set activity date"
@@ -449,7 +480,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               </Text>
             </Pressable>
           ) : null}
-          {record?.kind === 'wake-up' ? (
+          {record?.kind === 'wake-up' || record?.kind === 'diaper' ? (
             <Text style={styles.summary}>{shortDuration(now.getTime() - start.getTime())} ago</Text>
           ) : null}
           {completedRange ? (
@@ -516,23 +547,6 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             disabled={busy}
             onChange={(patch) => setDetailPatch((previous) => ({ ...previous, ...patch }))}
           />
-        ) : null}
-        {kind === 'diaper' ? (
-          <View style={styles.choices}>
-            {(['dry', 'wet', 'dirty', 'mixed'] as const).map((choice) => (
-              <Pressable
-                key={choice}
-                accessibilityRole="radio"
-                accessibilityLabel={`${choice} diaper`}
-                accessibilityState={{ checked: diaper === choice }}
-                disabled={busy}
-                onPress={() => setDiaper(choice)}
-                style={[styles.choice, diaper === choice && styles.selected]}
-              >
-                <Text style={styles.choiceText}>{choice[0].toUpperCase() + choice.slice(1)}</Text>
-              </Pressable>
-            ))}
-          </View>
         ) : null}
         {kind === 'medicine' ? (
           <TextInput
@@ -652,6 +666,9 @@ const createStyles = (theme: ActivityTheme) =>
     summary: { marginTop: 4, fontSize: 14, color: theme.muted, opacity: 0.65, textAlign: 'center' },
     range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },
     timer: { fontSize: 38, color: theme.text, fontWeight: '500', fontVariant: ['tabular-nums'] },
+    diaperHero: { gap: 12 },
+    diaperChoices: { width: '100%', flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
+    diaperChoice: { flex: 1, minWidth: 0, paddingHorizontal: 4 },
     choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
     choice: {
       padding: 12,

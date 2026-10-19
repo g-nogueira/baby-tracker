@@ -4,7 +4,11 @@ import regular from '../assets/napper/Saans-Regular.ttf';
 import medium from '../assets/napper/Saans-Medium.ttf';
 import italic from '../assets/napper/Saans-RegularItalic.ttf';
 import { TrackingFontsContext } from '../src/features/shared/tracking-text';
-import { Preview } from './scenarios';
+import { NearbyActivitiesSheet } from '../src/features/timeline/nearby-activities-sheet';
+import { careCycleViews } from '../src/features/care-service/cycle-view';
+import { homeCycleView } from '../src/features/timeline/home-cycle-view';
+import { historyDialGroups } from '../src/features/timeline/history-dial-state';
+import { Preview, overlapActivities } from './scenarios';
 import { ActivityThemeContext, nightTheme } from '../src/features/shared/activity-theme';
 import { ActivitySheet } from '../src/features/care-service/activity-sheet';
 import { NursingSheet } from '../src/features/care-service/nursing-sheet';
@@ -16,8 +20,9 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
     window: { width, height, scale: 1, fontScale: 1 },
     screen: { width, height, scale: 1, fontScale: 1 },
   });
-  const frozen =
-    scenario === 'feeding-dial'
+  const frozen = ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
+    ? '2026-10-19T09:57:00.000Z'
+    : scenario === 'feeding-dial'
       ? '2026-10-19T08:26:00.000Z'
       : scenario === 'night-forecast'
         ? '2026-10-19T00:20:00.000Z'
@@ -52,6 +57,11 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
   const dark = scenario.startsWith('night') || scenario === 'nursing';
   const theme = nightTheme;
   const callbacks = { onClose: () => {}, busy: false, error: null, now, timezone: 'Europe/Lisbon' };
+  const overlap = homeCycleView(
+    careCycleViews(overlapActivities(now.getTime()), '2026-10-19', 'Europe/Lisbon', now, true).day,
+  );
+  const cluster =
+    historyDialGroups(overlap, width - 32, 'start').find((targets) => targets.length > 1) ?? [];
   function Screen() {
     return (
       <TrackingFontsContext.Provider value={true}>
@@ -60,6 +70,9 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
             scenario={
               [
                 'feeding-dial',
+                'overlapping-dial',
+                'nearby-activities',
+                'diaper',
                 'history',
                 'night-asleep',
                 'bedtime-range',
@@ -77,6 +90,33 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
             now={now.getTime()}
           />
           <ActivityThemeContext.Provider value={theme}>
+            {scenario === 'nearby-activities' ? (
+              <NearbyActivitiesSheet
+                targets={cluster}
+                view={overlap}
+                disabled={false}
+                onSelect={() => {}}
+                onDismiss={() => {}}
+              />
+            ) : null}
+            {scenario === 'diaper' ? (
+              <ActivitySheet
+                {...callbacks}
+                intent={{
+                  type: 'edit',
+                  activity: {
+                    id: 'diaper-0',
+                    revision: 'v1',
+                    kind: 'diaper',
+                    status: 'completed',
+                    diaperType: 'wet',
+                    startedAt: '2026-10-19T06:15:00.000Z',
+                    endedAt: '2026-10-19T06:15:00.000Z',
+                  },
+                }}
+                onExecute={() => {}}
+              />
+            ) : null}
             {scenario === 'bedtime' || scenario === 'new-nap' ? (
               <ActivitySheet
                 {...callbacks}
@@ -163,5 +203,5 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
   } finally {
     globalThis.Date = systemDate;
   }
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${renderToString(getStyleElement())}<style>@font-face{font-family:Saans-Regular;src:url('${regular}')}@font-face{font-family:Saans-Medium;src:url('${medium}')}@font-face{font-family:Saans-RegularItalic;src:url('${italic}')}@page{size:${width}px ${height}px;margin:0}html,body{width:${width}px;height:${height}px;margin:0;overflow:hidden}body{font-family:Saans-Regular,sans-serif;background:${theme.background}}#react-root{height:${height}px}[role=dialog]{position:fixed;top:0;left:0;bottom:0;right:0}[role=dialog]>div{height:${scenario === 'bedtime' ? height * 0.74 : scenario === 'nursing' ? Math.min(height * 0.78, 600) : scenario === 'first-nursing' ? Math.min(height * 0.78, 540) : Math.min(height * 0.62, 450)}px!important;top:auto!important;bottom:0!important;left:0!important;transform:none!important}[role=dialog]>button{top:0;left:0;bottom:0;right:0}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${renderToString(getStyleElement())}<style>@font-face{font-family:Saans-Regular;src:url('${regular}')}@font-face{font-family:Saans-Medium;src:url('${medium}')}@font-face{font-family:Saans-RegularItalic;src:url('${italic}')}@page{size:${width}px ${height}px;margin:0}html,body{width:${width}px;height:${height}px;margin:0;overflow:hidden}body{font-family:Saans-Regular,sans-serif;background:${theme.background}}#react-root{height:${height}px}[role=dialog]{position:fixed;top:0;left:0;bottom:0;right:0}[role=dialog]>div{height:${scenario === 'nearby-activities' ? Math.min(height * 0.8, 80 + cluster.length * 96 + Math.max(0, cluster.length - 1) * 10 + 16) : scenario === 'diaper' ? Math.min(height * 0.8, 510) : scenario === 'bedtime' ? height * 0.74 : scenario === 'nursing' ? Math.min(height * 0.78, 600) : scenario === 'first-nursing' ? Math.min(height * 0.78, 540) : Math.min(height * 0.62, 450)}px!important;top:auto!important;bottom:0!important;left:0!important;transform:none!important}[role=dialog]>button{top:0;left:0;bottom:0;right:0}</style></head><body>${body}</body></html>`;
 }
