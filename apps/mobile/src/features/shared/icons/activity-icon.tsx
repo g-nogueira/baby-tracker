@@ -45,6 +45,8 @@ export function ActivityIcon({
     stop: 'M6 6H18V18H6Z',
     pause: 'M8 5V19 M16 5V19',
     play: 'M8 5L19 12L8 19Z',
+    'play-filled': 'M7 4L20 12L7 20Z',
+    'pause-filled': 'M6 4H10V20H6Z M14 4H18V20H14Z',
     check: 'M4 12L9 17L20 6',
     'home-filled': 'M2 11L12 2L22 11H20V22H14V15H10V22H4V11Z',
     moon: 'M20 15A9 9 0 0 1 9 4A9 9 0 1 0 20 15Z',
@@ -91,7 +93,7 @@ export function ActivityIcon({
       <Path
         d={paths[kind] ?? paths.check}
         transform={kind === 'pacifier' ? 'rotate(40 12 12)' : undefined}
-        fill={kind === 'stop' || kind === 'home-filled' ? color : 'none'}
+        fill={kind === 'stop' || kind.endsWith('-filled') ? color : 'none'}
         stroke={color}
         strokeWidth={1.7}
         strokeLinecap="round"

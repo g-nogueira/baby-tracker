@@ -81,7 +81,7 @@ it('keeps Home care markers on the same track as the Wake-up anchor at their act
   )?.props.style;
   expect(care).toBeDefined();
   expect(anchor).toBeDefined();
-  const center = 358 / 2 - 22;
+  const center = 358 / 2 - 18;
   for (const position of [care, anchor])
     expect(Math.hypot(position.left - center, position.top - center)).toBeCloseTo(
       (135 * 358) / 320,

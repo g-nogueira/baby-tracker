@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { homeCycleView } from './home-cycle-view';
 import { careCycleViews } from '@/features/care-service/cycle-view';
 import type { CareActivity, NursingActivity } from '@/features/care-service/contracts';
 import {
@@ -99,4 +100,64 @@ it('places the small Nap symbol inside its duration band while retaining the act
   const arc = target?.record?.projection.arc;
   expect(target?.angle).toBe(((arc?.start.angleDegrees ?? 0) + (arc?.end.angleDegrees ?? 0)) / 2);
   expect(target?.record?.occurredAt).toBe(at('09:40'));
+});
+
+it('keeps a diaper and feed 23 minutes apart individually visible on Home without moving either time', () => {
+  const view = homeCycleView(
+    careCycleViews(
+      [
+        wake,
+        {
+          id: 'diaper',
+          revision: 'v1',
+          kind: 'diaper',
+          diaperType: 'wet',
+          startedAt: at('07:53'),
+          endedAt: at('07:53'),
+          status: 'completed',
+        },
+        feed('feeding', '08:16', '08:26'),
+      ],
+      '2026-10-18',
+      'Europe/Lisbon',
+      new Date(at('08:27')),
+      false,
+    ).day,
+  );
+  for (const size of [358, 414]) {
+    const targets = historyDialGroups(view, size, 'start');
+    expect(
+      targets.map((group) => group.map((target) => target.record?.id ?? target.anchor?.recordId)),
+    ).toEqual([['wake'], ['diaper'], ['feeding']]);
+    for (const record of view.records) {
+      const target = targets.flat().find((target) => target.record?.id === record.id);
+      expect(target?.angle).toBe(
+        record.projection.token?.projection.angleDegrees ??
+          record.projection.arc?.start.angleDegrees,
+      );
+      expect(target?.record?.occurredAt).toBe(record.occurredAt);
+    }
+  }
+});
+it('still offers exact record selection for a tightly overlapping diaper and feed', () => {
+  const groups = historyDialGroups(
+    history([
+      {
+        id: 'diaper',
+        revision: 'v1',
+        kind: 'diaper',
+        diaperType: 'wet',
+        startedAt: at('14:00'),
+        endedAt: at('14:00'),
+        status: 'completed',
+      },
+      feed('feeding', '14:05', '14:17'),
+    ]),
+    358,
+  );
+  expect(
+    groups
+      .find((group) => group.some((target) => target.id === 'diaper'))
+      ?.map((target) => target.id),
+  ).toEqual(['diaper', 'feeding']);
 });

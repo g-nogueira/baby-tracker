@@ -1,7 +1,8 @@
 import { Text } from '@/features/shared/tracking-text';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { LIVE_CONTROLLER_MIN_HEIGHT } from './activity-live-controller-layout';
@@ -48,9 +49,10 @@ export function ActivityLiveController({
   nursingSides,
 }: ActivityLiveControllerProps) {
   const theme = useActivityTheme();
+  const gradientId = `nursing${useId().replaceAll(':', '')}`;
   const styles = useMemo(() => createStyles(theme), [theme]);
   return (
-    <View style={styles.controller}>
+    <View style={[styles.controller, theme.night && nursingSides && styles.nursingController]}>
       {nursingSides ? (
         <View style={styles.body}>
           <Pressable
@@ -60,7 +62,7 @@ export function ActivityLiveController({
             onPress={onOpen}
             style={styles.openIcon}
           >
-            <ActivityIcon name={icon} color={accentColor} size={34} />
+            <ActivityIcon name={icon} color={accentColor} size={theme.night ? 30 : 34} />
           </Pressable>
           {(['LEFT', 'RIGHT'] as const).map((side) => (
             <Pressable
@@ -69,17 +71,57 @@ export function ActivityLiveController({
               accessibilityLabel={`${nursingSides.active === side ? 'Pause' : nursingSides.active === null ? 'Resume' : 'Switch to'} ${side === 'LEFT' ? 'Left' : 'Right'} breast`}
               disabled={disabled}
               onPress={side === 'LEFT' ? nursingSides.onLeft : nursingSides.onRight}
-              style={[styles.sidePill, nursingSides.active === side && styles.activeSide]}
+              style={[
+                styles.sidePill,
+                nursingSides.active === side && styles.activeSide,
+                disabled && styles.disabled,
+              ]}
             >
+              {theme.night && nursingSides.active === side ? (
+                <View pointerEvents="none" style={[StyleSheet.absoluteFill, { height: 44 }]}>
+                  <Svg width="100%" height={44} accessibilityElementsHidden>
+                    <Defs>
+                      <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor="#8587FF" />
+                        <Stop offset="1" stopColor="#D1C8FF" />
+                      </LinearGradient>
+                    </Defs>
+                    <Rect
+                      x={1}
+                      y={1}
+                      width="99%"
+                      height={42}
+                      rx={21}
+                      fill={`url(#${gradientId})`}
+                      stroke="#B7B2FF"
+                      strokeWidth={2}
+                    />
+                  </Svg>
+                </View>
+              ) : null}
               <Text
                 style={[styles.sideTime, nursingSides.active === side && styles.activeSideText]}
               >
                 {side === 'LEFT' ? `L ${nursingSides.left}` : `R ${nursingSides.right}`}
               </Text>
               <ActivityIcon
-                name={nursingSides.active === side ? 'pause' : 'play'}
+                name={
+                  theme.night
+                    ? nursingSides.active === side
+                      ? 'pause-filled'
+                      : 'play-filled'
+                    : nursingSides.active === side
+                      ? 'pause'
+                      : 'play'
+                }
                 size={16}
-                color={nursingSides.active === side ? theme.onAccent : theme.muted}
+                color={
+                  theme.night
+                    ? '#F9F8F6'
+                    : nursingSides.active === side
+                      ? theme.onAccent
+                      : theme.muted
+                }
               />
             </Pressable>
           ))}
@@ -122,6 +164,7 @@ export function ActivityLiveController({
         onPress={onStop}
         style={({ pressed }) => [
           styles.stop,
+          theme.night && nursingSides && { width: 56 },
           disabled && styles.disabled,
           pressed && styles.pressed,
         ]}
@@ -146,6 +189,11 @@ const createStyles = (theme: ActivityTheme) =>
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
       elevation: 8,
+    },
+    nursingController: {
+      borderRadius: 18,
+      marginHorizontal: 8,
+      backgroundColor: '#2A284F',
     },
     body: {
       minHeight: LIVE_CONTROLLER_MIN_HEIGHT,
@@ -176,10 +224,22 @@ const createStyles = (theme: ActivityTheme) =>
       justifyContent: 'center',
       gap: 5,
       borderRadius: 24,
+      backgroundColor: theme.night ? '#302D57' : 'transparent',
     },
-    sideTime: { color: theme.muted, fontSize: 14, fontVariant: ['tabular-nums'] },
-    activeSide: { backgroundColor: '#999BFF' },
-    activeSideText: { color: theme.onAccent },
+    sideTime: {
+      color: theme.night ? '#77729A' : theme.muted,
+      fontSize: 14,
+      fontWeight: '400',
+      fontVariant: theme.night ? [] : ['tabular-nums'],
+    },
+    activeSide: {
+      backgroundColor: '#999BFF',
+      shadowColor: '#A9A2FF',
+      shadowOpacity: theme.night ? 0.4 : 0,
+      shadowRadius: 5,
+      shadowOffset: { width: 0, height: 0 },
+    },
+    activeSideText: { color: theme.night ? '#19152F' : theme.onAccent },
     icon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
     copy: { flex: 1, minWidth: 0, gap: 2 },
     title: { color: '#D8D2CC', fontSize: 12, fontWeight: '700' },

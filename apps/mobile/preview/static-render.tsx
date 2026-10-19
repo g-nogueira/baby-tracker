@@ -17,11 +17,13 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
     screen: { width, height, scale: 1, fontScale: 1 },
   });
   const frozen =
-    scenario === 'night-forecast'
-      ? '2026-10-19T00:20:00.000Z'
-      : scenario === 'day-markers' || scenario === 'wake-up'
-        ? '2026-10-19T06:15:00.000Z'
-        : null;
+    scenario === 'feeding-dial'
+      ? '2026-10-19T08:26:00.000Z'
+      : scenario === 'night-forecast'
+        ? '2026-10-19T00:20:00.000Z'
+        : scenario === 'day-markers' || scenario === 'wake-up'
+          ? '2026-10-19T06:15:00.000Z'
+          : null;
   const now = frozen ? new Date(frozen) : new Date();
   const at = (minutes: number) => new Date(now.getTime() + minutes * 60000).toISOString();
   const nap: SleepActivity = {
@@ -56,12 +58,15 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
         <View style={{ width, height, overflow: 'hidden' }}>
           <Preview
             scenario={
-              scenario === 'history' ||
-              scenario === 'night-asleep' ||
-              scenario === 'bedtime-range' ||
-              scenario === 'night-forecast' ||
-              scenario === 'day-markers' ||
-              scenario === 'wake-up'
+              [
+                'feeding-dial',
+                'history',
+                'night-asleep',
+                'bedtime-range',
+                'night-forecast',
+                'day-markers',
+                'wake-up',
+              ].includes(scenario)
                 ? scenario
                 : dark
                   ? 'night'

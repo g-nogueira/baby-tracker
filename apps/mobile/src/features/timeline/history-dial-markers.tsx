@@ -55,6 +55,9 @@ export function HistoryDialMarkers({
         const radians = ((first.angle - 90) * Math.PI) / 180;
         const color = historyActivityColor(historyTargetIcon(first));
         const grouped = targets.length > 1;
+        // Keep neighboring centers tappable when their badge edges overlap.
+        const targetSize = grouped ? 44 : 36;
+        const activeNursing = first.record?.kind === 'nursing' && first.record.status === 'active';
         const bareNap = napPosition === 'middle' && !grouped && first.record?.kind === 'nap';
         return (
           <Pressable
@@ -73,10 +76,10 @@ export function HistoryDialMarkers({
             onPress={() => (grouped ? setGroup(targets) : open(first))}
             style={{
               position: 'absolute',
-              left: ((160 + Math.cos(radians) * DIAL_MARKER_RADIUS) * size) / 320 - 22,
-              top: ((160 + Math.sin(radians) * DIAL_MARKER_RADIUS) * size) / 320 - 22,
-              width: 44,
-              height: 44,
+              left: ((160 + Math.cos(radians) * DIAL_MARKER_RADIUS) * size) / 320 - targetSize / 2,
+              top: ((160 + Math.sin(radians) * DIAL_MARKER_RADIUS) * size) / 320 - targetSize / 2,
+              width: targetSize,
+              height: targetSize,
               alignItems: 'center',
               justifyContent: 'center',
               zIndex: 2,
@@ -123,11 +126,12 @@ export function HistoryDialMarkers({
                   borderRadius: 18,
                   borderWidth: bareNap ? 0 : 2,
                   borderColor: color,
+                  borderStyle: activeNursing ? 'dotted' : 'solid',
                   backgroundColor: bareNap ? 'transparent' : `${color}16`,
                   alignItems: 'center',
                   justifyContent: 'center',
                   shadowColor: color,
-                  shadowOpacity: 0.18,
+                  shadowOpacity: activeNursing ? 0.5 : 0.18,
                   shadowRadius: 10,
                   shadowOffset: { width: 0, height: 0 },
                 }}
@@ -135,7 +139,13 @@ export function HistoryDialMarkers({
                 <ActivityIcon
                   name={historyTargetIcon(first)}
                   color={color}
-                  size={bareNap ? 21 : 27}
+                  size={
+                    bareNap
+                      ? 21
+                      : first.record?.kind === 'diaper' || first.record?.kind === 'nursing'
+                        ? 22
+                        : 27
+                  }
                 />
               </View>
             )}
@@ -144,8 +154,8 @@ export function HistoryDialMarkers({
                 numberOfLines={1}
                 style={{
                   position: 'absolute',
-                  top: 50,
-                  left: -38,
+                  top: targetSize / 2 + 28,
+                  left: targetSize / 2 - 60,
                   width: 120,
                   color: '#EFB77B',
                   fontSize: 14,

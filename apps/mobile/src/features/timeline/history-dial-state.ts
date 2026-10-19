@@ -73,8 +73,10 @@ export function historyDialGroups(
       });
   }
   targets.sort((a, b) => a.angle - b.angle || a.id.localeCompare(b.id));
+  // Allow partially overlapping badges like Napper; group only centers too close to select.
+  // Neither grouping nor overlap changes the authoritative timestamp/angle.
   const minimumAngle =
-    (2 * Math.asin(Math.min(1, 17 / ((DIAL_MARKER_RADIUS * size) / 320))) * 180) / Math.PI;
+    (2 * Math.asin(Math.min(1, 9 / ((DIAL_MARKER_RADIUS * size) / 320))) * 180) / Math.PI;
   const groups: HistoryDialTarget[][] = [];
   for (const target of targets) {
     const previous = groups.at(-1);
@@ -89,7 +91,7 @@ export function historyActivityColor(kind: string): string {
       {
         nap: '#A19CFF',
         nursing: '#A0EBCF',
-        diaper: '#DA91C6',
+        diaper: '#F1A0DB',
         medicine: '#E0E78F',
         'night-waking': '#F09C8C',
       } as Record<string, string>

@@ -39,6 +39,12 @@ sets the connected client's appearance. The separate local tracker remains avail
   Its dock has Back, view selectors and Add; Home retains five positions. Sound/library slots remain inactive.
 - Added an activity menu to `+`; historical dates still open past-activity entry directly.
 - Added L/R switch, pause and resume to the persistent Nursing bar alongside its stop control.
+  Matched its muted inactive pill, regular Saans timers, lavender active gradient and filled white
+  play/pause glyphs to the supplied Nursing comparison. The bar is narrower, with smaller artwork.
+- Reduced Diaper/Nursing artwork within dial badges, brightened the pink outline and added the active
+  Nursing dotted mint ring. Partially overlapping badges remain individually visible at their real
+  time angles; only tighter overlaps open the exact-record chooser. Badge-sized tap areas keep a
+  neighboring target from covering the center of another badge.
 - Removed the extra artwork rings in drawers and enlarged the symbols. Clock ranges omit repeated AM/PM.
 - Moved primary actions and Nursing side controls into TrueSheet native floating footers.
   Bedtime initially opens at 74% with contextual fields; expanded drawers reach 94%.
@@ -117,8 +123,10 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 | --- | --- | --- |
 | ![Nap](ui-refresh/nap-drawer.png) | ![Nursing](ui-refresh/nursing.png) | ![First Nursing](ui-refresh/first-nursing.png) |
 
-Validation passed: `pnpm check` (485 tests), the Lisbon timezone care/timeline suite
-(180 tests), Android/iOS JavaScript exports and the standalone preview build.
+![Nearby Diaper/Nursing badges and active Nursing bar](ui-refresh/feeding-dial.png)
+
+Validation passed: `pnpm check` (487 tests), the Lisbon timezone care/timeline suite
+(182 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -127,7 +135,8 @@ at the same instant remain separate. Other regressions cover week navigation, fu
 interval entry, annotation draft retention and the dependent Wake-up mood write. Bedtime regressions
 cover readback and revision conflicts, independent endpoints, overnight and Lisbon clock rollback,
 invalid ranges, transitions inside the routine and routine edits that overlap a recorded waking.
-History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
+Dial regressions keep a Diaper and feed 23 minutes apart individually visible without changing their
+angles, while tighter overlaps still retain exact record selection. History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
 chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
 also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
 outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.
