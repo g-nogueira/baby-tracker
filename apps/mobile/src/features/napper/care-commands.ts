@@ -1,5 +1,11 @@
+import { applyActivityDetails } from './care-details';
 import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calendar-day';
-import { assertSleepContext, byStart, sleepKinds } from '@/features/care-service/sleep-state';
+import {
+  assertSleepContext,
+  byStart,
+  sleepBoundaryAt,
+  sleepKinds,
+} from '@/features/care-service/sleep-state';
 import {
   CareServiceError,
   type CareActivity,
@@ -101,9 +107,12 @@ function pastLog(
 ) {
   const at = time(activity.startedAt, now);
   const log = newLog(activity.kind, at, false, id, user, timezone);
-  if ('endedAt' in activity) {
+  if ('endedAt' in activity && activity.endedAt !== undefined) {
     const end = time(activity.endedAt, now);
-    if (end < at || (activity.kind !== 'nursing' && end.getTime() === at.getTime()))
+    if (
+      end < at ||
+      (activity.kind !== 'nursing' && activity.kind !== 'bedtime' && end.getTime() === at.getTime())
+    )
       fail('End must be after Start.');
     log.end = zonedTimestamp(end, timezone);
   }
@@ -115,16 +124,19 @@ function pastLog(
       breastRightMinutes: 0,
       activeBreast: activity.lastBreast,
     });
-    return correctNapperNursing(
-      readNursing(log),
-      at,
-      time(activity.endedAt, now),
-      activity.leftSeconds,
-      activity.lastBreast,
-      now,
+    return applyActivityDetails(
+      correctNapperNursing(
+        readNursing(log),
+        at,
+        time(activity.endedAt, now),
+        activity.leftSeconds,
+        activity.lastBreast,
+        now,
+      ),
+      activity.details,
     );
   }
-  return log;
+  return applyActivityDetails(log, activity.details);
 }
 /** Pure command planning; the tracker owns preflight reads, locking, writes and confirmation. */
 export function prepareCareWrites(
@@ -180,7 +192,8 @@ export function prepareCareWrites(
     case 'wake-up': {
       if (!state.night || state.night.id !== expected?.id || !at)
         fail('The active night changed. Refresh and review its current state.');
-      if (at.toISOString() <= state.night.startedAt) fail('The transition must follow bedtime.');
+      if (at.toISOString() <= sleepBoundaryAt(state.night))
+        fail('The transition must follow bedtime.');
       if (command.type === 'start-night-waking') {
         if (state.waking) fail('A night waking is already running.');
         requests = [newLog('night-waking', at, true, id, user, timezone)];
@@ -261,7 +274,12 @@ export function prepareCareWrites(
         if (!previous) fail('The bedtime could not be read.');
         const delta = start.getTime() - Date.parse(previous.startedAt);
         Object.assign(request, bedtimeFields(start, timezone), {
-          end: zonedTimestamp(new Date(Date.parse(String(expected.end)) + delta), timezone),
+          end: zonedTimestamp(
+            command.endedAt
+              ? time(command.endedAt, now)
+              : time(new Date(Date.parse(String(expected.end)) + delta).toISOString(), now),
+            timezone,
+          ),
         });
       } else if (kind === 'nap' || kind === 'night-waking') {
         if (expected.isOpen === false) {
@@ -285,6 +303,11 @@ export function prepareCareWrites(
       break;
     default:
       throw new CareServiceError('invalid', 'Use Nursing controls for this action.');
+  }
+  if ('details' in command && command.details) {
+    // Wake up can also close a running waking: annotations belong to the newly requested boundary.
+    const target = requests.at(-1);
+    if (target) applyActivityDetails(target, command.details);
   }
   const replacements = new Map(requests.map((r) => [r.id, r]));
   const after = [...logs.filter((l) => !replacements.has(l.id)), ...requests];

@@ -34,8 +34,16 @@ Prerequisites: Node.js 24+ and pnpm 11.20+.
 ```bash
 pnpm install
 pnpm check
-pnpm mobile
+npm run start
 ```
+
+`npm run start` (or `pnpm start` / `pnpm mobile`) opens Expo's Android device chooser,
+builds and installs the native app on the selected device, then starts Metro. It also works
+from `apps/mobile`. Local Android builds require the Android SDK and a compatible JDK;
+connect a phone with USB debugging enabled and authorize the computer, or configure an
+Android emulator. Use `adb devices -l` to check connected devices.
+
+For Metro only, use `npm run start:metro`; this skips the native build and installation.
 
 Use an Expo development build for real-device work. Expo Go is not a release target.
 Rebuild native development clients after installing the new SecureStore, Gesture Handler,

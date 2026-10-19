@@ -36,6 +36,8 @@ export interface RadialActivityRecord {
   id: string;
   kind: RadialActivityKind;
   medicineNote?: string;
+  /** Recorded active time, excluding pauses; supplied by the connected read model. */
+  durationMs?: number;
   occurredAt: string;
   status: 'active' | 'completed' | NursingStatus;
   diaperType: DiaperType | null;
@@ -46,6 +48,8 @@ export interface ProjectedRadialActivity extends RadialActivityRecord {
 }
 
 export interface RadialCycleView {
+  estimatedWakeUp?: { at: string; angleDegrees: number; source: 'fixed-7am' };
+  nightProgress?: { startAngle: number; endAngle: number };
   kind: 'day' | 'night';
   emptyLabel: string | null;
   projection: CycleProjection | null;
@@ -114,16 +118,16 @@ export function projectedView(
 ): RadialCycleView {
   const startMs = new Date(projection.cycle.startedAt).getTime();
   const duration = new Date(projection.observedEndedAt).getTime() - startMs;
-  // Completed Nights fit their actual bounds. Active Nights expand only at 3h steps.
+  // Completed anchored cycles fit their real bounds. Active Nights expand only at 3h steps.
   const horizon =
-    kind === 'night'
-      ? Math.min(
-          CYCLE_HORIZON_MS,
-          projection.cycle.endedAt === null
-            ? Math.max(12 * 3600000, Math.ceil(duration / (3 * 3600000)) * 3 * 3600000)
-            : Math.max(1, duration),
-        )
-      : CYCLE_HORIZON_MS;
+    projection.cycle.endedAt !== null && projection.cycle.kind !== 'unanchored_day'
+      ? Math.min(CYCLE_HORIZON_MS, Math.max(1, duration))
+      : kind === 'night'
+        ? Math.min(
+            CYCLE_HORIZON_MS,
+            Math.max(12 * 3600000, Math.ceil(duration / (3 * 3600000)) * 3 * 3600000),
+          )
+        : CYCLE_HORIZON_MS;
   const position = (instant: ProjectedInstant): ProjectedInstant => ({
     ...instant,
     angleDegrees:
@@ -146,7 +150,7 @@ export function projectedView(
     })),
   };
   const offsets =
-    kind === 'night'
+    horizon !== CYCLE_HORIZON_MS
       ? [0, horizon / 4, horizon / 2, (horizon * 3) / 4, horizon].map(Math.round)
       : TICK_OFFSETS_MS;
   const startDay = calendarDayForInstant(new Date(startMs), projection.cycle.timezone);
@@ -289,9 +293,8 @@ export function clusterRadialTargets(
 ): ProjectedRadialActivity[][] {
   const angle = (record: ProjectedRadialActivity) =>
     record.projection.token?.projection.angleDegrees ??
-    ((record.projection.arc?.start.angleDegrees ?? 0) +
-      (record.projection.arc?.end.angleDegrees ?? 0)) /
-      2;
+    record.projection.arc?.start.angleDegrees ??
+    0;
   const targets = records
     .filter(
       (record) =>

@@ -23,11 +23,16 @@ vi.mock('@lodev09/react-native-true-sheet', () => ({
   }),
 }));
 function SheetBoundary(props: Record<string, unknown>) {
-  return <>{props.children as import('react').ReactNode}</>;
+  return (
+    <>
+      {props.children as import('react').ReactNode}
+      {props.footer as import('react').ReactNode}
+    </>
+  );
 }
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
 vi.mock('@react-native-community/datetimepicker', () => ({ default: 'DateTimePicker' }));
-vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path' }));
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path', Circle: 'Circle' }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
 const now = new Date('2026-10-15T12:00:00Z');
@@ -98,6 +103,52 @@ it('uses the instant of confirmation when the proposed start time was left untou
     at: '2026-10-15T12:01:05.000Z',
   });
 });
+it('allows an explicit end on a new Nap and records the chosen interval instead of starting a timer', async () => {
+  await render({ type: 'transition', command: 'start-nap' });
+  await act(async () => press('Set Nap time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-15T11:00:00Z')),
+  );
+  await act(async () => press('Set activity end time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-15T11:30:00Z')),
+  );
+  await act(async () => press('Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'record-past',
+    activity: {
+      kind: 'nap',
+      startedAt: '2026-10-15T11:00:00.000Z',
+      endedAt: '2026-10-15T11:30:00.000Z',
+    },
+  });
+});
+it('keeps Bedtime annotations in the draft across ticks and saves them with the transition', async () => {
+  const intent: ActivitySheetIntent = { type: 'transition', command: 'bedtime' };
+  await render(intent);
+  await act(async () => press('Long time to fall asleep')?.props.onPress());
+  await act(async () => press('Worn or held')?.props.onPress());
+  await act(async () =>
+    renderer.root.findByType('TextInput' as never).props.onChangeText('Synthetic note'),
+  );
+  await act(async () =>
+    renderer.update(
+      <ActivitySheet {...base} intent={intent} now={new Date(now.getTime() + 1000)} />,
+    ),
+  );
+  const footer = renderer.root.findByType(SheetBoundary).props.footer;
+  expect(footer).toBeDefined();
+  await act(async () => press('Night sleep')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'bedtime',
+    at: now.toISOString(),
+    details: { settling: ['took-long'], sleepMethod: 'held', comment: 'Synthetic note' },
+  });
+});
 it('retains an edited diaper timestamp/category through ticking and saves the exact revision', async () => {
   const activity: PointActivity = {
     id: 'diaper',
@@ -110,6 +161,9 @@ it('retains an edited diaper timestamp/category through ticking and saves the ex
   };
   const intent: ActivitySheetIntent = { type: 'edit', activity };
   await render(intent);
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () => press('Start time')?.props.onPress());
   await act(async () =>
     renderer.root
@@ -248,6 +302,61 @@ it('pauses an active Nap through the care port', async () => {
     at: now.toISOString(),
   });
 });
+it('requires explicit removal confirmation and keeps the reviewed revision across remote Nursing updates', async () => {
+  const log: NursingActivity = {
+    id: 'feed',
+    revision: 'v1',
+    kind: 'nursing',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    status: 'active',
+    leftSeconds: 0,
+    rightSeconds: 3600,
+    lastBreast: 'RIGHT',
+    pauseSeconds: 0,
+    measuredAt: now.toISOString(),
+  };
+  const onRemove = vi.fn();
+  const props = {
+    ...base,
+    log,
+    last: 'RIGHT' as const,
+    onStart: vi.fn(),
+    onChange: vi.fn(),
+    onCorrect: vi.fn(),
+    onRemove,
+  };
+  await act(async () => {
+    renderer = create(<NursingSheet {...props} />);
+  });
+  await act(async () => press('Remove Nursing')?.props.onPress());
+  expect(onRemove).not.toHaveBeenCalled();
+  await act(async () => press('Cancel removal')?.props.onPress());
+  expect(press('Confirm remove Nursing')).toBeUndefined();
+  await act(async () => press('Remove Nursing')?.props.onPress());
+  await act(async () =>
+    renderer.update(<NursingSheet {...props} log={{ ...log, revision: 'v2' }} />),
+  );
+  await act(async () => press('Confirm remove Nursing')?.props.onPress());
+  expect(onRemove).toHaveBeenCalledWith(log);
+});
+it('removes a Nap through the service command only after confirmation', async () => {
+  const activity: SleepActivity = {
+    id: 'nap',
+    revision: 'nap-v1',
+    kind: 'nap',
+    startedAt: '2026-10-15T10:00:00.000Z',
+    endedAt: '2026-10-15T10:30:00.000Z',
+    status: 'completed',
+    pauseSeconds: 0,
+    measuredAt: now.toISOString(),
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Remove Nap')?.props.onPress());
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Confirm remove Nap')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({ type: 'remove-activity', expected: activity });
+});
 it('edits an active Nursing start without silently adopting a newer remote revision', async () => {
   const log: NursingActivity = {
     id: 'feed',
@@ -277,6 +386,9 @@ it('edits an active Nursing start without silently adopting a newer remote revis
   await act(async () =>
     renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
   );
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () => press('Start time')?.props.onPress());
   await act(async () =>
     renderer.root
@@ -296,5 +408,94 @@ it('edits an active Nursing start without silently adopting a newer remote revis
   expect(props.onAdjustStart).toHaveBeenCalledWith(new Date('2026-10-15T10:55:00Z'), {
     id: 'feed',
     revision: 'feed-v1',
+  });
+});
+it('shows the Bedtime routine range and duration, and edits the sleep-start endpoint independently', async () => {
+  const activity: PointActivity = {
+    id: 'bed-routine',
+    revision: 'routine-v1',
+    kind: 'bedtime',
+    startedAt: '2026-10-14T19:45:00.000Z',
+    endedAt: '2026-10-14T19:55:00.000Z',
+    status: 'completed',
+  };
+  await render({ type: 'edit', activity });
+  const texts = () =>
+    renderer.root
+      .findAllByType('Text' as never)
+      .map((node) => node.children.join(''))
+      .join('|');
+  expect(texts()).toContain('7:45 – 7:55');
+  expect(texts()).toContain('10 min long');
+  expect(press('Long time to fall asleep')).toBeUndefined();
+  await act(async () => press('Set Night sleep time')?.props.onPress());
+  await act(async () => press('End time')?.props.onPress());
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-14T20:00:00Z')),
+  );
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: activity.startedAt,
+    endedAt: '2026-10-14T20:00:00.000Z',
+  });
+});
+it('removes Wake up only after confirming the reviewed revision and supports minute adjustment', async () => {
+  const activity: PointActivity = {
+    id: 'wake',
+    revision: 'wake-v1',
+    kind: 'wake-up',
+    startedAt: '2026-10-15T05:30:00.000Z',
+    endedAt: '2026-10-15T05:30:00.000Z',
+    status: 'completed',
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Start one minute earlier')?.props.onPress());
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: '2026-10-15T05:29:00.000Z',
+  });
+  base.onExecute.mockClear();
+  await act(async () => press('Remove Wake up')?.props.onPress());
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Confirm remove Wake up')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({ type: 'remove-activity', expected: activity });
+});
+
+it('keeps all diaper choices in the native footer through expansion and preserves the selected draft', async () => {
+  const activity: PointActivity = {
+    id: 'diaper',
+    revision: 'reviewed-v1',
+    kind: 'diaper',
+    startedAt: '2026-10-15T09:00:00.000Z',
+    endedAt: '2026-10-15T09:00:00.000Z',
+    status: 'completed',
+    diaperType: 'wet',
+  };
+  await render({ type: 'edit', activity });
+  expect(renderer.root.findByType(SheetBoundary).props.footer).toBeDefined();
+  const scroll = renderer.root.findByType('ScrollView' as never);
+  expect(scroll.findAllByProps({ accessibilityRole: 'radio' })).toHaveLength(0);
+  for (const type of ['dry', 'wet', 'dirty', 'mixed'])
+    expect(press(`${type} diaper`)).toBeDefined();
+  await act(async () => press('mixed diaper')?.props.onPress());
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
+  expect(press('mixed diaper')?.props.accessibilityState.checked).toBe(true);
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 0 } }),
+  );
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: activity.startedAt,
+    diaperType: 'mixed',
   });
 });

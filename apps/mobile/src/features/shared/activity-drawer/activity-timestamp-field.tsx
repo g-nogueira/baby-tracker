@@ -1,7 +1,9 @@
+import { Text } from '@/features/shared/tracking-text';
+import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { StableDateTimePicker } from '@/features/shared/activity-drawer/stable-date-time-picker';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 export type ActivityTimestampPickerMode = 'date' | 'time';
 
@@ -29,6 +31,8 @@ export function ActivityTimestampField({
   timezone,
   value,
 }: ActivityTimestampFieldProps) {
+  const theme = useActivityTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const formatters = useMemo(
     () => ({
       date: new Intl.DateTimeFormat(undefined, {
@@ -75,6 +79,9 @@ export function ActivityTimestampField({
         <View style={styles.pickerPanel}>
           <StableDateTimePicker
             key={pickerMode}
+            themeVariant={theme.night ? 'dark' : 'light'}
+            textColor={theme.text}
+            accentColor={theme.accent}
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             maximumDate={maximumDate}
             mode={pickerMode}
@@ -93,22 +100,28 @@ export function ActivityTimestampField({
   );
 }
 
-const styles = StyleSheet.create({
-  field: { gap: 8 },
-  fieldLabel: { color: '#292724', fontSize: 14, fontWeight: '700' },
-  fieldValues: { flexDirection: 'row', gap: 10 },
-  valueButton: {
-    flex: 1,
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#EEEAF9',
-  },
-  timeButton: { flex: 0, minWidth: 104 },
-  readOnly: { backgroundColor: '#F3F1EE' },
-  valueText: { color: '#292724', fontSize: 15, fontWeight: '600' },
-  pickerPanel: { alignItems: 'flex-end', padding: 8, borderRadius: 14, backgroundColor: '#F7F4EF' },
-  doneButton: { minWidth: 64, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  doneText: { color: '#7367B9', fontSize: 15, fontWeight: '700' },
-});
+const createStyles = (theme: ActivityTheme) =>
+  StyleSheet.create({
+    field: { gap: 8 },
+    fieldLabel: { color: theme.text, fontSize: 14, fontWeight: '700' },
+    fieldValues: { flexDirection: 'row', gap: 10 },
+    valueButton: {
+      flex: 1,
+      minHeight: 48,
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.field,
+    },
+    timeButton: { flex: 0, minWidth: 104 },
+    readOnly: { backgroundColor: theme.field },
+    valueText: { color: theme.text, fontSize: 15, fontWeight: '600' },
+    pickerPanel: {
+      alignItems: 'flex-end',
+      padding: 8,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
+    },
+    doneButton: { minWidth: 64, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    doneText: { color: theme.accent, fontSize: 15, fontWeight: '700' },
+  });
