@@ -34,31 +34,31 @@ function SheetBoundary(props: Record<string, unknown>) {
 }
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
-it('separates a care marker from the wake-up anchor without changing its time angle', async () => {
-  const records: CareActivity[] = [
-    {
-      id: 'wake',
-      revision: 'v',
-      kind: 'wake-up',
-      status: 'completed',
-      startedAt: '2026-10-18T07:00:00.000Z',
-      endedAt: '2026-10-18T07:00:00.000Z',
-    },
-    {
-      id: 'diaper',
-      revision: 'v',
-      kind: 'diaper',
-      diaperType: 'wet',
-      status: 'completed',
-      startedAt: '2026-10-18T07:00:00.000Z',
-      endedAt: '2026-10-18T07:00:00.000Z',
-    },
-  ];
+it('keeps Home care markers on the same track as the Wake-up anchor at their actual time angle', async () => {
+  const at = (hour: string) => `2026-10-18T${hour}:00:00.000Z`;
   const view = careCycleViews(
-    records,
+    [
+      {
+        id: 'wake',
+        revision: 'v1',
+        kind: 'wake-up',
+        status: 'completed',
+        startedAt: at('07'),
+        endedAt: at('07'),
+      },
+      {
+        id: 'diaper',
+        revision: 'v1',
+        kind: 'diaper',
+        diaperType: 'wet',
+        status: 'completed',
+        startedAt: at('08'),
+        endedAt: at('08'),
+      },
+    ],
     '2026-10-18',
     'UTC',
-    new Date('2026-10-18T09:00:00Z'),
+    new Date(at('09')),
     true,
   ).day;
   await act(async () => {
@@ -74,17 +74,19 @@ it('separates a care marker from the wake-up anchor without changing its time an
     );
   });
   const targets = renderer.root.findAllByType('Pressable' as never);
-  const position = (prefix: string) =>
-    targets.find((n) => String(n.props.accessibilityLabel).startsWith(prefix))?.props.style[1];
-  const care = position('Diaper, wet');
-  const anchor = position('Edit Wake up');
+  const care = targets.find((node) => String(node.props.accessibilityLabel).startsWith('Diaper at'))
+    ?.props.style;
+  const anchor = targets.find((node) =>
+    String(node.props.accessibilityLabel).startsWith('Wake up at'),
+  )?.props.style;
   expect(care).toBeDefined();
   expect(anchor).toBeDefined();
-  expect(Math.hypot(care.left - anchor.left, care.top - anchor.top)).toBeGreaterThanOrEqual(44);
   const center = 358 / 2 - 22;
-  expect(Math.atan2(care.top - center, care.left - center)).toBeCloseTo(
-    Math.atan2(anchor.top - center, anchor.left - center),
-  );
+  for (const position of [care, anchor])
+    expect(Math.hypot(position.left - center, position.top - center)).toBeCloseTo(
+      (135 * 358) / 320,
+    );
+  expect(care.top).toBeLessThan(anchor.top);
   await act(async () => renderer.unmount());
 });
 it('keeps the activity marker at its start when only its duration changes', async () => {

@@ -16,7 +16,13 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
     window: { width, height, scale: 1, fontScale: 1 },
     screen: { width, height, scale: 1, fontScale: 1 },
   });
-  const now = new Date();
+  const frozen =
+    scenario === 'night-forecast'
+      ? '2026-10-19T00:20:00.000Z'
+      : scenario === 'day-markers' || scenario === 'wake-up'
+        ? '2026-10-19T06:15:00.000Z'
+        : null;
+  const now = frozen ? new Date(frozen) : new Date();
   const at = (minutes: number) => new Date(now.getTime() + minutes * 60000).toISOString();
   const nap: SleepActivity = {
     id: 'preview-nap',
@@ -50,7 +56,12 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
         <View style={{ width, height, overflow: 'hidden' }}>
           <Preview
             scenario={
-              scenario === 'history' || scenario === 'night-asleep' || scenario === 'bedtime-range'
+              scenario === 'history' ||
+              scenario === 'night-asleep' ||
+              scenario === 'bedtime-range' ||
+              scenario === 'night-forecast' ||
+              scenario === 'day-markers' ||
+              scenario === 'wake-up'
                 ? scenario
                 : dark
                   ? 'night'
@@ -88,6 +99,23 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
                 onExecute={() => {}}
               />
             ) : null}
+            {scenario === 'wake-up' ? (
+              <ActivitySheet
+                {...callbacks}
+                intent={{
+                  type: 'edit',
+                  activity: {
+                    id: 'wake',
+                    revision: 'v1',
+                    kind: 'wake-up',
+                    startedAt: '2026-10-19T04:30:00.000Z',
+                    endedAt: '2026-10-19T04:30:00.000Z',
+                    status: 'completed',
+                  },
+                }}
+                onExecute={() => {}}
+              />
+            ) : null}
             {scenario === 'nap-drawer' ? (
               <ActivitySheet
                 {...callbacks}
@@ -113,6 +141,22 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
   }
   AppRegistry.registerComponent('Review', () => Screen);
   const { element, getStyleElement } = AppRegistry.getApplication('Review');
-  const body = renderToString(element);
+  // Freeze only this synchronous static render; production clocks and browser previews are unchanged.
+  const systemDate = globalThis.Date;
+  if (frozen)
+    globalThis.Date = new Proxy(systemDate, {
+      construct(target, args) {
+        return Reflect.construct(target, args.length ? args : [now.getTime()]);
+      },
+      get(target, key, receiver) {
+        return key === 'now' ? () => now.getTime() : Reflect.get(target, key, receiver);
+      },
+    });
+  let body: string;
+  try {
+    body = renderToString(element);
+  } finally {
+    globalThis.Date = systemDate;
+  }
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">${renderToString(getStyleElement())}<style>@font-face{font-family:Saans-Regular;src:url('${regular}')}@font-face{font-family:Saans-Medium;src:url('${medium}')}@font-face{font-family:Saans-RegularItalic;src:url('${italic}')}@page{size:${width}px ${height}px;margin:0}html,body{width:${width}px;height:${height}px;margin:0;overflow:hidden}body{font-family:Saans-Regular,sans-serif;background:${theme.background}}#react-root{height:${height}px}[role=dialog]{position:fixed;top:0;left:0;bottom:0;right:0}[role=dialog]>div{height:${scenario === 'bedtime' ? height * 0.74 : scenario === 'nursing' ? Math.min(height * 0.78, 600) : scenario === 'first-nursing' ? Math.min(height * 0.78, 540) : Math.min(height * 0.62, 450)}px!important;top:auto!important;bottom:0!important;left:0!important;transform:none!important}[role=dialog]>button{top:0;left:0;bottom:0;right:0}</style></head><body>${body}</body></html>`;
 }

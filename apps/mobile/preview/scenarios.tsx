@@ -102,15 +102,30 @@ export function Preview({
   const [date, setDate] = useState(scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10));
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CareActivity[]>(
-    scenario === 'night-asleep' || scenario === 'bedtime-range'
-      ? [routine]
-      : scenario === 'first-nursing'
-        ? [wake]
-        : scenario === 'day' || scenario === 'history'
-          ? scenario === 'history'
-            ? [wake, nap]
-            : [wake, nap, nursing]
-          : [bed, waking, nursing],
+    scenario === 'night-forecast'
+      ? [{ ...routine, startedAt: '2026-10-18T18:45:00.000Z', endedAt: '2026-10-18T18:55:00.000Z' }]
+      : scenario === 'day-markers' || scenario === 'wake-up'
+        ? [
+            { ...wake, startedAt: '2026-10-19T04:30:00.000Z', endedAt: '2026-10-19T04:30:00.000Z' },
+            {
+              id: 'day-diaper',
+              revision: 'v1',
+              kind: 'diaper',
+              diaperType: 'wet',
+              startedAt: '2026-10-19T06:14:00.000Z',
+              endedAt: '2026-10-19T06:14:00.000Z',
+              status: 'completed',
+            },
+          ]
+        : scenario === 'night-asleep' || scenario === 'bedtime-range'
+          ? [routine]
+          : scenario === 'first-nursing'
+            ? [wake]
+            : scenario === 'day' || scenario === 'history'
+              ? scenario === 'history'
+                ? [wake, nap]
+                : [wake, nap, nursing]
+              : [bed, waking, nursing],
   );
   const snapshot: CareSnapshot = { activities: rows, issues: [] };
   const historySnapshot =

@@ -1,7 +1,9 @@
+import { homeCycleView } from './home-cycle-view';
 import { HistoryDialMarkers } from './history-dial-markers';
 import {
   historyDialView,
   historyActivityColor,
+  DIAL_MARKER_RADIUS,
   HISTORY_START_ANGLE,
   HISTORY_SWEEP_ANGLE,
 } from './history-dial-state';
@@ -102,7 +104,8 @@ export function RadialCycle({
 }: RadialCycleProps) {
   const theme = useActivityTheme();
   const history = presentation === 'history';
-  if (history) view = historyDialView(view);
+  const connected = theme.night;
+  if (connected) view = history ? historyDialView(view) : homeCycleView(view);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const clusterSheet = useRef<TrueSheet>(null);
   const pendingRecord = useRef<ProjectedRadialActivity | null>(null);
@@ -139,17 +142,28 @@ export function RadialCycle({
       >
         <Path
           d={arcPath(
-            history ? HISTORY_START_ANGLE : CYCLE_START_ANGLE_DEGREES,
-            history
+            connected ? HISTORY_START_ANGLE : CYCLE_START_ANGLE_DEGREES,
+            connected
               ? HISTORY_START_ANGLE + HISTORY_SWEEP_ANGLE
               : CYCLE_START_ANGLE_DEGREES + CYCLE_SWEEP_ANGLE_DEGREES,
             theme.night ? 135 : 126,
           )}
           fill="none"
-          stroke={history ? '#2B294A' : theme.track}
+          stroke={history ? '#2B294A' : connected ? '#191830' : theme.track}
           strokeLinecap="round"
           strokeWidth={theme.night ? 30 : 12}
         />
+        {!history &&
+        view.nightProgress &&
+        view.nightProgress.endAngle > view.nightProgress.startAngle ? (
+          <Path
+            d={arcPath(view.nightProgress.startAngle, view.nightProgress.endAngle, 135)}
+            fill="none"
+            stroke="#252341"
+            strokeWidth={30}
+            strokeLinecap="round"
+          />
+        ) : null}
         {view.ticks
           .filter(
             (tick) =>
@@ -197,11 +211,11 @@ export function RadialCycle({
             (theme.night && record.kind === 'night')
           )
             return null;
-          const radius = laneRadius(record.projection.lane);
+          const radius = connected ? DIAL_MARKER_RADIUS : laneRadius(record.projection.lane);
           const start = arc.start.angleDegrees;
           const actualSweep = Math.max(0, arc.end.angleDegrees - start);
           const visualSweep = Math.max(0.8, actualSweep);
-          if (history && record.kind !== 'nap' && actualSweep < 18) return null;
+          if (connected && record.kind !== 'nap' && actualSweep < 18) return null;
           if (theme.night)
             return (
               <Path
@@ -268,16 +282,17 @@ export function RadialCycle({
         })}
       </Svg>
 
-      {history ? (
+      {connected ? (
         <HistoryDialMarkers
           view={view}
+          napPosition={history ? 'middle' : 'start'}
           size={size}
           disabled={disabled}
           onPressRecord={onPressRecord}
           onPressAnchor={onPressAnchor}
         />
       ) : null}
-      {!history
+      {!connected
         ? clusterRadialTargets(
             view.records,
             (2 * Math.asin(22 / ((theme.night ? 93 : 135) * scale)) * 180) / Math.PI,
@@ -342,7 +357,7 @@ export function RadialCycle({
             );
           })
         : null}
-      {!history
+      {!connected
         ? projection.anchors
             .filter((anchor) => anchor.recordId !== null)
             .map((anchor) => {
@@ -371,6 +386,46 @@ export function RadialCycle({
                 </RecordTarget>
               );
             })
+        : null}
+      {!history && view.estimatedWakeUp
+        ? (() => {
+            const estimate = view.estimatedWakeUp;
+            const point = polarPoint(estimate.angleDegrees, DIAL_MARKER_RADIUS);
+            const clock = formatClock(estimate.at, projection.cycle.timezone);
+            return (
+              <View
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={`Estimated wake-up, ${clock}`}
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: point.x * scale - 22,
+                  top: point.y * scale - 22,
+                  zIndex: 2,
+                  width: 44,
+                  height: 44,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ActivityBadge icon="wake" color="#EBC16F" size={36} active />
+                <Text
+                  style={{
+                    position: 'absolute',
+                    top: 50,
+                    left: -38,
+                    width: 120,
+                    color: '#EBC16F',
+                    fontSize: 14,
+                    textAlign: 'center',
+                  }}
+                >
+                  {clock}
+                </Text>
+              </View>
+            );
+          })()
         : null}
       {cluster ? (
         <TrueSheet
@@ -449,7 +504,7 @@ export function RadialCycle({
         accessibilityLabel={`${view.kind} cycle. ${status.replace('\n', ' ')}.`}
         accessibilityRole="summary"
         pointerEvents="none"
-        style={[styles.centerStatus, history && { top: '27%' }]}
+        style={[styles.centerStatus, history ? { top: '27%' } : connected && { top: '33%' }]}
       >
         <Text style={styles.statusLabel}>{centerStatus.label}</Text>
         {centerStatus.value ? (
@@ -458,7 +513,9 @@ export function RadialCycle({
             adjustsFontSizeToFit
             style={[
               styles.status,
-              history && { fontSize: 34, lineHeight: 44, letterSpacing: -0.8 },
+              history
+                ? { fontSize: 34, lineHeight: 44, letterSpacing: -0.8 }
+                : connected && { fontSize: 48, lineHeight: 56 },
             ]}
           >
             {centerStatus.value}

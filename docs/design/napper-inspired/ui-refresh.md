@@ -21,11 +21,12 @@ sets the connected client's appearance. The separate local tracker remains avail
 - Bundled the supplied Saans Regular/Medium/Italic fonts and original colored activity artwork.
 - Added purple artwork variants to persistent Nap/Night-waking timers and font-load failure fallback.
 - Dark connected surfaces for both cycles; moved cycle switching into an icon pill on the dial.
-- Sized Home from the available viewport; reduced quick actions to four in Day and three in Night.
+- Sized Home from the available viewport; kept four supported quick actions in both Day and Night.
   Medicine and other supported actions remain in the three-column `+` menu.
 - Removed the utility header and Home cycle pill; cycle switching lives in history and empty-cycle states.
 - Kept midnight visible and placed timed markers at their start, independently of duration.
-  Home markers near a wake/bedtime anchor use an inner rail at the same angle; nearby groups retain exact record IDs.
+  Connected markers and interval bands now use the same track centerline, including those near
+  wake/bedtime anchors. Nearby groups retain exact record IDs rather than moving icons inward.
   Sleep intervals use quiet outlined bands; the completed Night no longer paints a bright full dial.
 - Added drag feedback and animated layout changes between Home and history.
 - Matched the supplied history comparison with a single date header, real calendar picker, smaller
@@ -47,6 +48,14 @@ sets the connected client's appearance. The separate local tracker remains avail
 - Added explicit end-time entry on a proposed Nap/waking, saving a completed interval instead of a live timer.
 - Preserved exact timestamp drafts, continuous Nursing split updates and native TrueSheet ownership.
 - Preserved the replaceable care ports, authoritative Napper writes and collision/stale-save guards.
+- Added a temporary 07:00 local wake estimate for active Nights, with a progress arc. It remains separate
+  from recorded anchors and cannot be edited or saved as a Wake-up. Overdue estimates stay on the same
+  morning; daylight-saving transitions use the session's IANA timezone. Active anchored Days use a 14h
+  display window that expands with observed time; unanchored Days retain the full calendar-day window.
+- Raised the Home dial, reduced its main timer, tightened action spacing and adjusted the dock/stars.
+- Enabled confirmed Wake-up removal. Preflight rereads and revision checks precede DELETE; confirmed
+  absence restores state from the remaining shared records. Removal is rejected if it would create
+  new sleep collisions, including a Nap inside the reopened Night. Compact Wake-up includes age and ±1min.
 - Preserved Bedtime as a routine interval, with independent Start/End editing. Night sleep, its dial
   anchor and Wake-up recency start at the routine's end. A 19:45–19:55 routine gives 1h 49m asleep at 21:44.
   Completed Bedtime opens as a compact range/duration drawer; its contextual fields appear on expansion.
@@ -54,9 +63,9 @@ sets the connected client's appearance. The separate local tracker remains avail
   Ticks outside those bounds disappear. Nearby groups show activity artwork, a count and a secondary
   symbol when they contain different activity kinds; short duration bands use a smaller visual minimum.
 
-Individual Nap, Night waking, Nursing, Diaper and Medicine removal still requires confirmation
+Individual Wake-up, Nap, Night waking, Nursing, Diaper and Medicine removal still requires confirmation
 of the reviewed revision. The adapter rereads before DELETE and confirms absence afterwards;
-uncertain outcomes require refresh. Bedtime/Wake-up deletion remains unavailable independently.
+uncertain outcomes require refresh. Bedtime deletion remains unavailable independently.
 
 ## Original assets and remaining differences
 
@@ -72,9 +81,9 @@ still opens the tracker with the system typeface. Typography selects the supplie
 files instead of synthesizing bold faces. Exact gradients, glows, animation and remaining geometry
 are still under comparison; supplying the artwork alone does not establish full UI parity.
 
-Sleep predictions, full Napper analytics, sounds and the sleep-content library
-are not implemented by this tracking port. History totals describe recorded data only. No predictions, future wake-up anchors or working
-sound/library destinations are fabricated. Full app parity includes those separate capabilities.
+Personalized sleep predictions, full Napper analytics, sounds and the sleep-content library
+are not implemented by this tracking port. History totals describe recorded data only. The temporary 07:00 estimate is a display-only fallback
+authorized for this MVP; it is not a Napper prediction. Sounds/library remain inactive. Full app parity includes those separate capabilities.
 
 ## Review and validation
 
@@ -100,12 +109,16 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 | --- | --- |
 | ![Night asleep](ui-refresh/night-asleep.png) | ![Bedtime range](ui-refresh/bedtime-range.png) |
 
+| Night with 07:00 estimate | Day marker alignment | Wake-up controls |
+| --- | --- | --- |
+| ![Night estimate](ui-refresh/night-forecast.png) | ![Day markers](ui-refresh/day-markers.png) | ![Wake-up](ui-refresh/wake-up.png) |
+
 | Completed Nap | Running Nursing | First Nursing |
 | --- | --- | --- |
 | ![Nap](ui-refresh/nap-drawer.png) | ![Nursing](ui-refresh/nursing.png) | ![First Nursing](ui-refresh/first-nursing.png) |
 
-Validation passed: `pnpm check` (472 tests), the Lisbon timezone care/timeline suite
-(167 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (485 tests), the Lisbon timezone care/timeline suite
+(180 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -115,7 +128,9 @@ interval entry, annotation draft retention and the dependent Wake-up mood write.
 cover readback and revision conflicts, independent endpoints, overnight and Lisbon clock rollback,
 invalid ranges, transitions inside the routine and routine edits that overlap a recorded waking.
 History regressions cover geometry-only reframing, mixed boundary/activity groups, exact selection after
-chooser dismissal, and stable native calendar selection while the live clock ticks.
+chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
+also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
+outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.
 
 On a test profile, compare each state side by side with Napper on both phones: home, current and
 historical cycles, first/active/paused/completed Nursing, Nap, Night waking, past care, exact time

@@ -141,13 +141,17 @@ export class NapperCareService implements CareService {
       try {
         const expected = 'expected' in command ? this.expected(profileId, command.expected) : null;
         if (command.type === 'remove-activity' && expected) {
-          if (expected.category === 'BED_TIME' || expected.category === 'WOKE_UP')
+          if (expected.category === 'BED_TIME')
             throw new CareServiceError(
               'invalid',
-              'Night boundaries cannot be removed separately. Edit their times instead.',
+              'Bedtime cannot be removed separately. Edit its times instead.',
             );
           await this.tracker.remove(profileId, expected, (before, after) => {
-            if (expected.category === 'NAP' || expected.category === 'NIGHT_WAKING')
+            if (
+              expected.category === 'NAP' ||
+              expected.category === 'NIGHT_WAKING' ||
+              expected.category === 'WOKE_UP'
+            )
               validateCareSleep(before, after, [expected], this.now());
           });
         } else if (command.type === 'start-nursing') {

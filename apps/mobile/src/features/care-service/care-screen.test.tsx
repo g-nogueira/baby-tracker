@@ -386,7 +386,7 @@ it('treats Night sleep as the containing phase with no separate bottom stop time
   expect(text()).toContain('Asleep for');
   expect(press('Stop running Night')).toBeUndefined();
   expect(press('Stop running Nursing')).toBeDefined();
-  await act(async () => press('Night waking,')?.props.onPress());
+  await act(async () => press('Night waking')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
     type: 'transition',
     command: 'start-night-waking',
@@ -460,6 +460,11 @@ it('shows an imported sleep collision once while leaving completed records edita
   await render();
   expect(text().split(message)).toHaveLength(2);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
+  const group = renderer.root
+    .findAllByType('Pressable' as never)
+    .find((node) => String(node.props.accessibilityLabel).includes('nearby activities'));
+  expect(group).toBeDefined();
+  await act(async () => group?.props.onPress());
   await act(async () => press('Edit Wake up')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
     type: 'edit',
@@ -585,7 +590,7 @@ it('counts Night sleep and Wake-up recency from the end of the Bedtime routine',
   expect(text()).toContain('1h 49m');
   expect(text()).not.toContain('1h 59m');
   expect(press('Wake up, 1h 49m')).toBeDefined();
-  expect(press('Edit Bedtime, 07:55 PM')).toBeDefined();
+  expect(press('Bedtime at 7:55 PM')).toBeDefined();
 });
 it('opens a stable history date picker and navigates using the selected calendar day', async () => {
   await render();

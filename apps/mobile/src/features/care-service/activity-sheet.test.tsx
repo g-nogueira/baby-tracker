@@ -443,3 +443,26 @@ it('shows the Bedtime routine range and duration, and edits the sleep-start endp
     endedAt: '2026-10-14T20:00:00.000Z',
   });
 });
+it('removes Wake up only after confirming the reviewed revision and supports minute adjustment', async () => {
+  const activity: PointActivity = {
+    id: 'wake',
+    revision: 'wake-v1',
+    kind: 'wake-up',
+    startedAt: '2026-10-15T05:30:00.000Z',
+    endedAt: '2026-10-15T05:30:00.000Z',
+    status: 'completed',
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Start one minute earlier')?.props.onPress());
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-activity',
+    expected: activity,
+    startedAt: '2026-10-15T05:29:00.000Z',
+  });
+  base.onExecute.mockClear();
+  await act(async () => press('Remove Wake up')?.props.onPress());
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Confirm remove Wake up')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({ type: 'remove-activity', expected: activity });
+});

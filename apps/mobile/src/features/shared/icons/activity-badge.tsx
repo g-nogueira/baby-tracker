@@ -9,12 +9,16 @@ export function ActivityBadge({
   size = 48,
   active = false,
   outlined = true,
+  artworkScale,
+  backgroundColor,
 }: {
   icon: string;
   color: string;
   size?: number;
   active?: boolean;
   outlined?: boolean;
+  artworkScale?: number;
+  backgroundColor?: string;
 }) {
   const theme = useActivityTheme();
   return (
@@ -25,7 +29,7 @@ export function ActivityBadge({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: theme.night ? 'transparent' : `${color}12`,
+          backgroundColor: backgroundColor ?? (theme.night ? 'transparent' : `${color}12`),
           borderColor: active ? color : `${color}70`,
           borderStyle: active ? 'dotted' : 'solid',
           borderWidth: active ? 2 : outlined ? 1.5 : 0,
@@ -36,7 +40,11 @@ export function ActivityBadge({
         },
       ]}
     >
-      <ActivityIcon name={icon} color={color} size={size * (theme.night ? 0.82 : 0.45)} />
+      <ActivityIcon
+        name={icon}
+        color={color}
+        size={size * (artworkScale ?? (theme.night ? 0.82 : 0.45))}
+      />
     </View>
   );
 }

@@ -209,7 +209,7 @@ export function CareHome({
       id: 'night',
       label: state.night ? 'Wake up' : 'Night sleep',
       meta: state.night ? focusElapsed(sleepBoundaryAt(state.night)) : recency('bedtime'),
-      icon: state.night ? 'wake' : 'bedtime',
+      icon: 'bedtime',
       color: '#5B4C94',
       disabled: blocked || Boolean(state.nap),
       disabledReason: state.nap ? 'Stop the nap before starting Night sleep.' : null,
@@ -219,9 +219,7 @@ export function CareHome({
     {
       id: 'sleep',
       label: state.night ? (state.waking ? 'Fell asleep again' : 'Night waking') : 'Nap',
-      meta: state.waking
-        ? focusElapsed(state.waking.startedAt)
-        : recency(state.night ? 'night-waking' : 'nap'),
+      meta: state.waking ? focusElapsed(state.waking.startedAt) : state.night ? '' : recency('nap'),
       icon: state.night ? 'night-waking' : 'nap',
       color: state.night ? '#52728A' : '#7367B9',
       disabled: blocked,
@@ -352,8 +350,8 @@ export function CareHome({
   );
   const homeTop = historyMode
     ? Math.max(28, Math.min(44, viewport.height * 0.05))
-    : Math.max(20, Math.min(64, (homeHeight - dialMaxSize - 145) * 0.25));
-  const actionGap = Math.max(24, Math.min(48, (homeHeight - dialMaxSize - 130) * 0.3));
+    : Math.max(16, Math.min(28, (homeHeight - dialMaxSize - 145) * 0.18));
+  const actionGap = Math.max(16, Math.min(24, (homeHeight - dialMaxSize - 130) * 0.3));
   const displayCenter = historyMode
     ? {
         label: selection === 'night' ? 'Night to' : 'Day of',
@@ -477,10 +475,7 @@ export function CareHome({
                 <HomeQuickActions
                   compact
                   actions={actions
-                    .filter(
-                      (action) =>
-                        action.id !== 'medicine' && (!state.night || action.id !== 'diaper'),
-                    )
+                    .filter((action) => action.id !== 'medicine')
                     .map((action) => ({
                       ...action,
                       color: theme.night
@@ -629,7 +624,16 @@ export function CareHome({
             </View>
           ) : null}
         </ScrollView>
-        <View style={[styles.dockHost, { bottom: Math.max(8, insets.bottom) }]}>
+        <View
+          style={[
+            styles.dockHost,
+            {
+              bottom: Math.max(8, insets.bottom) + (!historyMode && !hasControllers ? 16 : 0),
+              left: !historyMode && !hasControllers ? 22 : 16,
+              right: !historyMode && !hasControllers ? 22 : 16,
+            },
+          ]}
+        >
           {historyMode ? (
             <View
               style={[styles.historyDock, { paddingHorizontal: viewport.width < 360 ? 4 : 18 }]}
@@ -945,7 +949,7 @@ function NightSky({ history = false }: { history?: boolean }) {
       >
         <Defs>
           <LinearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={history ? '#19172D' : '#101024'} />
+            <Stop offset="0" stopColor={history ? '#19172D' : '#121127'} />
             <Stop offset="1" stopColor={history ? '#252445' : '#1B1A3D'} />
           </LinearGradient>
           <RadialGradient id="starGlow">
@@ -964,7 +968,7 @@ function NightSky({ history = false }: { history?: boolean }) {
                 cy={star.y}
                 r={3}
                 fill="url(#starGlow)"
-                opacity={0.55}
+                opacity={0.4}
               />
             ))}
         {!history &&
@@ -982,11 +986,11 @@ function NightSky({ history = false }: { history?: boolean }) {
     </View>
   );
 }
-const nightStars = Array.from({ length: 70 }, (_, i) => ({
+const nightStars = Array.from({ length: 110 }, (_, i) => ({
   id: `star-${i}`,
   x: (i * 127 + 19) % 400,
   y: (i * 197 + 31) % 900,
-  radius: i % 4 === 0 ? 1.1 : 0.6,
+  radius: i % 4 === 0 ? 0.75 : 0.4,
   opacity: 0.15 + (i % 3) * 0.1,
 }));
 const skyStyle = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };

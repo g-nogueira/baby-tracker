@@ -6,22 +6,25 @@ import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 import type { ProjectedRadialActivity, RadialCycleView } from './radial-cycle-state';
 import {
+  DIAL_MARKER_RADIUS,
   historyActivityColor,
   historyDialGroups,
   historyTargetIcon,
   type HistoryDialTarget,
 } from './history-dial-state';
 
-/** History groups share the track with their boundary; opening a group never guesses its editor. */
+/** Connected dial groups share the track with their boundary; opening a group never guesses its editor. */
 export function HistoryDialMarkers({
   view,
   size,
   disabled,
   onPressRecord,
   onPressAnchor,
+  napPosition = 'middle',
 }: {
   view: RadialCycleView;
   size: number;
+  napPosition?: 'start' | 'middle';
   disabled: boolean;
   onPressRecord: (record: ProjectedRadialActivity) => void;
   onPressAnchor?: (id: string) => void;
@@ -46,13 +49,13 @@ export function HistoryDialMarkers({
   };
   return (
     <>
-      {historyDialGroups(view, size).map((targets) => {
+      {historyDialGroups(view, size, napPosition).map((targets) => {
         const first = targets[0];
         const boundary = targets.find((target) => target.anchor);
         const radians = ((first.angle - 90) * Math.PI) / 180;
         const color = historyActivityColor(historyTargetIcon(first));
         const grouped = targets.length > 1;
-        const bareNap = !grouped && first.record?.kind === 'nap';
+        const bareNap = napPosition === 'middle' && !grouped && first.record?.kind === 'nap';
         return (
           <Pressable
             key={first.id}
@@ -70,8 +73,8 @@ export function HistoryDialMarkers({
             onPress={() => (grouped ? setGroup(targets) : open(first))}
             style={{
               position: 'absolute',
-              left: ((160 + Math.cos(radians) * 139) * size) / 320 - 22,
-              top: ((160 + Math.sin(radians) * 139) * size) / 320 - 22,
+              left: ((160 + Math.cos(radians) * DIAL_MARKER_RADIUS) * size) / 320 - 22,
+              top: ((160 + Math.sin(radians) * DIAL_MARKER_RADIUS) * size) / 320 - 22,
               width: 44,
               height: 44,
               alignItems: 'center',

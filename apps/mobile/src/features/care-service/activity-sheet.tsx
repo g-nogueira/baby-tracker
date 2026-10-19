@@ -267,7 +267,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
   const footer = (
     <View pointerEvents="box-none" style={[styles.footer, { width: '100%' }]}>
       <View style={[styles.footerActions, { width: '100%' }]}>
-        {intent.type === 'transition' && !active ? (
+        {(intent.type === 'transition' || record?.kind === 'wake-up') && !active ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Start one minute earlier"
@@ -306,7 +306,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
             onPress={activeStop}
           />
         ) : null}
-        {intent.type === 'transition' && !active ? (
+        {(intent.type === 'transition' || record?.kind === 'wake-up') && !active ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Start one minute later"
@@ -386,7 +386,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               });
           }}
           onRemove={
-            record && record.kind !== 'bedtime' && record.kind !== 'wake-up'
+            record && record.kind !== 'bedtime'
               ? () => onExecute({ type: 'remove-activity', expected: record })
               : undefined
           }
@@ -436,7 +436,7 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
               <Text style={styles.muted}>{active ? 'End · Running' : 'Set end time'}</Text>
             </Pressable>
           ) : null}
-          {!completedRange || expanded ? (
+          {(!completedRange && record?.kind !== 'wake-up') || expanded ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Set activity date"
@@ -448,6 +448,9 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
                 {dayLabel(start, now, timezone)}
               </Text>
             </Pressable>
+          ) : null}
+          {record?.kind === 'wake-up' ? (
+            <Text style={styles.summary}>{shortDuration(now.getTime() - start.getTime())} ago</Text>
           ) : null}
           {completedRange ? (
             <Text style={styles.summary}>
@@ -612,12 +615,23 @@ const createStyles = (theme: ActivityTheme) =>
     content: { padding: 20, paddingTop: 16, paddingBottom: 160, gap: 28 },
     footer: { paddingTop: 12, paddingBottom: 24, alignItems: 'center', gap: 8 },
     footerActions: {
+      maxWidth: 300,
+      alignSelf: 'center',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 32,
     },
-    minute: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 6 },
+    minute: {
+      width: 48,
+      maxWidth: 48,
+      minWidth: 48,
+      flexShrink: 0,
+      minHeight: 48,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
     pause: {
       minHeight: 44,
       flexDirection: 'row',

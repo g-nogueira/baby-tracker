@@ -1,6 +1,7 @@
 import { CYCLE_START_ANGLE_DEGREES, CYCLE_SWEEP_ANGLE_DEGREES } from '@baby-tracker/domain';
 import type { ProjectedRadialActivity, RadialCycleView } from './radial-cycle-state';
 
+export const DIAL_MARKER_RADIUS = 135;
 export const HISTORY_START_ANGLE = 217;
 export const HISTORY_SWEEP_ANGLE = 286;
 type Anchor = NonNullable<RadialCycleView['projection']>['anchors'][number];
@@ -47,13 +48,17 @@ export function historyDialView(view: RadialCycleView): RadialCycleView {
 }
 
 /** One visible rail, including boundaries. Every member remains individually selectable. */
-export function historyDialGroups(view: RadialCycleView, size: number): HistoryDialTarget[][] {
+export function historyDialGroups(
+  view: RadialCycleView,
+  size: number,
+  napPosition: 'start' | 'middle' = 'middle',
+): HistoryDialTarget[][] {
   const targets: HistoryDialTarget[] = view.records
     .filter((record) => record.kind !== 'night')
     .flatMap((record) => {
       const arc = record.projection.arc;
       const angle =
-        record.kind === 'nap' && arc
+        napPosition === 'middle' && record.kind === 'nap' && arc
           ? (arc.start.angleDegrees + arc.end.angleDegrees) / 2
           : (record.projection.token?.projection.angleDegrees ?? arc?.start.angleDegrees);
       return angle === undefined ? [] : [{ id: record.id, angle, record, anchor: null }];
@@ -68,7 +73,8 @@ export function historyDialGroups(view: RadialCycleView, size: number): HistoryD
       });
   }
   targets.sort((a, b) => a.angle - b.angle || a.id.localeCompare(b.id));
-  const minimumAngle = (2 * Math.asin(Math.min(1, 17 / ((139 * size) / 320))) * 180) / Math.PI;
+  const minimumAngle =
+    (2 * Math.asin(Math.min(1, 17 / ((DIAL_MARKER_RADIUS * size) / 320))) * 180) / Math.PI;
   const groups: HistoryDialTarget[][] = [];
   for (const target of targets) {
     const previous = groups.at(-1);

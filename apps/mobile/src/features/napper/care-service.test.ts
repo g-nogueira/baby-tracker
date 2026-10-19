@@ -239,7 +239,7 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
       expect(call?.[1]?.body).toBeUndefined();
     },
   );
-  it('rejects stale removal, separate night-boundary removal, and repeated removal taps', async () => {
+  it('rejects stale removal, separate Bedtime removal, and repeated removal taps', async () => {
     const log: WireLog = {
       id: 'nap',
       category: 'NAP',
@@ -268,11 +268,11 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     release();
     await first;
     expect(h.removed).toHaveLength(1);
-    const boundary = await careHarness([point('wake-up', stamp('06:00:00'))]);
+    const boundary = await careHarness([point('bedtime', stamp('06:00:00'))]);
     await expect(
       boundary.care.execute('test-baby', {
         type: 'remove-activity',
-        expected: await boundary.find('wake-up'),
+        expected: await boundary.find('bedtime'),
       }),
     ).rejects.toThrow('cannot be removed separately');
     expect(boundary.removed).toEqual([]);
@@ -1175,4 +1175,76 @@ describe('Bedtime routine ranges', () => {
       expect(h.sent).toHaveLength(0);
     },
   );
+});
+describe('Wake-up removal', () => {
+  const bed = point('bedtime', '2026-10-18T18:55:00Z');
+  const wake = point('wake-up', '2026-10-19T04:30:00Z');
+  const now = '2026-10-19T06:16:00Z';
+  it('confirms removal and reopens the preceding night while preserving a later diaper', async () => {
+    const diaper: WireLog = {
+      id: 'diaper',
+      category: 'CHANGED_DIAPER',
+      start: '2026-10-19T06:15:00Z',
+      end: '2026-10-19T06:15:00Z',
+      isOpen: false,
+      diaperContent: 'WET',
+    };
+    const h = await careHarness([bed, wake, diaper], now);
+    await h.care.execute('test-baby', {
+      type: 'remove-activity',
+      expected: await h.find('wake-up'),
+    });
+    const snapshot = await h.care.current('test-baby');
+    expect(h.removed).toEqual([wake.id]);
+    expect(h.sent).toHaveLength(0);
+    expect(snapshot.activities.some((a) => a.kind === 'wake-up')).toBe(false);
+    expect(snapshot.activities.some((a) => a.id === diaper.id)).toBe(true);
+    expect(sleepContext(snapshot.activities).night?.id).toBe(bed.id);
+  });
+  it.each([true, false])(
+    'rejects removal that would move a running/completed Nap into Night (open=%s)',
+    async (isOpen) => {
+      const nap: WireLog = {
+        id: 'later-nap',
+        category: 'NAP',
+        start: '2026-10-19T05:00:00Z',
+        end: '2026-10-19T05:20:00Z',
+        isOpen,
+        pauses: [],
+      };
+      const h = await careHarness([bed, wake, nap], now);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected: await h.find('wake-up') }),
+      ).rejects.toMatchObject({ code: 'conflict' });
+      expect(h.removed).toHaveLength(0);
+    },
+  );
+  it.each(['lost', 'stale'] as const)(
+    'requires reconciliation after an unconfirmed Wake-up removal (%s)',
+    async (mode) => {
+      const h = await careHarness([bed, wake], now);
+      const expected = await h.find('wake-up');
+      h.removalMode(mode);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected }),
+      ).rejects.toMatchObject({ code: 'uncertain' });
+      expect(h.care.needsRefresh).toBe(true);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected }),
+      ).rejects.toMatchObject({ code: 'uncertain' });
+      expect(h.removed).toHaveLength(1);
+      await h.care.reconcile('test-baby');
+      expect(h.care.needsRefresh).toBe(false);
+    },
+  );
+});
+it('rejects a Wake-up removal when another caregiver edited it after review', async () => {
+  const wire = point('wake-up', '2026-10-19T04:30:00Z');
+  const h = await careHarness([wire], '2026-10-19T06:15:00Z');
+  const expected = await h.find('wake-up');
+  h.setRows([{ ...wire, comment: 'Updated elsewhere' }]);
+  await expect(
+    h.care.execute('test-baby', { type: 'remove-activity', expected }),
+  ).rejects.toMatchObject({ code: 'conflict' });
+  expect(h.removed).toHaveLength(0);
 });

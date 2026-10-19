@@ -46,6 +46,8 @@ export interface ProjectedRadialActivity extends RadialActivityRecord {
 }
 
 export interface RadialCycleView {
+  estimatedWakeUp?: { at: string; angleDegrees: number; source: 'fixed-7am' };
+  nightProgress?: { startAngle: number; endAngle: number };
   kind: 'day' | 'night';
   emptyLabel: string | null;
   projection: CycleProjection | null;

@@ -1,3 +1,4 @@
+import { useActivityTheme } from '@/features/shared/activity-theme';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useState } from 'react';
@@ -26,6 +27,7 @@ export function HomeQuickActions({
   compact?: boolean;
 }) {
   const { width } = useWindowDimensions();
+  const theme = useActivityTheme();
   const [containerWidth, setContainerWidth] = useState(Math.min(440, width - 32));
   const layout = homeQuickActionsLayout(containerWidth, actions.length);
   return (
@@ -39,7 +41,7 @@ export function HomeQuickActions({
           accessibilityHint={action.disabledReason ?? `Opens ${action.label} controls`}
           accessibilityLabel={
             action.disabledReason === null
-              ? `${action.label}, ${action.meta}`
+              ? `${action.label}${action.meta ? `, ${action.meta}` : ''}`
               : `${action.label} unavailable. ${action.disabledReason}`
           }
           accessibilityRole="button"
@@ -62,7 +64,9 @@ export function HomeQuickActions({
           <ActivityBadge
             icon={action.icon}
             color={action.color}
-            size={compact ? 44 : layout.circleSize}
+            size={compact ? 40 : layout.circleSize}
+            artworkScale={compact && theme.night ? 0.65 : undefined}
+            backgroundColor={compact && theme.night ? '#1C1B38' : undefined}
             active={action.active}
             outlined={Boolean(action.active)}
           />
