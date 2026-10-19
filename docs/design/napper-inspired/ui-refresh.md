@@ -150,8 +150,20 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 
 The completed-Day log render uses a taller viewport to review the full list without scrolling.
 
-Validation passed: `pnpm check` (503 tests), the Lisbon timezone care/timeline suite
-(198 tests), Android/iOS JavaScript exports and the standalone preview build.
+| Running Nap | Paused Nap | Narrow Nap bar (320px) |
+| --- | --- | --- |
+| ![Running Nap](ui-refresh/nap-progress.png) | ![Paused Nap](ui-refresh/nap-paused.png) | ![Narrow Nap](ui-refresh/nap-small.png) |
+
+The Nap bar uses activity artwork, a stopwatch, regular-weight elapsed time, estimated remaining
+minutes, a progress track and separate Pause/Resume and Stop controls. Remaining time is marked `~`:
+it is a display-only average of up to seven valid preceding completed naps in the current snapshot,
+with a 60-minute fallback. It is not Napper's forecast and is never saved as an activity. Both elapsed
+time and progress exclude pauses and freeze while paused; overdue estimates stay full without
+negative remaining time. The estimate's source is included in accessibility text. Buttons retain
+the reviewed record revision and use the existing care-service commands and write guards.
+
+Validation passed: `pnpm check` (509 tests), the Lisbon timezone care/timeline suite
+(204 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -167,6 +179,9 @@ selection surviving drawer expansion/collapse and retaining the reviewed revisio
 chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
 also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
 outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.
+
+Nap bar regressions cover pause/resume/stop with the reviewed revision, disabled controls, frozen
+paused values, sample filtering, the seven-record limit, fallback and overdue progress.
 
 Log regressions cover complete ranges, active versus elapsed duration, Bedtime routine endpoints,
 continuous Night sleep after waking, concurrent care, absent/conflicting context, Lisbon rollback,

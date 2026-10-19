@@ -45,6 +45,8 @@ export function ActivityIcon({
       'M6 12A1.5 1.5 0 1 1 3 12A1.5 1.5 0 1 1 6 12Z M13.5 12A1.5 1.5 0 1 1 10.5 12A1.5 1.5 0 1 1 13.5 12Z M21 12A1.5 1.5 0 1 1 18 12A1.5 1.5 0 1 1 21 12Z',
     close: 'M6 6L18 18 M18 6L6 18',
     stop: 'M6 6H18V18H6Z',
+    stopwatch: 'M9 2H15 M12 2V5 M18 6L20 4 M12 8V13L15 15 M20 13A8 8 0 1 1 4 13A8 8 0 1 1 20 13Z',
+    flag: 'M4 22V3 Q8 0 13 3 Q17 6 21 3 V14 Q17 17 13 14 Q8 11 4 14 M4 3V14',
     pause: 'M8 5V19 M16 5V19',
     play: 'M8 5L19 12L8 19Z',
     'play-filled': 'M7 4L20 12L7 20Z',

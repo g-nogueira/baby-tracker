@@ -1,3 +1,4 @@
+import { napProgress } from './nap-progress';
 import { RoundAction } from '@/features/shared/round-action';
 import { CareLog } from './care-log';
 import { HistoryWeek } from './history-week';
@@ -756,6 +757,23 @@ export function CareHome({
                 disabled={blocked}
                 elapsedLabel={duration(activityDuration(liveSleep, now))}
                 icon={activityIcons[liveSleep.kind]}
+                napProgress={
+                  liveSleep.kind === 'nap'
+                    ? {
+                        ...napProgress(liveSleep, current, now),
+                        paused: liveSleep.status === 'paused',
+                        onTogglePause: () =>
+                          void execute(
+                            {
+                              type: liveSleep.status === 'paused' ? 'resume-nap' : 'pause-nap',
+                              expected: liveSleep,
+                              at: new Date().toISOString(),
+                            },
+                            false,
+                          ),
+                      }
+                    : undefined
+                }
                 onOpen={() => open(liveSleep)}
                 onStop={() =>
                   void execute({

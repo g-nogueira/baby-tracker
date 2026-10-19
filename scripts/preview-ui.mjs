@@ -73,6 +73,8 @@ if (process.argv.includes('--static')) {
   });
   const { renderPreview } = await import(path.join(outDir, 'render.mjs'));
   for (const scenario of [
+    'nap-progress',
+    'nap-paused',
     'day',
     'night',
     'night-asleep',

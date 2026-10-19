@@ -1,3 +1,4 @@
+import { NapLiveController, type NapProgressControl } from './nap-live-controller';
 import { Text } from '@/features/shared/tracking-text';
 import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
@@ -18,6 +19,7 @@ interface ActivityLiveControllerProps {
   onStop: () => void;
   stopAccessibilityLabel: string;
   subtitle?: string;
+  napProgress?: NapProgressControl;
   nursingSides?: {
     left: string;
     right: string;
@@ -47,10 +49,23 @@ export function ActivityLiveController({
   stopAccessibilityLabel,
   subtitle,
   nursingSides,
+  napProgress,
 }: ActivityLiveControllerProps) {
   const theme = useActivityTheme();
   const gradientId = `nursing${useId().replaceAll(':', '')}`;
   const styles = useMemo(() => createStyles(theme), [theme]);
+  if (napProgress)
+    return (
+      <NapLiveController
+        progress={napProgress}
+        elapsedLabel={elapsedLabel}
+        disabled={disabled}
+        onOpen={onOpen}
+        onStop={onStop}
+        accessibilityLabel={accessibilityLabel}
+        stopAccessibilityLabel={stopAccessibilityLabel}
+      />
+    );
   return (
     <View style={[styles.controller, theme.night && nursingSides && styles.nursingController]}>
       {nursingSides ? (

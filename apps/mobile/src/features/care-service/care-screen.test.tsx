@@ -513,6 +513,55 @@ it('keeps a paused Nap editable alongside Nursing and care actions', async () =>
     at: new Date().toISOString(),
   });
 });
+it('pauses, resumes and stops a Nap from the live bar using its reviewed revision', async () => {
+  const nap: SleepActivity = {
+    id: 'bar-nap',
+    revision: 'active-v1',
+    kind: 'nap',
+    status: 'active',
+    startedAt: '2026-10-15T01:00:00.000Z',
+    endedAt: null,
+    measuredAt: '2026-10-15T01:25:23.000Z',
+    pauseSeconds: 0,
+  };
+  hooks.model.current = snapshot([nap]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(text()).toContain('~35m');
+  await act(async () => press('Pause Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'pause-nap',
+    expected: nap,
+    at: new Date().toISOString(),
+  });
+  const paused = { ...nap, revision: 'paused-v2', status: 'paused' as const };
+  hooks.model = { ...hooks.model, current: snapshot([paused]) };
+  await update();
+  const before = text();
+  await act(async () => {
+    vi.advanceTimersByTime(60000);
+  });
+  // Other recency labels tick; the bar's progress/elapsed values stay frozen.
+  expect(text()).toContain('~35m');
+  expect(before).toContain('25:23');
+  expect(text()).toContain('25:23');
+  await act(async () => press('Resume Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'resume-nap',
+    expected: paused,
+    at: new Date().toISOString(),
+  });
+  await act(async () => press('Stop running Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'stop-nap',
+    expected: paused,
+    at: new Date().toISOString(),
+  });
+  hooks.model = { ...hooks.model, busy: true };
+  await update();
+  expect(press('Resume Nap')?.props.disabled).toBe(true);
+  expect(press('Stop running Nap')?.props.disabled).toBe(true);
+});
 it('blocks multiple active feeds and conflicting sleep state', async () => {
   const nap: SleepActivity = {
     id: 'nap',
