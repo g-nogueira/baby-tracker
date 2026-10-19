@@ -79,6 +79,8 @@ if (process.argv.includes('--static')) {
     'night-forecast',
     'day-markers',
     'feeding-dial',
+    'log-today',
+    'log-bedtime',
     'overlapping-dial',
     'nearby-activities',
     'diaper',

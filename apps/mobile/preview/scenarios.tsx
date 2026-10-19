@@ -1,3 +1,4 @@
+import { logActivities } from './log-scenarios';
 import { useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CareHome } from '../src/features/care-service/care-screen';
@@ -147,72 +148,83 @@ export function Preview({
     },
     { ...routine, startedAt: historyAt('18:45'), endedAt: historyAt('18:55') },
   ];
-  const [date, setDate] = useState(scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10));
+  const [date, setDate] = useState(
+    scenario === 'history' || scenario === 'log-bedtime' ? '2026-10-18' : at(0).slice(0, 10),
+  );
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CareActivity[]>(
-    ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
-      ? overlapActivities(now)
-      : scenario === 'feeding-dial'
-        ? [
-            { ...wake, startedAt: at(-216), endedAt: at(-216) },
-            {
-              id: 'early-diaper',
-              revision: 'v1',
-              kind: 'diaper',
-              diaperType: 'wet',
-              startedAt: at(-90),
-              endedAt: at(-90),
-              status: 'completed',
-            },
-            {
-              id: 'near-feed-diaper',
-              revision: 'v1',
-              kind: 'diaper',
-              diaperType: 'wet',
-              startedAt: at(-33),
-              endedAt: at(-33),
-              status: 'completed',
-            },
-            { ...nursing, startedAt: at(-10), leftSeconds: 0, rightSeconds: 600 },
-          ]
-        : scenario === 'night-forecast'
+    scenario === 'log-today' || scenario === 'log-bedtime'
+      ? logActivities(scenario === 'log-today' ? '2026-10-19' : '2026-10-18')
+      : ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
+        ? overlapActivities(now)
+        : scenario === 'feeding-dial'
           ? [
+              { ...wake, startedAt: at(-216), endedAt: at(-216) },
               {
-                ...routine,
-                startedAt: '2026-10-18T18:45:00.000Z',
-                endedAt: '2026-10-18T18:55:00.000Z',
+                id: 'early-diaper',
+                revision: 'v1',
+                kind: 'diaper',
+                diaperType: 'wet',
+                startedAt: at(-90),
+                endedAt: at(-90),
+                status: 'completed',
               },
+              {
+                id: 'near-feed-diaper',
+                revision: 'v1',
+                kind: 'diaper',
+                diaperType: 'wet',
+                startedAt: at(-33),
+                endedAt: at(-33),
+                status: 'completed',
+              },
+              { ...nursing, startedAt: at(-10), leftSeconds: 0, rightSeconds: 600 },
             ]
-          : scenario === 'day-markers' || scenario === 'wake-up'
+          : scenario === 'night-forecast'
             ? [
                 {
-                  ...wake,
-                  startedAt: '2026-10-19T04:30:00.000Z',
-                  endedAt: '2026-10-19T04:30:00.000Z',
-                },
-                {
-                  id: 'day-diaper',
-                  revision: 'v1',
-                  kind: 'diaper',
-                  diaperType: 'wet',
-                  startedAt: '2026-10-19T06:14:00.000Z',
-                  endedAt: '2026-10-19T06:14:00.000Z',
-                  status: 'completed',
+                  ...routine,
+                  startedAt: '2026-10-18T18:45:00.000Z',
+                  endedAt: '2026-10-18T18:55:00.000Z',
                 },
               ]
-            : scenario === 'night-asleep' || scenario === 'bedtime-range'
-              ? [routine]
-              : scenario === 'first-nursing'
-                ? [wake]
-                : scenario === 'day' || scenario === 'history'
-                  ? scenario === 'history'
-                    ? [wake, nap]
-                    : [wake, nap, nursing]
-                  : [bed, waking, nursing],
+            : scenario === 'day-markers' || scenario === 'wake-up'
+              ? [
+                  {
+                    ...wake,
+                    startedAt: '2026-10-19T04:30:00.000Z',
+                    endedAt: '2026-10-19T04:30:00.000Z',
+                  },
+                  {
+                    id: 'day-diaper',
+                    revision: 'v1',
+                    kind: 'diaper',
+                    diaperType: 'wet',
+                    startedAt: '2026-10-19T06:14:00.000Z',
+                    endedAt: '2026-10-19T06:14:00.000Z',
+                    status: 'completed',
+                  },
+                ]
+              : scenario === 'night-asleep' || scenario === 'bedtime-range'
+                ? [routine]
+                : scenario === 'first-nursing'
+                  ? [wake]
+                  : scenario === 'day' || scenario === 'history'
+                    ? scenario === 'history'
+                      ? [wake, nap]
+                      : [wake, nap, nursing]
+                    : [bed, waking, nursing],
   );
-  const snapshot: CareSnapshot = { activities: rows, issues: [] };
+  const snapshot: CareSnapshot = {
+    activities: scenario === 'log-bedtime' ? logActivities('2026-10-19') : rows,
+    issues: [],
+  };
   const historySnapshot =
-    scenario === 'history' ? { activities: historyRows, issues: [] } : snapshot;
+    scenario === 'history'
+      ? { activities: historyRows, issues: [] }
+      : scenario === 'log-bedtime'
+        ? { activities: rows, issues: [] }
+        : snapshot;
   const model = {
     stage: 'ready',
     baby: { id: 'preview', name: 'Arthur' },
@@ -220,7 +232,7 @@ export function Preview({
     current: snapshot,
     history: historySnapshot,
     date,
-    today: scenario === 'history' ? '2026-10-18' : at(0).slice(0, 10),
+    today: scenario === 'history' || scenario === 'log-bedtime' ? '2026-10-18' : at(0).slice(0, 10),
     timezone: 'Europe/Lisbon',
     providerName: 'Component preview',
     busy: false,
@@ -248,7 +260,12 @@ export function Preview({
           insets: { top: 0, left: 0, right: 0, bottom: 16 },
         }}
       >
-        <CareHome model={model} initialHistoryView={scenario === 'history' ? 'dial' : undefined} />
+        <CareHome
+          model={model}
+          initialHistoryView={
+            scenario.startsWith('log-') ? 'log' : scenario === 'history' ? 'dial' : undefined
+          }
+        />
       </SafeAreaProvider>
     </TrackingFontsContext.Provider>
   );

@@ -1,4 +1,5 @@
 import { RoundAction } from '@/features/shared/round-action';
+import { CareLog } from './care-log';
 import { HistoryWeek } from './history-week';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityMenuSheet } from './activity-menu-sheet';
@@ -431,7 +432,13 @@ export function CareHome({
           )}
           <Animated.View
             {...navigationGesture.panHandlers}
-            style={[styles.home, { paddingTop: homeTop, transform: [{ translateY: dragY }] }]}
+            style={[
+              styles.home,
+              {
+                paddingTop: historyMode && historyView !== 'dial' ? 0 : homeTop,
+                transform: [{ translateY: dragY }],
+              },
+            ]}
           >
             {(!historyMode || historyView === 'dial') && view ? (
               <RadialCycle
@@ -535,43 +542,14 @@ export function CareHome({
               {!rows.length && !model.refreshing ? (
                 <Text style={styles.empty}>No activity in this cycle.</Text>
               ) : null}
-              {rows.map((a) => (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${activityLabels[a.kind]} at ${format(a.startedAt)}`}
-                  key={a.id}
-                  disabled={blocked}
-                  onPress={() => open(a)}
-                  style={styles.row}
-                >
-                  <ActivityIcon name={activityIcons[a.kind]} color={activityColors[a.kind]} />
-                  <View style={styles.rowText}>
-                    <Text style={styles.rowTitle}>
-                      {activityLabels[a.kind]} · {format(a.startedAt)}
-                      {a.kind === 'bedtime' && a.endedAt && a.endedAt !== a.startedAt
-                        ? ` – ${format(a.endedAt)}`
-                        : ''}
-                      {a.status !== 'completed' ? ' · Running' : ''}
-                    </Text>
-                    <Text style={styles.muted}>
-                      {a.kind === 'nursing'
-                        ? (() => {
-                            const t = nursingTimes(a, now);
-                            return `${duration(t.total * 1000)} · L ${duration(t.left * 1000)} · R ${duration(t.right * 1000)}`;
-                          })()
-                        : a.kind === 'nap' || a.kind === 'night-waking'
-                          ? duration(activityDuration(a, now))
-                          : a.kind === 'bedtime' && a.endedAt
-                            ? `${shortDuration(Date.parse(a.endedAt) - Date.parse(a.startedAt))} routine`
-                            : a.kind === 'diaper'
-                              ? a.diaperType
-                              : a.kind === 'medicine'
-                                ? a.note || 'No note'
-                                : 'Tap to edit time'}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
+              <CareLog
+                activities={rows}
+                context={history}
+                now={now}
+                timezone={model.timezone}
+                disabled={blocked}
+                onOpen={open}
+              />
               <View style={styles.sync}>
                 <Text style={styles.source}>
                   {model.updatedAt
@@ -1103,24 +1081,19 @@ const createStyles = (theme: ActivityTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginTop: 24,
-      marginBottom: 6,
+      marginTop: 16,
+      marginBottom: 12,
     },
     sectionTitle: { color: theme.text, fontSize: 18, fontWeight: '500' },
-    row: {
-      minHeight: 68,
-      padding: 14,
-      borderRadius: 22,
-      backgroundColor: theme.surface,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    rowText: { flex: 1, gap: 5 },
     rowTitle: { fontSize: 14, fontWeight: '600', color: theme.text },
     empty: { padding: 24, textAlign: 'center', color: theme.muted },
     error: { color: theme.error, fontSize: 14 },
-    sync: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    sync: {
+      width: '100%',
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
     local: { minHeight: 44, paddingVertical: 12, fontSize: 12, color: theme.muted },
   });
 

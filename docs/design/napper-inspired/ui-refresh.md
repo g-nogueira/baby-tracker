@@ -56,6 +56,13 @@ sets the connected client's appearance. The separate local tracker remains avail
 - Removed the extra artwork rings in drawers and enlarged the symbols. Clock ranges omit repeated AM/PM.
 - Moved primary actions and Nursing side controls into TrueSheet native floating footers.
   Bedtime initially opens at 74% with contextual fields; expanded drawers reach 94%.
+- Rebuilt the activity list with tinted cards, accent stripes, aligned time columns and recorded
+  Start–End ranges for Nursing, Nap, Night waking and Bedtime. Diaper content uses title case;
+  Nursing shows active duration and nonzero side totals. Day starts at Wake-up, including when a
+  feed crosses that boundary; Night retains Bedtime-to-Wake-up order.
+- Added non-editable end-of-wake-window and sleep-session summaries from the shared history.
+  Night wakings split continuous sleep; Nap end starts the next wake window, and Bedtime’s end
+  marks actual sleep. Missing or conflicting phase context does not produce an invented duration.
 - Added functional Start/How/comment fields for Bedtime/Nap and wake-mood/comment fields for waking.
   Draft patches save with timestamps through portable care commands; the adapter maps the observed Napper enums.
   Unedited supported provider fields and unknown enum values survive annotation edits.
@@ -137,8 +144,14 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 | --- | --- | --- |
 | ![Grouped dial](ui-refresh/overlapping-dial.png) | ![Nearby cards](ui-refresh/nearby-activities.png) | ![Diaper controls](ui-refresh/diaper.png) |
 
-Validation passed: `pnpm check` (492 tests), the Lisbon timezone care/timeline suite
-(187 tests), Android/iOS JavaScript exports and the standalone preview build.
+| Day log | Completed Day with Bedtime routine |
+| --- | --- |
+| ![Day log](ui-refresh/log-today.png) | ![Completed Day log](ui-refresh/log-bedtime.png) |
+
+The completed-Day log render uses a taller viewport to review the full list without scrolling.
+
+Validation passed: `pnpm check` (503 tests), the Lisbon timezone care/timeline suite
+(198 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -154,6 +167,10 @@ selection surviving drawer expansion/collapse and retaining the reviewed revisio
 chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
 also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
 outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.
+
+Log regressions cover complete ranges, active versus elapsed duration, Bedtime routine endpoints,
+continuous Night sleep after waking, concurrent care, absent/conflicting context, Lisbon rollback,
+Wake-up ties/carryover feeds, Night ordering and exact editor handoff.
 
 On a test profile, compare each state side by side with Napper on both phones: home, current and
 historical cycles, first/active/paused/completed Nursing, Nap, Night waking, past care, exact time

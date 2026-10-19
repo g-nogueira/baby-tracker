@@ -608,3 +608,47 @@ it('opens a stable history date picker and navigates using the selected calendar
   expect(hooks.model.setDate).toHaveBeenCalledWith('2026-10-13');
   expect(renderer.root.findAllByType('DateTimePicker' as never)).toHaveLength(0);
 });
+it('renders chronological log ranges and phase summaries while opening the exact reviewed record', async () => {
+  vi.setSystemTime(new Date('2026-10-15T11:30:00.000Z'));
+  const wake: PointActivity = {
+    id: 'wake',
+    revision: 'wake-v1',
+    kind: 'wake-up',
+    startedAt: '2026-10-15T04:50:00.000Z',
+    endedAt: '2026-10-15T04:50:00.000Z',
+    status: 'completed',
+  };
+  const priorBed: PointActivity = {
+    ...bed,
+    startedAt: '2026-10-14T18:55:00.000Z',
+    endedAt: '2026-10-14T18:55:00.000Z',
+  };
+  const nap: SleepActivity = {
+    id: 'nap',
+    revision: 'reviewed-nap',
+    kind: 'nap',
+    startedAt: '2026-10-15T08:26:00.000Z',
+    endedAt: '2026-10-15T08:51:00.000Z',
+    status: 'completed',
+    pauseSeconds: 0,
+    measuredAt: new Date().toISOString(),
+  };
+  hooks.model.current = snapshot([priorBed, wake, nap]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(text().replace(/\u202f/g, ' ')).toContain('9:26 AM – 9:51 AM');
+  expect(text()).toContain('End of 09h 55m sleep session');
+  expect(text()).toContain('End of 03h 36m wake window');
+  const labels = renderer.root
+    .findAllByType('Pressable' as never)
+    .map((node) => String(node.props.accessibilityLabel).replace(/\u202f/g, ' '));
+  expect(labels.indexOf('Wake up at 5:50 AM')).toBeLessThan(labels.indexOf('First nap at 9:26 AM'));
+  await act(async () => press('First nap at')?.props.onPress());
+  expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
+    type: 'edit',
+    activity: nap,
+  });
+  expect(hooks.model.execute).not.toHaveBeenCalled();
+});
