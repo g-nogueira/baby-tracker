@@ -1,3 +1,4 @@
+import { readActivityDetails } from './care-details';
 import {
   calendarDayForInstant,
   zonedDayBounds,
@@ -131,7 +132,9 @@ export function readSleepPauses(wire: WireLog, now: Date) {
 export function readCareRecord(wire: WireLog, revision: string, now: Date): CareActivity | null {
   const kind = kindForCategory(wire.category);
   if (!kind || wire.skipped === true) return null;
-  if (kind === 'nursing') return toNursingActivity(wire, revision, now);
+  const details = readActivityDetails(wire);
+  if (kind === 'nursing')
+    return { ...toNursingActivity(wire, revision, now), ...(details ? { details } : {}) };
   if (typeof wire.id !== 'string') throw invalid('An activity ID is missing.');
   const startedAt = kind === 'bedtime' ? bedtimeInstant(wire) : instant(wire.start);
   const end = instant(wire.end);
@@ -139,12 +142,15 @@ export function readCareRecord(wire: WireLog, revision: string, now: Date): Care
   const timed = kind === 'nap' || kind === 'night-waking';
   if (!timed && wire.isOpen)
     throw invalid('An unfinished bedtime routine or point activity must be reviewed in Napper.');
+  if (kind === 'bedtime' && Date.parse(end) > now.getTime())
+    throw invalid('A bedtime routine ends in the future.');
   if (Date.parse(startedAt) > now.getTime()) throw invalid('An activity starts in the future.');
   if (!wire.isOpen && Date.parse(end) < Date.parse(startedAt))
     throw invalid('An activity ends before it starts.');
   const base = {
     id: wire.id,
     revision,
+    ...(details ? { details } : {}),
     startedAt,
     endedAt: wire.isOpen ? null : end,
     status: wire.isOpen ? ('active' as const) : ('completed' as const),

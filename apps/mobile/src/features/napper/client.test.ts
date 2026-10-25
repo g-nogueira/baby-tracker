@@ -33,6 +33,25 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 describe('Napper client', () => {
+  it.each(['', 'Removed', '"ok"', '{"success":true}'])(
+    'accepts DELETE acknowledgment %j without treating it as the confirmed record state',
+    async (body) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { status: 200 }));
+      const client = new NapperClient(memory().store, 'device', fetcher, now);
+      await client.restore();
+      await client.remove('test-baby', 'log/id');
+      expect(String(fetcher.mock.calls[0][0])).toBe(
+        'https://api.napper.app/logs/test-baby/log%2Fid',
+      );
+      expect(fetcher.mock.calls[0][1]?.method).toBe('DELETE');
+    },
+  );
+  it('rejects an explicit DELETE failure acknowledgment', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ success: false }));
+    const client = new NapperClient(memory().store, 'device', fetcher, now);
+    await client.restore();
+    await expect(client.remove('test-baby', 'log')).rejects.toMatchObject({ code: 'invalid' });
+  });
   it('uses captured OTP/login bodies and persists the token pair before accepting login', async () => {
     const mem = memory(null);
     const fetcher = vi

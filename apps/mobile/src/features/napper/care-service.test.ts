@@ -47,8 +47,18 @@ export async function careHarness(
   let gate: Promise<void> | null = null;
   let afterPut: (() => void) | null = null;
   const sent: WireLog[] = [];
+  const removed: string[] = [];
+  let removalMode: 'normal' | 'stale' | 'lost' = 'normal';
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const path = new URL(String(input)).pathname;
+    if (init?.method === 'DELETE') {
+      const id = decodeURIComponent(path.split('/').at(-1) ?? '');
+      removed.push(id);
+      if (gate) await gate;
+      if (removalMode !== 'stale') rows = rows.filter((r) => r.id !== id);
+      if (removalMode === 'lost') throw new Error('synthetic lost delete acknowledgment');
+      return new Response(null, { status: 204 });
+    }
     if (init?.method === 'PUT') {
       const request = JSON.parse(String(init.body)) as WireLog;
       sent.push(request);
@@ -104,6 +114,10 @@ export async function careHarness(
     care,
     client,
     sent,
+    removed,
+    removalMode: (mode: 'normal' | 'stale' | 'lost') => {
+      removalMode = mode;
+    },
     fetcher,
     find,
     now: () => now,
@@ -126,6 +140,170 @@ export async function careHarness(
   };
 }
 describe('provider-neutral care port backed by the observed Napper contracts', () => {
+  it('keeps the chosen morning mood on Wake up while confirming closure of a concurrent waking', async () => {
+    const waking: WireLog = {
+      id: 'synthetic-waking',
+      category: 'NIGHT_WAKING',
+      start: stamp('07:00:00'),
+      end: stamp('07:00:00'),
+      isOpen: true,
+      babyMoodOnWakeUp: 'BAD',
+      comment: '',
+    };
+    const h = await careHarness([point('bedtime', stamp('06:00:00')), waking]);
+    await h.care.execute('test-baby', {
+      type: 'wake-up',
+      expected: await h.find('bedtime'),
+      at: stamp('07:30:00'),
+      details: { wakeMood: 'good', comment: 'Morning note' },
+    });
+    expect(h.sent.map((row) => [row.category, row.babyMoodOnWakeUp])).toEqual([
+      ['NIGHT_WAKING', 'BAD'],
+      ['WOKE_UP', 'GOOD'],
+    ]);
+    expect((await h.find('wake-up')).details).toEqual({
+      wakeMood: 'good',
+      comment: 'Morning note',
+    });
+  });
+  it('saves sleep annotations with the initial write and reads the confirmed provider-neutral values', async () => {
+    const h = await careHarness();
+    const details = {
+      settling: ['took-long' as const, 'upset' as const],
+      sleepMethod: 'held' as const,
+      comment: 'Synthetic 5% & / 🌙',
+    };
+    await h.provider.care.execute('test-baby', { type: 'bedtime', at: stamp('07:00:00'), details });
+    expect((await h.find('bedtime')).details).toEqual(details);
+    expect(h.sent.at(-1)).toMatchObject({
+      babyMoodOnSleep: ['LONG_TIME_TO_FALL_ASLEEP', 'UPSET'],
+      howBabySlept: 'WORN_OR_HELD',
+      comment: encodeURIComponent(details.comment),
+    });
+  });
+  it('merges only edited annotation fields and rejects a stale reviewed revision', async () => {
+    const log = {
+      ...point('bedtime', stamp('06:00:00')),
+      howBabySlept: 'UNKNOWN_FUTURE_METHOD',
+      babyMoodOnSleep: ['PROVIDER_ONLY'],
+      timeToFallAsleep: 'TOOK_A_WHILE',
+    };
+    const h = await careHarness([log]);
+    const reviewed = await h.find('bedtime');
+    await h.provider.care.execute('test-baby', {
+      type: 'edit-activity',
+      expected: reviewed,
+      startedAt: reviewed.startedAt,
+      details: { comment: 'Edited note' },
+    });
+    expect(h.sent.at(-1)).toMatchObject({
+      howBabySlept: 'UNKNOWN_FUTURE_METHOD',
+      babyMoodOnSleep: ['PROVIDER_ONLY'],
+      timeToFallAsleep: 'TOOK_A_WHILE',
+      comment: 'Edited%20note',
+    });
+    const count = h.sent.length;
+    await expect(
+      h.provider.care.execute('test-baby', {
+        type: 'edit-activity',
+        expected: reviewed,
+        startedAt: reviewed.startedAt,
+        details: { comment: 'Stale note' },
+      }),
+    ).rejects.toBeInstanceOf(CareServiceError);
+    expect(h.sent).toHaveLength(count);
+  });
+  it.each(['nap', 'night-waking', 'nursing', 'diaper', 'medicine'] as const)(
+    'removes the exact shared %s record and confirms its absence',
+    async (kind) => {
+      const log: WireLog = {
+        id: 'remove-me',
+        category: categories[kind],
+        start: stamp('07:00:00'),
+        end: stamp('07:05:00'),
+        isOpen: false,
+        ...(kind === 'nursing'
+          ? { activeBreast: 'RIGHT', breastLeftMinutes: 0, breastRightMinutes: 300 }
+          : {}),
+        ...(kind === 'diaper' ? { diaperContent: 'WET' } : {}),
+        ...(kind === 'medicine' ? { comment: 'synthetic%20note' } : {}),
+      };
+      const h = await careHarness([log]);
+      await h.care.execute('test-baby', { type: 'remove-activity', expected: await h.find(kind) });
+      expect(h.removed).toEqual([log.id]);
+      expect(h.sent).toEqual([]);
+      expect((await h.care.current('test-baby')).activities).toEqual([]);
+      expect(h.care.needsRefresh).toBe(false);
+      const call = h.fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE');
+      expect(String(call?.[0])).toBe('https://api.napper.app/logs/test-baby/remove-me');
+      expect(call?.[1]?.body).toBeUndefined();
+    },
+  );
+  it('rejects stale removal, separate Bedtime removal, and repeated removal taps', async () => {
+    const log: WireLog = {
+      id: 'nap',
+      category: 'NAP',
+      start: stamp('07:00:00'),
+      end: stamp('07:10:00'),
+      isOpen: false,
+    };
+    const h = await careHarness([log]);
+    const stale = await h.find('nap');
+    h.setRows([{ ...log, comment: 'remote edit' }]);
+    await expect(
+      h.care.execute('test-baby', { type: 'remove-activity', expected: stale }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    expect(h.removed).toEqual([]);
+    const fresh = await h.find('nap');
+    let release = () => {};
+    h.hold(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const first = h.care.execute('test-baby', { type: 'remove-activity', expected: fresh });
+    await expect(
+      h.care.execute('test-baby', { type: 'remove-activity', expected: fresh }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    release();
+    await first;
+    expect(h.removed).toHaveLength(1);
+    const boundary = await careHarness([point('bedtime', stamp('06:00:00'))]);
+    await expect(
+      boundary.care.execute('test-baby', {
+        type: 'remove-activity',
+        expected: await boundary.find('bedtime'),
+      }),
+    ).rejects.toThrow('cannot be removed separately');
+    expect(boundary.removed).toEqual([]);
+  });
+  it.each(['lost', 'stale'] as const)(
+    'blocks retries after %s removal confirmation until manual reconciliation',
+    async (mode) => {
+      const h = await careHarness([
+        {
+          id: 'nap',
+          category: 'NAP',
+          start: stamp('07:00:00'),
+          end: stamp('07:10:00'),
+          isOpen: false,
+        },
+      ]);
+      const command: CareCommand = { type: 'remove-activity', expected: await h.find('nap') };
+      h.removalMode(mode);
+      await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({
+        code: 'uncertain',
+      });
+      expect(h.care.needsRefresh).toBe(true);
+      await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({
+        code: 'uncertain',
+      });
+      expect(h.removed).toHaveLength(1);
+      await h.care.reconcile('test-baby');
+      expect(h.care.needsRefresh).toBe(false);
+      expect(h.removed).toHaveLength(1);
+    },
+  );
   it('starts, stops, edits and continues a Nap when the fetched history begins mid-night', async () => {
     const oldBed: WireLog = {
       ...point('bedtime', '2026-10-13T19:00:00Z'),
@@ -895,4 +1073,178 @@ describe('bedtime and timezone wire conversion', () => {
     expect(bedtimeInstant(fields)).toBe(new Date(at).toISOString());
     expect(Date.parse(zonedTimestamp(new Date(at), 'Europe/Lisbon'))).toBe(Date.parse(at));
   });
+});
+
+describe('Bedtime routine ranges', () => {
+  const start = '2026-10-18T18:45:00.000Z';
+  const end = '2026-10-18T18:55:00.000Z';
+  const now = '2026-10-18T20:44:00.000Z';
+  const routine = {
+    ...point('bedtime', start),
+    ...bedtimeFields(new Date(start), 'Europe/Lisbon'),
+    end,
+  };
+  it('decodes the original routine separately from the actual asleep phase', async () => {
+    const h = await careHarness([routine], now);
+    const record = await h.find('bedtime');
+    expect(record).toMatchObject({ startedAt: start, endedAt: end });
+    const state = sleepContext([record]);
+    expect(state.phaseStartedAt).toBe(end);
+    expect(Date.parse(now) - Date.parse(state.phaseStartedAt ?? '')).toBe(109 * 60000);
+  });
+  it('edits both routine endpoints, confirms readback and rejects an outdated revision', async () => {
+    const h = await careHarness([routine], now);
+    const expected = await h.find('bedtime');
+    const command: CareCommand = {
+      type: 'edit-activity',
+      expected,
+      startedAt: '2026-10-18T18:40:00.000Z',
+      endedAt: '2026-10-18T19:00:00.000Z',
+    };
+    await h.care.execute('test-baby', command);
+    expect(await h.find('bedtime')).toMatchObject({
+      startedAt: command.startedAt,
+      endedAt: command.endedAt,
+    });
+    expect(sleepContext((await h.care.current('test-baby')).activities).phaseStartedAt).toBe(
+      command.endedAt,
+    );
+    await expect(h.care.execute('test-baby', command)).rejects.toThrow(/changed/);
+    expect(h.sent).toHaveLength(1);
+  });
+  it('rejects waking and morning transitions inside the routine before writing', async () => {
+    const h = await careHarness([routine], now);
+    const expected = await h.find('bedtime');
+    for (const type of ['start-night-waking', 'wake-up'] as const)
+      await expect(
+        h.care.execute('test-baby', { type, expected, at: '2026-10-18T18:50:00.000Z' }),
+      ).rejects.toThrow(/follow bedtime/);
+    expect(h.sent).toHaveLength(0);
+  });
+  it('rejects an edited routine that would swallow a recorded night waking', async () => {
+    const h = await careHarness(
+      [
+        routine,
+        {
+          id: 'waking-after-routine',
+          category: 'NIGHT_WAKING',
+          start: '2026-10-18T19:00:00Z',
+          end: '2026-10-18T19:05:00Z',
+          isOpen: false,
+          pauses: [],
+        },
+      ],
+      now,
+    );
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'edit-activity',
+        expected: await h.find('bedtime'),
+        startedAt: start,
+        endedAt: '2026-10-18T19:02:00.000Z',
+      }),
+    ).rejects.toThrow(/after its bedtime/);
+    expect(h.sent).toHaveLength(0);
+  });
+  it.each([
+    ['2026-10-25T23:50:00.000Z', '2026-10-26T00:10:00.000Z'],
+    ['2026-10-25T00:50:00.000Z', '2026-10-25T01:10:00.000Z'],
+  ])(
+    'retains both endpoints across midnight or the Lisbon clock rollback (%s → %s)',
+    async (startedAt, endedAt) => {
+      const h = await careHarness([], '2026-10-26T02:00:00.000Z');
+      await h.care.execute('test-baby', {
+        type: 'record-past',
+        activity: { kind: 'bedtime', startedAt, endedAt },
+      });
+      expect(await h.find('bedtime')).toMatchObject({ startedAt, endedAt });
+    },
+  );
+  it.each(['2026-10-18T18:40:00.000Z', '2026-10-18T20:45:00.000Z'])(
+    'rejects a routine end before its start or after now (%s) before writing',
+    async (endedAt) => {
+      const h = await careHarness([routine], now);
+      await expect(
+        h.care.execute('test-baby', {
+          type: 'edit-activity',
+          expected: await h.find('bedtime'),
+          startedAt: start,
+          endedAt,
+        }),
+      ).rejects.toThrow();
+      expect(h.sent).toHaveLength(0);
+    },
+  );
+});
+describe('Wake-up removal', () => {
+  const bed = point('bedtime', '2026-10-18T18:55:00Z');
+  const wake = point('wake-up', '2026-10-19T04:30:00Z');
+  const now = '2026-10-19T06:16:00Z';
+  it('confirms removal and reopens the preceding night while preserving a later diaper', async () => {
+    const diaper: WireLog = {
+      id: 'diaper',
+      category: 'CHANGED_DIAPER',
+      start: '2026-10-19T06:15:00Z',
+      end: '2026-10-19T06:15:00Z',
+      isOpen: false,
+      diaperContent: 'WET',
+    };
+    const h = await careHarness([bed, wake, diaper], now);
+    await h.care.execute('test-baby', {
+      type: 'remove-activity',
+      expected: await h.find('wake-up'),
+    });
+    const snapshot = await h.care.current('test-baby');
+    expect(h.removed).toEqual([wake.id]);
+    expect(h.sent).toHaveLength(0);
+    expect(snapshot.activities.some((a) => a.kind === 'wake-up')).toBe(false);
+    expect(snapshot.activities.some((a) => a.id === diaper.id)).toBe(true);
+    expect(sleepContext(snapshot.activities).night?.id).toBe(bed.id);
+  });
+  it.each([true, false])(
+    'rejects removal that would move a running/completed Nap into Night (open=%s)',
+    async (isOpen) => {
+      const nap: WireLog = {
+        id: 'later-nap',
+        category: 'NAP',
+        start: '2026-10-19T05:00:00Z',
+        end: '2026-10-19T05:20:00Z',
+        isOpen,
+        pauses: [],
+      };
+      const h = await careHarness([bed, wake, nap], now);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected: await h.find('wake-up') }),
+      ).rejects.toMatchObject({ code: 'conflict' });
+      expect(h.removed).toHaveLength(0);
+    },
+  );
+  it.each(['lost', 'stale'] as const)(
+    'requires reconciliation after an unconfirmed Wake-up removal (%s)',
+    async (mode) => {
+      const h = await careHarness([bed, wake], now);
+      const expected = await h.find('wake-up');
+      h.removalMode(mode);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected }),
+      ).rejects.toMatchObject({ code: 'uncertain' });
+      expect(h.care.needsRefresh).toBe(true);
+      await expect(
+        h.care.execute('test-baby', { type: 'remove-activity', expected }),
+      ).rejects.toMatchObject({ code: 'uncertain' });
+      expect(h.removed).toHaveLength(1);
+      await h.care.reconcile('test-baby');
+      expect(h.care.needsRefresh).toBe(false);
+    },
+  );
+});
+it('rejects a Wake-up removal when another caregiver edited it after review', async () => {
+  const wire = point('wake-up', '2026-10-19T04:30:00Z');
+  const h = await careHarness([wire], '2026-10-19T06:15:00Z');
+  const expected = await h.find('wake-up');
+  h.setRows([{ ...wire, comment: 'Updated elsewhere' }]);
+  await expect(
+    h.care.execute('test-baby', { type: 'remove-activity', expected }),
+  ).rejects.toMatchObject({ code: 'conflict' });
+  expect(h.removed).toHaveLength(0);
 });

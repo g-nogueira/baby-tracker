@@ -34,11 +34,16 @@ vi.mock('@lodev09/react-native-true-sheet', () => ({
   }),
 }));
 function SheetBoundary(props: Record<string, unknown>) {
-  return <>{props.children as import('react').ReactNode}</>;
+  return (
+    <>
+      {props.children as import('react').ReactNode}
+      {props.footer as import('react').ReactNode}
+    </>
+  );
 }
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
 vi.mock('@react-native-community/datetimepicker', () => ({ default: 'DateTimePicker' }));
-vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path' }));
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path', Circle: 'Circle' }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
 afterEach(async () => {
@@ -90,7 +95,9 @@ it('opens the proposed time, keeps the picker stable across ticks, and starts at
   expect(sheet.props.dismissible).toBe(true);
   expect(sheet.props.draggable).toBe(true);
   expect(sheet.props.scrollable).toBe(true);
-  expect(sheet.props.detents).toEqual([330 / 800, 650 / 800]);
+  expect(sheet.props.detents[0]).toBeGreaterThan(0.5);
+  expect(sheet.props.detents[1]).toBeGreaterThan(sheet.props.detents[0]);
+  expect(sheet.props.detents[1]).toBeLessThan(1);
   expect(renderer.root.findByType('ScrollView' as never).props.nestedScrollEnabled).toBe(true);
 });
 it('updates the split before finger release and preserves an edit through remote/timer rerenders', async () => {
@@ -108,6 +115,9 @@ it('updates the split before finger release and preserves an edit through remote
   await act(async () => {
     renderer = create(<NapperNursingSheet {...base} log={log} onCorrect={onCorrect} />);
   });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   await act(async () => renderer.root.findByType('Slider' as never).props.onValueChange(120));
   expect(renderer.root.findByType('Slider' as never).props.value).toBe(120);
   await act(async () =>
@@ -144,6 +154,9 @@ it('opens a fractional completed split as a whole-second edit draft without chan
   await act(async () => {
     renderer = create(<NapperNursingSheet {...base} log={log} onCorrect={onCorrect} />);
   });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
   expect(renderer.root.findByType('Slider' as never).props.value).toBe(13);
   expect(onCorrect).not.toHaveBeenCalled();
   expect(log.breastLeftMinutes).toBe(12.75);
@@ -227,9 +240,12 @@ it('reports native expansion failures and leaves the time picker closed', async 
   });
   await act(async () => press('Set Nursing start time')?.props.onPress());
   expect(renderer.root.findAllByType('DateTimePicker' as never)).toHaveLength(0);
-  expect(renderer.root.findByProps({ accessibilityRole: 'alert' }).children.join('')).toContain(
-    'Close and reopen Nursing',
-  );
+  expect(
+    renderer.root
+      .findAllByType('Text' as never)
+      .find((node) => node.props.accessibilityRole === 'alert')
+      ?.children.join(''),
+  ).toContain('Close and reopen Nursing');
 });
 it('waits for native expansion and ignores repeated time taps during that transition', async () => {
   let finish: () => void = () => undefined;

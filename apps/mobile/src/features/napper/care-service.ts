@@ -140,7 +140,21 @@ export class NapperCareService implements CareService {
       this.writing = true;
       try {
         const expected = 'expected' in command ? this.expected(profileId, command.expected) : null;
-        if (command.type === 'start-nursing') {
+        if (command.type === 'remove-activity' && expected) {
+          if (expected.category === 'BED_TIME')
+            throw new CareServiceError(
+              'invalid',
+              'Bedtime cannot be removed separately. Edit its times instead.',
+            );
+          await this.tracker.remove(profileId, expected, (before, after) => {
+            if (
+              expected.category === 'NAP' ||
+              expected.category === 'NIGHT_WAKING' ||
+              expected.category === 'WOKE_UP'
+            )
+              validateCareSleep(before, after, [expected], this.now());
+          });
+        } else if (command.type === 'start-nursing') {
           await this.tracker.start(profileId, command.side, new Date(command.at));
         } else if (command.type === 'change-nursing' && expected) {
           await this.tracker.change(profileId, expected, command.command);
@@ -167,7 +181,9 @@ export class NapperCareService implements CareService {
           const additional =
             command.type === 'edit-activity'
               ? [day(command.startedAt), ...(command.endedAt ? [day(command.endedAt)] : [])]
-              : command.type === 'record-past' && 'endedAt' in command.activity
+              : command.type === 'record-past' &&
+                  'endedAt' in command.activity &&
+                  command.activity.endedAt !== undefined
                 ? [day(command.activity.endedAt)]
                 : [];
           // The tracker may replan the remaining steps after confirming a dependent write.

@@ -30,6 +30,10 @@ The separate SQLite tracker remains under `/local`; its data/outbox is not uploa
   activity's `originTimezone` for historical editing. Napper supplies only offset timestamps;
   its original IANA zone is unknown and is not guessed. Its adapter translates the selected
   zone into the offset-bearing timestamps required by the observed SDK.
+- Confirmed removal is an explicit `remove-activity` command carrying an opaque activity revision.
+  The UI confirms intent; the provider rejects stale records and confirms authoritative absence.
+  The initial adapter supports individual Nap, Night waking, Nursing, Diaper and Medicine removal;
+  night boundaries are not deleted independently and no implicit cascade or fake Undo is offered.
 - Commands express care operations: start/pause/switch/stop Nursing, start/pause/resume/stop/continue Nap,
   bedtime, night waking, fall asleep, morning wake-up, edits and past activity creation.
   Auth and care ports are separate, so changing authentication does not affect activity code.
@@ -106,8 +110,26 @@ Proposed start/transition times are tappable. Native TrueSheet owns detents and 
 native slider updates arrive during dragging. Date/time pickers hold unconfirmed selections
 through clock renders. Active Nursing start editing captures its original reviewed revision;
 completed Nursing retains explicit Last and whole-second split editing. Past activity creation
-uses the selected historical cycle, including past nights. Weekly history and broader Napper
-features are outside this delivery.
+uses the selected historical cycle, including past nights. History has a calendar strip, cycle/list views and recorded totals. Predictions and full Napper
+analytics remain outside this delivery.
+
+## Portable activity annotations
+
+`ActivityDetails` adds optional settling flags, sleep method, wake mood and comment to the read model.
+Creation, transition, edit and past-record commands carry sparse detail patches alongside timestamps.
+The UI uses neutral values such as `held` and `took-long`; Napper strings stay in `care-details.ts`.
+
+| Care field | Observed Napper field | Examples |
+| --- | --- | --- |
+| `settling` | `babyMoodOnSleep` | `took-long` → `LONG_TIME_TO_FALL_ASLEEP`, `upset` → `UPSET` |
+| `sleepMethod` | `howBabySlept` | `in-bed` → `IN_BED`, `held` → `WORN_OR_HELD` |
+| `wakeMood` | `babyMoodOnWakeUp` | `bad` / `neutral` / `good` → `BAD` / `NEUTRAL` / `GOOD` |
+| `comment` | `comment` | URI-encoded only inside the adapter |
+
+Only edited keys are replaced; other permitted Napper fields and unknown enum values are preserved.
+Annotations use the same reviewed revision and authoritative confirmation as time edits. During a
+morning transition, mood/comment target the new Wake-up record; they do not overwrite the waking
+record that must first be closed. A replacement service stores the neutral values directly.
 
 ## Replacing Napper with our service
 
@@ -138,3 +160,5 @@ an accidentally stopped nap. Night read synchronization has been reported workin
 night writes have been reported working with a collision caveat. The new guarded transition and
 collision warning/correction flow still require phone acceptance. Existing native dependencies
 are unchanged; this delivery does not require adding another native module.
+
+The connected presentation refresh and its static-review limits are documented in [the UI refresh notes](../design/napper-inspired/ui-refresh.md).

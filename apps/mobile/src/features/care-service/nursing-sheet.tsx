@@ -1,13 +1,17 @@
+import { RoundAction } from '@/features/shared/round-action';
+import { Text } from '@/features/shared/tracking-text';
+import { clockLabel, shortDuration } from './presentation';
+import { useActivityTheme, type ActivityTheme } from '@/features/shared/activity-theme';
+import { SheetToolbar } from './sheet-toolbar';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import Slider from '@react-native-community/slider';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -29,6 +33,7 @@ interface Props {
   onStart: (side: Breast, start: Date) => void;
   onChange: (command: NursingCommand) => void;
   onCorrect: (start: Date, end: Date, left: number, last: Breast) => void;
+  onRemove?: (expected: ActivityReference) => void;
   onAdjustStart?: (start: Date, expected: ActivityReference) => void;
 }
 /** TrueSheet v3 owns native drag, nested-scroll and dismissal behavior on both platforms. */
@@ -44,7 +49,11 @@ export function NursingSheet({
   onChange,
   onCorrect,
   onAdjustStart,
+  onRemove,
 }: Props) {
+  const theme = useActivityTheme();
+  const color = theme.night ? '#8EEBBE' : '#B35D7D';
+  const styles = useMemo(() => createStyles(theme, color), [theme, color]);
   const nursing = log;
   const completed = nursing !== null && nursing.status === 'completed';
   const initial = useRef({
@@ -71,10 +80,12 @@ export function NursingSheet({
   const sheet = useRef<TrueSheet>(null);
   const openingPicker = useRef(false);
   const { height } = useWindowDimensions();
-  const [expanded, setExpanded] = useState(completed);
+  const [expanded, setExpanded] = useState(false);
   const expandStartPicker = async () => {
     if (openingPicker.current) return;
     openingPicker.current = true;
+    if (nursing && !adjusted)
+      startRevision.current = { id: nursing.id, revision: nursing.revision };
     try {
       // Wait for native expansion before showing a platform time picker over the sheet.
       await sheet.current?.resize(1);
@@ -132,16 +143,126 @@ export function NursingSheet({
       timeZone: timezone,
     }).format(date);
   const time = (seconds: number) => formatLiveDuration(seconds * 1000);
+  const footer = (
+    <View pointerEvents="box-none" style={[styles.footer, { width: '100%' }]}>
+      {!completed ? (
+        <View style={styles.sides}>
+          {(['LEFT', 'RIGHT'] as const).map((side) => (
+            <Pressable
+              key={side}
+              accessibilityRole="button"
+              accessibilityLabel={
+                nursing
+                  ? `${paused ? 'Resume' : nursing.lastBreast === side ? 'Pause' : 'Switch to'} ${side === 'LEFT' ? 'Left' : 'Right'} breast`
+                  : `Start Nursing on ${side === 'LEFT' ? 'Left' : 'Right'} breast`
+              }
+              disabled={busy || pickerError !== null}
+              onPress={() =>
+                nursing
+                  ? onChange(
+                      paused
+                        ? { kind: 'resume', side }
+                        : nursing.lastBreast === side
+                          ? { kind: 'pause' }
+                          : { kind: 'switch', side },
+                    )
+                  : onStart(side, adjusted ? start : new Date())
+              }
+              style={[
+                styles.side,
+                {
+                  backgroundColor:
+                    nursing && !paused && nursing.lastBreast === side
+                      ? theme.night
+                        ? '#999BFF'
+                        : color
+                      : theme.field,
+                },
+                busy && styles.disabled,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.sideLabel,
+                  {
+                    color:
+                      nursing && !paused && nursing.lastBreast === side
+                        ? theme.onAccent
+                        : theme.text,
+                  },
+                ]}
+              >
+                {side === 'LEFT' ? 'L' : 'R'}
+              </Text>
+              <ActivityIcon
+                color={nursing && !paused && nursing.lastBreast === side ? theme.onAccent : color}
+                name={nursing && !paused && nursing.lastBreast === side ? 'pause' : 'play'}
+              />
+              <Text
+                style={[
+                  styles.sideMeta,
+                  {
+                    color:
+                      nursing && !paused && nursing.lastBreast === side
+                        ? theme.onAccent
+                        : theme.muted,
+                  },
+                ]}
+              >
+                {totals
+                  ? time(side === 'LEFT' ? totals.left : totals.right)
+                  : last === null
+                    ? ''
+                    : last === side
+                      ? 'Last'
+                      : 'Next'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={[styles.footerActions, { width: '100%' }]}>
+        {completed ? (
+          <RoundAction
+            label="Save Nursing changes"
+            disabled={!canSave}
+            onPress={() => {
+              if (lastSide) onCorrect(start, end, left, lastSide);
+            }}
+          />
+        ) : nursing ? (
+          <RoundAction
+            label="Stop Nursing"
+            icon="stop"
+            disabled={busy}
+            onPress={() => onChange({ kind: 'stop' })}
+          />
+        ) : null}
+        {!completed && adjusted && nursing && onAdjustStart ? (
+          <RoundAction
+            label="Save Nursing start time"
+            disabled={busy || pickerError !== null || start > now}
+            onPress={() => {
+              if (startRevision.current) onAdjustStart(start, startRevision.current);
+            }}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
   return (
     <TrueSheet
       ref={sheet}
-      initialDetentIndex={completed ? 1 : 0}
-      detents={[Math.min(0.5, 330 / height), Math.min(0.84, 650 / height)]}
+      initialDetentIndex={0}
+      detents={[Math.min(0.78, (completed ? 450 : nursing ? 600 : 540) / height), 0.94]}
       scrollable
+      footer={footer}
+      cornerRadius={28}
       draggable
       dismissible
-      backgroundColor="#FFFFFF"
-      grabberOptions={{ color: '#C5BBB3', width: 42, adaptive: false }}
+      backgroundColor={theme.surface}
+      grabberOptions={{ color: theme.muted, width: 42, adaptive: false }}
       accessibilityOptions={{ paneTitle: 'Nursing', grabberLabel: 'Nursing drawer' }}
       onDidDismiss={onClose}
       onDidPresent={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
@@ -153,23 +274,63 @@ export function NursingSheet({
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        <SheetToolbar
+          label="Nursing"
+          busy={busy}
+          onClose={() => void sheet.current?.dismiss()}
+          onExpand={() => {
+            void sheet.current
+              ?.resize(1)
+              .then(() => setExpanded(true))
+              .catch(() => {
+                setPickerError('Close and reopen the Nursing drawer to view its details.');
+              });
+          }}
+          onRemove={nursing && onRemove ? () => onRemove(nursing) : undefined}
+        />
         <View style={styles.hero}>
-          <ActivityIcon name="nursing" color="#B35D7D" size={28} />
+          <ActivityIcon name="nursing" color={color} size={88} />
           <Text accessibilityRole="header" style={styles.title}>
-            {completed ? 'Edit Nursing' : 'Nursing'}
+            Nursing
           </Text>
           {!expanded ? (
             nursing && totals ? (
-              <Text style={styles.time}>{time(totals.total)}</Text>
+              completed ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Set Nursing start time"
+                  disabled={busy}
+                  onPress={() => void expandStartPicker()}
+                  style={{ width: '100%', alignItems: 'center' }}
+                >
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.time, styles.range]}>
+                    {clockLabel(start, timezone, false)} – {clockLabel(end, timezone, false)}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.time}>{time(totals.total)}</Text>
+              )
             ) : (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Set Nursing start time"
                 onPress={() => void expandStartPicker()}
+                style={{ width: '100%', alignItems: 'center' }}
               >
                 <Text style={styles.time}>{format(start)}</Text>
               </Pressable>
             )
+          ) : (
+            <Text style={[styles.time, styles.range]}>
+              {clockLabel(start, timezone, false)} –{' '}
+              {completed ? clockLabel(end, timezone, false) : '…'}
+            </Text>
+          )}
+          {completed ? (
+            <Text style={styles.muted}>
+              {shortDuration(total * 1000)} long · {shortDuration(now.getTime() - end.getTime())}{' '}
+              ago
+            </Text>
           ) : null}
           {nursing && nursing.status !== 'completed' ? (
             <Text style={styles.muted}>
@@ -179,59 +340,6 @@ export function NursingSheet({
             </Text>
           ) : null}
         </View>
-        {!completed ? (
-          <View style={styles.sides}>
-            {(['LEFT', 'RIGHT'] as const).map((side) => (
-              <Pressable
-                key={side}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  nursing
-                    ? `${paused ? 'Resume' : nursing.lastBreast === side ? 'Pause' : 'Switch to'} ${side === 'LEFT' ? 'Left' : 'Right'} breast`
-                    : `Start Nursing on ${side === 'LEFT' ? 'Left' : 'Right'} breast`
-                }
-                disabled={busy || pickerError !== null}
-                onPress={() =>
-                  nursing
-                    ? onChange(
-                        paused
-                          ? { kind: 'resume', side }
-                          : nursing.lastBreast === side
-                            ? { kind: 'pause' }
-                            : { kind: 'switch', side },
-                      )
-                    : onStart(side, adjusted ? start : new Date())
-                }
-                style={[styles.side, busy && styles.disabled]}
-              >
-                <Text style={styles.sideLabel}>{side === 'LEFT' ? 'L' : 'R'}</Text>
-                <ActivityIcon
-                  name={nursing && !paused && nursing.lastBreast === side ? 'pause' : 'play'}
-                />
-                <Text style={styles.sideMeta}>
-                  {totals
-                    ? time(side === 'LEFT' ? totals.left : totals.right)
-                    : last === null
-                      ? ''
-                      : last === side
-                        ? 'Last'
-                        : 'Next'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-        {nursing && nursing.status !== 'completed' ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Stop Nursing"
-            disabled={busy}
-            onPress={() => onChange({ kind: 'stop' })}
-            style={[styles.stop, busy && styles.disabled]}
-          >
-            <ActivityIcon name="stop" size={24} />
-          </Pressable>
-        ) : null}
         {expanded ? (
           <>
             <ActivityTimestampField
@@ -263,8 +371,10 @@ export function NursingSheet({
                   onPickerChange={pick}
                 />
                 <View style={styles.split}>
-                  <Text>Left · {time(left)}</Text>
-                  <Text>Right · {time(Math.max(0, total - left))}</Text>
+                  <Text style={{ color: theme.text }}>Left · {time(left)}</Text>
+                  <Text style={{ color: theme.text }}>
+                    Right · {time(Math.max(0, total - left))}
+                  </Text>
                 </View>
                 <Slider
                   accessibilityLabel="Left and Right Nursing time split"
@@ -274,9 +384,9 @@ export function NursingSheet({
                   value={Math.min(left, total)}
                   disabled={busy || total === 0}
                   onValueChange={(value) => setLeft(Math.round(value))}
-                  minimumTrackTintColor="#B35D7D"
-                  maximumTrackTintColor="#EBDCE2"
-                  thumbTintColor="#B35D7D"
+                  minimumTrackTintColor={color}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={color}
                   style={styles.slider}
                 />
                 <Text style={styles.muted}>
@@ -294,44 +404,18 @@ export function NursingSheet({
                       onPress={() => setLast(side)}
                       style={[styles.last, lastSide === side && styles.lastSelected]}
                     >
-                      <Text>{side === 'LEFT' ? 'Left' : 'Right'}</Text>
+                      <Text style={{ color: theme.text }}>
+                        {side === 'LEFT' ? 'Left' : 'Right'}
+                      </Text>
                     </Pressable>
                   ))}
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Save Nursing changes"
-                  disabled={!canSave}
-                  onPress={() => {
-                    if (lastSide) onCorrect(start, end, left, lastSide);
-                  }}
-                  style={[styles.save, !canSave && styles.disabled]}
-                >
-                  <Text style={styles.white}>Save changes</Text>
-                </Pressable>
               </>
             ) : nursing ? (
-              <>
-                <Text style={styles.muted}>End · Running · {format(now)}</Text>
-                {adjusted && onAdjustStart ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Save Nursing start time"
-                    disabled={busy || pickerError !== null || start > now}
-                    onPress={() => {
-                      if (startRevision.current) onAdjustStart(start, startRevision.current);
-                    }}
-                    style={styles.save}
-                  >
-                    <Text style={styles.white}>Save start time</Text>
-                  </Pressable>
-                ) : null}
-              </>
+              <Text style={styles.muted}>End · Running · {format(now)}</Text>
             ) : null}
           </>
-        ) : (
-          <Text style={styles.hint}>Swipe up for date and time</Text>
-        )}
+        ) : null}
         {error || pickerError ? (
           <Text accessibilityRole="alert" style={styles.error}>
             {pickerError ?? error}
@@ -341,56 +425,74 @@ export function NursingSheet({
     </TrueSheet>
   );
 }
-const styles = StyleSheet.create({
-  scroll: { flex: 1 },
-  content: { padding: 20, paddingBottom: 38, gap: 14 },
-  hero: { alignItems: 'center', gap: 6 },
-  title: { fontSize: 18, fontWeight: '700', color: '#292724' },
-  time: { fontSize: 34, color: '#292724', fontVariant: ['tabular-nums'] },
-  muted: { color: '#746F68', fontSize: 13, textAlign: 'center' },
-  sides: { flexDirection: 'row', justifyContent: 'center', gap: 22 },
-  side: {
-    width: 94,
-    minHeight: 98,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 24,
-    backgroundColor: '#B35D7D',
-  },
-  sideLabel: { fontSize: 20, color: '#FFFFFF', fontWeight: '700' },
-  sideMeta: { color: '#FFFFFF', fontSize: 12 },
-  stop: {
-    width: 56,
-    height: 48,
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#292724',
-    borderRadius: 14,
-  },
-  hint: { color: '#746F68', fontSize: 12, textAlign: 'center' },
-  split: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  slider: { height: 44, width: '100%' },
-  last: {
-    minHeight: 44,
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E4DDD5',
-    borderRadius: 14,
-  },
-  lastSelected: { backgroundColor: '#F6E4EB', borderColor: '#B35D7D' },
-  label: { fontWeight: '600', color: '#292724' },
-  save: {
-    backgroundColor: '#B35D7D',
-    minHeight: 50,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  white: { color: '#FFFFFF', fontWeight: '700' },
-  error: { fontSize: 14, color: '#A64444', textAlign: 'center' },
-  disabled: { opacity: 0.45 },
-});
+const createStyles = (theme: ActivityTheme, color: string) =>
+  StyleSheet.create({
+    scroll: { flex: 1 },
+    footer: { alignItems: 'center', paddingTop: 12, paddingBottom: 24, gap: 16 },
+    footerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 24,
+    },
+    content: { padding: 16, paddingBottom: 280, gap: 20 },
+    hero: { alignItems: 'center', gap: 20, marginTop: -28, paddingHorizontal: 32 },
+    title: { fontSize: 20, fontWeight: '500', color: theme.muted },
+    range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },
+    time: { fontSize: 38, fontWeight: '500', color: theme.text, fontVariant: ['tabular-nums'] },
+    muted: { color: theme.muted, fontSize: 13, textAlign: 'center' },
+    sides: { flexDirection: 'row', justifyContent: 'center', gap: 22 },
+    side: {
+      width: 96,
+      minHeight: 96,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderRadius: 48,
+      borderWidth: 1.5,
+      borderColor: theme.accent,
+      backgroundColor: color,
+    },
+    sideLabel: { fontSize: 20, color: theme.onAccent, fontWeight: '700' },
+    sideMeta: { color: theme.onAccent, fontSize: 12 },
+    stop: {
+      width: 80,
+      height: 80,
+      alignSelf: 'center',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      borderRadius: 40,
+    },
+    hint: { color: theme.muted, fontSize: 12, textAlign: 'center' },
+    split: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+    slider: { height: 44, width: '100%' },
+    last: {
+      minHeight: 44,
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 14,
+    },
+    lastSelected: { backgroundColor: theme.accentSoft, borderColor: color },
+    label: { fontWeight: '600', color: theme.text },
+    save: {
+      backgroundColor: '#999BFF',
+      borderWidth: 2,
+      borderColor: '#BCBDFF',
+      marginTop: 16,
+      width: 80,
+      height: 80,
+      alignSelf: 'center',
+      borderRadius: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    white: { color: theme.onAccent, fontWeight: '700' },
+    error: { fontSize: 14, color: theme.error, textAlign: 'center' },
+    disabled: { opacity: 0.45 },
+  });

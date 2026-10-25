@@ -1,4 +1,4 @@
-import { byStart } from './sleep-state';
+import { byStart, sleepBoundaryAt } from './sleep-state';
 import type { CareActivity } from './contracts';
 
 export interface SleepConflict {
@@ -20,7 +20,7 @@ export function sleepConflicts(records: readonly CareActivity[]): SleepConflict[
   for (let i = 1; i < boundaries.length; i++)
     if (
       boundaries[i].kind === boundaries[i - 1].kind ||
-      boundaries[i].startedAt === boundaries[i - 1].startedAt
+      boundaries[i].startedAt <= sleepBoundaryAt(boundaries[i - 1])
     )
       add(
         'boundaries',
@@ -54,7 +54,7 @@ export function sleepConflicts(records: readonly CareActivity[]): SleepConflict[
     const preceding = [...boundaries].reverse().find((b) => b.startedAt <= interval.startedAt);
     const next = boundaries.find((b) => b.startedAt > interval.startedAt);
     if (interval.kind === 'night-waking') {
-      if (preceding?.kind !== 'bedtime' || interval.startedAt <= preceding.startedAt)
+      if (preceding?.kind !== 'bedtime' || interval.startedAt <= sleepBoundaryAt(preceding))
         add('waking-start', 'A night waking must start after its bedtime.', [
           interval,
           ...(preceding ? [preceding] : []),

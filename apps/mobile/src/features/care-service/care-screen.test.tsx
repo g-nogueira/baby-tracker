@@ -1,6 +1,9 @@
 import { forwardRef, useImperativeHandle } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import type {
   CareActivity,
   CareSnapshot,
@@ -8,15 +11,101 @@ import type {
   PointActivity,
   SleepActivity,
 } from './contracts';
-import { CareScreen } from './care-screen';
+import type { CareScreen } from './care-screen';
 import { NursingSheet } from './nursing-sheet';
 import { ActivitySheet } from './activity-sheet';
 import { RadialCycle, RadialCycleSelector } from '@/features/timeline/radial-cycle';
+
+/** Exercise Expo's Android transform: source-only rendering misses compiler ordering bugs. */
+async function compileNativeScreen(isDev: boolean): Promise<typeof CareScreen> {
+  const mobileRequire = createRequire(new URL('../../../package.json', import.meta.url));
+  const expoRequire = createRequire(mobileRequire.resolve('expo/package.json'));
+  const babel = expoRequire('@babel/core') as {
+    transformFileSync: (path: string, options: Record<string, unknown>) => { code: string };
+  };
+  const compiled = babel.transformFileSync(
+    fileURLToPath(new URL('./care-screen.tsx', import.meta.url)),
+    {
+      babelrc: false,
+      configFile: false,
+      presets: [expoRequire.resolve('babel-preset-expo')],
+      caller: {
+        name: 'metro',
+        bundler: 'metro',
+        platform: 'android',
+        engine: 'hermes',
+        isDev,
+        supportsReactCompiler: true,
+        projectRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+      },
+    },
+  );
+  const dependencies = new Map<string, unknown>([
+    ['react-native', await vi.importMock('react-native')],
+    ['react-native-svg', { __esModule: true, ...(await vi.importMock('react-native-svg')) }],
+    ['react-native-safe-area-context', await vi.importMock('react-native-safe-area-context')],
+    ['./use-care-tracker', await vi.importMock('./use-care-tracker')],
+  ]);
+  for (const [, id] of compiled.code.matchAll(/require\("([^"]+)"\)/g)) {
+    if (!dependencies.has(id)) {
+      try {
+        dependencies.set(id, id.startsWith('@babel/runtime/') ? expoRequire(id) : await import(id));
+      } catch (cause) {
+        throw new Error(`Native test import failed: ${id}`, { cause });
+      }
+    }
+  }
+  const module = { exports: {} as { CareScreen: typeof CareScreen } };
+  runInNewContext(compiled.code, {
+    require: (id: string) => {
+      if (!dependencies.has(id)) throw new Error(`Unresolved native test import: ${id}`);
+      return dependencies.get(id);
+    },
+    module,
+    exports: module.exports,
+    get Date() {
+      return globalThis.Date;
+    },
+    get setInterval() {
+      return globalThis.setInterval;
+    },
+    get clearInterval() {
+      return globalThis.clearInterval;
+    },
+  });
+  return module.exports.CareScreen;
+}
+let NativeCareScreen: typeof CareScreen;
+beforeAll(async () => {
+  NativeCareScreen = await compileNativeScreen(true);
+});
 const hooks = vi.hoisted(() => ({ model: {} as Record<string, unknown> }));
-vi.mock('./use-care-tracker', () => ({ useCareTracker: () => hooks.model }));
+vi.mock('./use-care-tracker', () => ({ useCareTracker: () => ({ ...hooks.model }) }));
 vi.mock('expo-router', () => ({ Link: 'Link' }));
+const gestures = vi.hoisted(() => ({
+  current: null as null | {
+    onMoveShouldSetPanResponder: (event: unknown, move: { dx: number; dy: number }) => boolean;
+    onPanResponderRelease: (event: unknown, move: { dx: number; dy: number }) => void;
+  },
+}));
 vi.mock('react-native', () => ({
+  LayoutAnimation: { configureNext: () => {}, Presets: { easeInEaseOut: {} } },
+  Animated: {
+    Value: class {
+      setValue() {}
+    },
+    View: 'View',
+    spring: () => ({ start: () => {} }),
+  },
+  PanResponder: {
+    create: (config: NonNullable<typeof gestures.current>) => {
+      gestures.current = config;
+      return { panHandlers: {} };
+    },
+  },
+  Image: 'Image',
   View: 'View',
+  StatusBar: 'StatusBar',
   Text: 'Text',
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
@@ -36,12 +125,25 @@ vi.mock('react-native-svg', () => ({
   G: 'G',
   Line: 'Line',
   Path: 'Path',
+  Defs: 'Defs',
+  LinearGradient: 'LinearGradient',
+  Stop: 'Stop',
+  Rect: 'Rect',
+  RadialGradient: 'RadialGradient',
   Text: 'SvgText',
 }));
 vi.mock('@lodev09/react-native-true-sheet', () => ({
   TrueSheet: forwardRef((props: Record<string, unknown>, ref) => {
-    useImperativeHandle(ref, () => ({ resize: async () => undefined }));
-    return <>{props.children as import('react').ReactNode}</>;
+    useImperativeHandle(ref, () => ({
+      resize: async () => undefined,
+      dismiss: async () => (props.onDidDismiss as (() => void) | undefined)?.(),
+    }));
+    return (
+      <>
+        {props.children as import('react').ReactNode}
+        {props.footer as import('react').ReactNode}
+      </>
+    );
   }),
 }));
 vi.mock('@react-native-community/slider', () => ({ default: 'Slider' }));
@@ -104,11 +206,11 @@ const factory = vi.fn();
 const snapshot = (activities: CareActivity[]): CareSnapshot => ({ activities, issues: [] });
 const render = async () => {
   await act(async () => {
-    renderer = create(<CareScreen createProvider={factory} />);
+    renderer = create(<NativeCareScreen createProvider={factory} />);
   });
 };
 const update = async () => {
-  await act(async () => renderer.update(<CareScreen createProvider={factory} />));
+  await act(async () => renderer.update(<NativeCareScreen createProvider={factory} />));
 };
 beforeEach(() => {
   vi.useFakeTimers();
@@ -140,17 +242,108 @@ afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount());
   vi.useRealTimers();
 });
+it('renders action recency with the production native compiler', async () => {
+  const ProductionCareScreen = await compileNativeScreen(false);
+  await act(async () => {
+    renderer = create(<ProductionCareScreen createProvider={factory} />);
+  });
+  expect(press('Nursing, 3 min')).toBeDefined();
+});
+it('uses the dark surface for both cycles and keeps navigation available on an empty Night', async () => {
+  hooks.model.current = snapshot([]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(renderer.root.findByType('StatusBar' as never).props.barStyle).toBe('light-content');
+  await act(async () => press('History')?.props.onPress());
+  await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
+  expect(text()).toContain('No night sleep logged');
+  expect(press('Day')).toBeDefined();
+  await act(async () => press('Day')?.props.onPress());
+  expect(renderer.root.findByType(RadialCycleSelector).props.selection).toBe('day');
+});
+it('opens history separately and returns Home to the current day', async () => {
+  hooks.model.date = '2026-10-14';
+  await render();
+  expect(text()).not.toContain('Day log');
+  await act(async () => press('History')?.props.onPress());
+  expect(press('Show 2026-10-14')).toBeDefined();
+  expect(press('Cycle dial')).toBeDefined();
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(text()).toContain('Day log');
+  await act(async () => press('Choose history date')?.props.onPress());
+  expect(press('Previous day')).toBeDefined();
+  await act(async () => press('Home')?.props.onPress());
+  expect(hooks.model.setDate).toHaveBeenCalledWith(hooks.model.today);
+  expect(text()).not.toContain('Day log');
+});
+it('swipes between the tracking dial and history without taking horizontal gestures', async () => {
+  await render();
+  expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 80, dy: 10 })).toBe(false);
+  expect(gestures.current?.onMoveShouldSetPanResponder({}, { dx: 5, dy: 80 })).toBe(true);
+  await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: 80 }));
+  expect(press('Cycle dial')).toBeDefined();
+  expect(press('Activity list')).toBeDefined();
+  await act(async () => gestures.current?.onPanResponderRelease({}, { dx: 5, dy: -80 }));
+  expect(text()).not.toContain('Day log');
+});
+it('opens the activity menu from plus and hands off to Nursing after dismissal', async () => {
+  await render();
+  await act(async () => press('Add activity')?.props.onPress());
+  expect(press('Track Nursing')).toBeDefined();
+  await act(async () => press('Track Nursing')?.props.onPress());
+  expect(renderer.root.findByType(NursingSheet).props.log).toEqual(active);
+  expect(press('Track Nursing')).toBeUndefined();
+});
+it('navigates the week, blocks future dates and switches between history surfaces', async () => {
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  expect(press('Show 2026-10-16')?.props.disabled).toBe(true);
+  await act(async () => press('Show 2026-10-13')?.props.onPress());
+  expect(hooks.model.setDate).toHaveBeenCalledWith('2026-10-13');
+  await act(async () => press('Cycle totals')?.props.onPress());
+  expect(text()).toContain('Day totals');
+  expect(press('Nursing,')).toBeUndefined();
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(text()).toContain('Day log');
+});
+it('switches, pauses and resumes Nursing directly from the persistent side controls', async () => {
+  await render();
+  await act(async () => press('Switch to Left breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: active,
+    command: { kind: 'switch', side: 'LEFT' },
+  });
+  await act(async () => press('Pause Right breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: active,
+    command: { kind: 'pause' },
+  });
+  const paused = { ...active, status: 'paused' as const };
+  hooks.model.current = snapshot([paused]);
+  hooks.model.history = hooks.model.current;
+  await update();
+  await act(async () => press('Resume Left breast')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'change-nursing',
+    expected: paused,
+    command: { kind: 'resume', side: 'LEFT' },
+  });
+});
 it('renders shared canonical Nursing on the dial and keeps live controls available without a Napper dependency', async () => {
   await render();
-  expect(text()).toContain('Shared records · Replaceable test service');
+  expect(press('Profile and sync')).toBeDefined();
   expect(renderer.root.findByType(RadialCycle).props.view.records).toHaveLength(1);
   expect(text()).not.toContain('coming next');
+  expect(text()).toContain('03:23');
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   await act(async () => press('Open running Nursing')?.props.onPress());
   expect(renderer.root.findByType(NursingSheet).props.log).toEqual(active);
   await act(async () => {
     vi.advanceTimersByTime(2000);
   });
+  expect(text()).toContain('03:25');
   await act(async () => press('Stop running Nursing')?.props.onPress());
   expect(hooks.model.execute).toHaveBeenCalledWith({
     type: 'change-nursing',
@@ -158,12 +351,18 @@ it('renders shared canonical Nursing on the dial and keeps live controls availab
     command: { kind: 'stop' },
   });
 });
+it('opens profile and sync details without signing out or leaving the shared tracker', async () => {
+  await render();
+  await act(async () => press('Profile and sync')?.props.onPress());
+  expect(text()).toContain('Shared records · Replaceable test service');
+  expect(hooks.model.signOut).not.toHaveBeenCalled();
+});
 it('renders Night waking with Nursing concurrently, and distinguishes falling asleep from morning wake-up', async () => {
   hooks.model.current = snapshot([bed, waking, active]);
   hooks.model.history = hooks.model.current;
   await render();
-  expect(renderer.root.findByType(RadialCycleSelector).props.selection).toBe('night');
-  expect(text()).toContain('Awake tonight');
+  expect(renderer.root.findByType(RadialCycle).props.view.kind).toBe('night');
+  expect(text()).toContain('Awake for');
   expect(press('Fell asleep again')?.props.disabled).toBe(false);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   await act(async () => press('Wake up,')?.props.onPress());
@@ -187,7 +386,7 @@ it('treats Night sleep as the containing phase with no separate bottom stop time
   expect(text()).toContain('Asleep for');
   expect(press('Stop running Night')).toBeUndefined();
   expect(press('Stop running Nursing')).toBeDefined();
-  await act(async () => press('Night waking,')?.props.onPress());
+  await act(async () => press('Night waking')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
     type: 'transition',
     command: 'start-night-waking',
@@ -209,6 +408,7 @@ it('opens the exact Wake up anchor and permits new records on a past night while
   hooks.model.current = snapshot([{ ...active, startedAt: '2026-10-16T11:55:00.000Z' }]);
   hooks.model.history = snapshot([bed, wake]);
   await render();
+  await act(async () => press('History')?.props.onPress());
   await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
   const dial = renderer.root.findByType(RadialCycle);
   expect(dial.props.view.projection.cycle.startedAt).toBe(bed.startedAt);
@@ -260,6 +460,11 @@ it('shows an imported sleep collision once while leaving completed records edita
   await render();
   expect(text().split(message)).toHaveLength(2);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
+  const group = renderer.root
+    .findAllByType('Pressable' as never)
+    .find((node) => String(node.props.accessibilityLabel).includes('nearby activities'));
+  expect(group).toBeDefined();
+  await act(async () => group?.props.onPress());
   await act(async () => press('Edit Wake up')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
     type: 'edit',
@@ -307,6 +512,55 @@ it('keeps a paused Nap editable alongside Nursing and care actions', async () =>
     expected: nap,
     at: new Date().toISOString(),
   });
+});
+it('pauses, resumes and stops a Nap from the live bar using its reviewed revision', async () => {
+  const nap: SleepActivity = {
+    id: 'bar-nap',
+    revision: 'active-v1',
+    kind: 'nap',
+    status: 'active',
+    startedAt: '2026-10-15T01:00:00.000Z',
+    endedAt: null,
+    measuredAt: '2026-10-15T01:25:23.000Z',
+    pauseSeconds: 0,
+  };
+  hooks.model.current = snapshot([nap]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(text()).toContain('~35m');
+  await act(async () => press('Pause Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'pause-nap',
+    expected: nap,
+    at: new Date().toISOString(),
+  });
+  const paused = { ...nap, revision: 'paused-v2', status: 'paused' as const };
+  hooks.model = { ...hooks.model, current: snapshot([paused]) };
+  await update();
+  const before = text();
+  await act(async () => {
+    vi.advanceTimersByTime(60000);
+  });
+  // Other recency labels tick; the bar's progress/elapsed values stay frozen.
+  expect(text()).toContain('~35m');
+  expect(before).toContain('25:23');
+  expect(text()).toContain('25:23');
+  await act(async () => press('Resume Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'resume-nap',
+    expected: paused,
+    at: new Date().toISOString(),
+  });
+  await act(async () => press('Stop running Nap')?.props.onPress());
+  expect(hooks.model.execute).toHaveBeenLastCalledWith({
+    type: 'stop-nap',
+    expected: paused,
+    at: new Date().toISOString(),
+  });
+  hooks.model = { ...hooks.model, busy: true };
+  await update();
+  expect(press('Resume Nap')?.props.disabled).toBe(true);
+  expect(press('Stop running Nap')?.props.disabled).toBe(true);
 });
 it('blocks multiple active feeds and conflicting sleep state', async () => {
   const nap: SleepActivity = {
@@ -360,9 +614,90 @@ it('opens care logging on the shared screen instead of routing to the separate l
     kind: 'diaper',
   });
   await act(async () => renderer.root.findByType(ActivitySheet).props.onClose());
-  await act(async () => press('Medicine,')?.props.onPress());
+  await act(async () => press('Add activity')?.props.onPress());
+  await act(async () => press('Track Medicine')?.props.onPress());
   expect(renderer.root.findByType(ActivitySheet).props.intent).toMatchObject({
     type: 'care',
     kind: 'medicine',
   });
+});
+it('counts Night sleep and Wake-up recency from the end of the Bedtime routine', async () => {
+  vi.setSystemTime(new Date('2026-10-18T20:44:00.000Z'));
+  const routine = {
+    ...bed,
+    startedAt: '2026-10-18T18:45:00.000Z',
+    endedAt: '2026-10-18T18:55:00.000Z',
+  };
+  hooks.model = {
+    ...hooks.model,
+    current: snapshot([routine]),
+    history: snapshot([routine]),
+    date: '2026-10-18',
+    today: '2026-10-18',
+  };
+  await render();
+  expect(text()).toContain('1h 49m');
+  expect(text()).not.toContain('1h 59m');
+  expect(press('Wake up, 1h 49m')).toBeDefined();
+  expect(press('Bedtime at 7:55 PM')).toBeDefined();
+});
+it('opens a stable history date picker and navigates using the selected calendar day', async () => {
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  expect(text().split('|')).not.toContain('History');
+  await act(async () => press('Choose history date')?.props.onPress());
+  const picker = renderer.root.findByType('DateTimePicker' as never);
+  const onChange = picker.props.onChange;
+  vi.setSystemTime(new Date('2026-10-15T01:26:23.000Z'));
+  await act(async () => {
+    vi.advanceTimersByTime(1000);
+  });
+  expect(renderer.root.findByType('DateTimePicker' as never).props.onChange).toBe(onChange);
+  await act(async () => onChange({ type: 'set' }, new Date('2026-10-13T12:00:00Z')));
+  expect(hooks.model.setDate).toHaveBeenCalledWith('2026-10-13');
+  expect(renderer.root.findAllByType('DateTimePicker' as never)).toHaveLength(0);
+});
+it('renders chronological log ranges and phase summaries while opening the exact reviewed record', async () => {
+  vi.setSystemTime(new Date('2026-10-15T11:30:00.000Z'));
+  const wake: PointActivity = {
+    id: 'wake',
+    revision: 'wake-v1',
+    kind: 'wake-up',
+    startedAt: '2026-10-15T04:50:00.000Z',
+    endedAt: '2026-10-15T04:50:00.000Z',
+    status: 'completed',
+  };
+  const priorBed: PointActivity = {
+    ...bed,
+    startedAt: '2026-10-14T18:55:00.000Z',
+    endedAt: '2026-10-14T18:55:00.000Z',
+  };
+  const nap: SleepActivity = {
+    id: 'nap',
+    revision: 'reviewed-nap',
+    kind: 'nap',
+    startedAt: '2026-10-15T08:26:00.000Z',
+    endedAt: '2026-10-15T08:51:00.000Z',
+    status: 'completed',
+    pauseSeconds: 0,
+    measuredAt: new Date().toISOString(),
+  };
+  hooks.model.current = snapshot([priorBed, wake, nap]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  await act(async () => press('History')?.props.onPress());
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(text().replace(/\u202f/g, ' ')).toContain('9:26 AM – 9:51 AM');
+  expect(text()).toContain('End of 09h 55m sleep session');
+  expect(text()).toContain('End of 03h 36m wake window');
+  const labels = renderer.root
+    .findAllByType('Pressable' as never)
+    .map((node) => String(node.props.accessibilityLabel).replace(/\u202f/g, ' '));
+  expect(labels.indexOf('Wake up at 5:50 AM')).toBeLessThan(labels.indexOf('First nap at 9:26 AM'));
+  await act(async () => press('First nap at')?.props.onPress());
+  expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
+    type: 'edit',
+    activity: nap,
+  });
+  expect(hooks.model.execute).not.toHaveBeenCalled();
 });
