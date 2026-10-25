@@ -150,6 +150,19 @@ behavior and safe areas still need Android/iPhone validation. No live browser vi
 
 The completed-Day log render uses a taller viewport to review the full list without scrolling.
 
+| Completed duration band | Night waking endpoints | Narrow Night waking (320px) |
+| --- | --- | --- |
+| ![Duration band](ui-refresh/long-nap.png) | ![Night waking range](ui-refresh/waking-range.png) | ![Narrow range](ui-refresh/waking-small.png) |
+
+Duration bands are selectable along their whole visible filled area, including the rounded end.
+A grouped interval opens the same nearby-record chooser as its marker; standalone intervals open
+their exact record. Home and History use a 28-unit band with a stronger outline and rounded caps.
+The geometry still uses the real start/end angles. Disabled views block arc actions.
+
+The large drawer range has independent Start and End buttons. Tapping End initializes the picker
+from the end instant, even while the Start picker is already open. Completed Bedtime and Night waking
+end changes retain the original start and reviewed revision. Active sleep still has a read-only end.
+
 | Running Nap | Paused Nap | Narrow Nap bar (320px) |
 | --- | --- | --- |
 | ![Running Nap](ui-refresh/nap-progress.png) | ![Paused Nap](ui-refresh/nap-paused.png) | ![Narrow Nap](ui-refresh/nap-small.png) |
@@ -162,8 +175,8 @@ time and progress exclude pauses and freeze while paused; overdue estimates stay
 negative remaining time. The estimate's source is included in accessibility text. Buttons retain
 the reviewed record revision and use the existing care-service commands and write guards.
 
-Validation passed: `pnpm check` (509 tests), the Lisbon timezone care/timeline suite
-(204 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (515 tests), the Lisbon timezone care/timeline suite
+(210 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -179,6 +192,10 @@ selection surviving drawer expansion/collapse and retaining the reviewed revisio
 chooser dismissal, and stable native calendar selection while the live clock ticks. Wake-up removal
 also covers reopened Night state, preserved diapers, stale revisions, Nap collisions and uncertain
 outcomes. Forecast tests cover Lisbon DST, overdue estimates and separation from recorded boundaries.
+
+Duration interaction tests cover standalone Home/History arcs, grouped chooser handoff after
+dismissal and disabled actions. Time-picker tests cover direct End taps on Bedtime/Night waking,
+clock ticks, switching endpoints while open and canceling without writes.
 
 Nap bar regressions cover pause/resume/stop with the reviewed revision, disabled controls, frozen
 paused values, sample filtering, the seven-record limit, fallback and overdue progress.

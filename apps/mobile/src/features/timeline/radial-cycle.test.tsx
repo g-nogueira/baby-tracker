@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { RadialCycle } from './radial-cycle';
+import { NearbyActivitiesSheet } from './nearby-activities-sheet';
 import { careCycleViews } from '@/features/care-service/cycle-view';
 import type { CareActivity } from '@/features/care-service/contracts';
 import { ActivityThemeContext, nightTheme } from '@/features/shared/activity-theme';
@@ -328,6 +329,139 @@ it('opens a grouped Nap/Nursing card with measured duration and hands off the ex
   expect(openRecord).toHaveBeenCalledOnce();
   expect(openRecord).toHaveBeenCalledWith(
     expect.objectContaining({ id: 'feeding', editorRecordId: 'feeding' }),
+  );
+  await act(async () => renderer.unmount());
+});
+
+it.each(['home', 'history'] as const)(
+  'opens a long duration directly from its filled path in %s and blocks taps while disabled',
+  async (presentation) => {
+    const wake: CareActivity = {
+      id: 'wake',
+      revision: 'wake-v1',
+      kind: 'wake-up',
+      status: 'completed',
+      startedAt: '2026-10-18T07:00:00.000Z',
+      endedAt: '2026-10-18T07:00:00.000Z',
+    };
+    const nap: CareActivity = {
+      id: 'long-nap',
+      revision: 'nap-v1',
+      kind: 'nap',
+      status: 'completed',
+      startedAt: '2026-10-18T10:00:00.000Z',
+      endedAt: '2026-10-18T12:00:00.000Z',
+      measuredAt: '2026-10-18T12:00:00.000Z',
+      pauseSeconds: 0,
+    };
+    const view = careCycleViews(
+      [wake, nap],
+      '2026-10-18',
+      'UTC',
+      new Date('2026-10-18T16:00:00Z'),
+      true,
+    ).day;
+    const onPressRecord = vi.fn();
+    const screen = (disabled: boolean) => (
+      <ActivityThemeContext.Provider value={nightTheme}>
+        <RadialCycle
+          view={view}
+          presentation={presentation}
+          centerStatus={{ label: 'Awake', value: '4h', hint: '' }}
+          disabled={disabled}
+          onPressRecord={onPressRecord}
+        />
+      </ActivityThemeContext.Provider>
+    );
+    await act(async () => {
+      renderer = create(screen(false));
+    });
+    const path = () =>
+      renderer.root
+        .findAllByType('Path' as never)
+        .find((n) => n.props.testID === 'duration:long-nap');
+    expect(path()?.props.fill).not.toBe('none');
+    expect(path()?.props.d).toMatch(/ Z$/);
+    await act(async () => path()?.props.onPress());
+    expect(onPressRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ id: nap.id, occurredAt: nap.startedAt, endedAt: nap.endedAt }),
+    );
+    onPressRecord.mockClear();
+    await act(async () => renderer.update(screen(true)));
+    await act(async () => path()?.props.onPress());
+    expect(onPressRecord).not.toHaveBeenCalled();
+    await act(async () => renderer.unmount());
+  },
+);
+it('opens the same nearby records from a grouped long arc and hands off its exact Nap after dismissal', async () => {
+  const records: CareActivity[] = [
+    {
+      id: 'wake',
+      revision: 'v1',
+      kind: 'wake-up',
+      status: 'completed',
+      startedAt: '2026-10-18T07:00:00.000Z',
+      endedAt: '2026-10-18T07:00:00.000Z',
+    },
+    {
+      id: 'diaper',
+      revision: 'v1',
+      kind: 'diaper',
+      diaperType: 'wet',
+      status: 'completed',
+      startedAt: '2026-10-18T10:00:00.000Z',
+      endedAt: '2026-10-18T10:00:00.000Z',
+    },
+    {
+      id: 'nap',
+      revision: 'nap-v1',
+      kind: 'nap',
+      status: 'completed',
+      startedAt: '2026-10-18T10:01:00.000Z',
+      endedAt: '2026-10-18T12:00:00.000Z',
+      measuredAt: '2026-10-18T12:00:00.000Z',
+      pauseSeconds: 0,
+    },
+  ];
+  const view = careCycleViews(
+    records,
+    '2026-10-18',
+    'UTC',
+    new Date('2026-10-18T16:00:00Z'),
+    true,
+  ).day;
+  const onPressRecord = vi.fn();
+  await act(async () => {
+    renderer = create(
+      <ActivityThemeContext.Provider value={nightTheme}>
+        <RadialCycle
+          view={view}
+          centerStatus={{ label: 'Awake', value: '4h', hint: '' }}
+          disabled={false}
+          onPressRecord={onPressRecord}
+        />
+      </ActivityThemeContext.Provider>,
+    );
+  });
+  await act(async () =>
+    renderer.root
+      .findAllByType('Path' as never)
+      .find((n) => n.props.testID === 'duration:nap')
+      ?.props.onPress(),
+  );
+  expect(onPressRecord).not.toHaveBeenCalled();
+  const sheet = renderer.root.findByType(NearbyActivitiesSheet);
+  expect(sheet.props.targets.map((t: { id: string }) => t.id).sort()).toEqual(['diaper', 'nap']);
+  const napRow = renderer.root
+    .findAllByType('Pressable' as never)
+    .find((node) => String(node.props.accessibilityLabel).startsWith('Edit Nap at'));
+  expect(napRow).toBeDefined();
+  await act(async () => napRow?.props.onPress());
+  expect(onPressRecord).not.toHaveBeenCalled();
+  const nativeSheet = renderer.root.findByType(SheetBoundary);
+  await act(async () => nativeSheet.props.onDidDismiss());
+  expect(onPressRecord).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'nap', occurredAt: records[2].startedAt }),
   );
   await act(async () => renderer.unmount());
 });

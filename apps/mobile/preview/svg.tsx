@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from 'react';
 const element = (tag: string) =>
   function SvgElement({
     children,
+    onPress,
     accessibilityElementsHidden: _hidden,
     importantForAccessibility: _importance,
     ...props
@@ -10,7 +11,7 @@ const element = (tag: string) =>
     children?: ReactNode;
     [key: string]: unknown;
   }) {
-    return createElement(tag, props, children);
+    return createElement(tag, { ...props, onClick: onPress ?? props.onClick }, children);
   };
 export default element('svg');
 export const Circle = element('circle');

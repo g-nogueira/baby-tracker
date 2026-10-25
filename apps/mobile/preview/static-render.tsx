@@ -22,17 +22,19 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
   });
   const frozen = scenario.startsWith('log-')
     ? '2026-10-19T10:30:00.000Z'
-    : scenario.startsWith('nap-')
-      ? '2026-10-19T13:26:00.000Z'
-      : ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
-        ? '2026-10-19T09:57:00.000Z'
-        : scenario === 'feeding-dial'
-          ? '2026-10-19T08:26:00.000Z'
-          : scenario === 'night-forecast'
-            ? '2026-10-19T00:20:00.000Z'
-            : scenario === 'day-markers' || scenario === 'wake-up'
-              ? '2026-10-19T06:15:00.000Z'
-              : null;
+    : ['long-nap', 'waking-range'].includes(scenario)
+      ? '2026-10-19T15:00:00.000Z'
+      : scenario.startsWith('nap-')
+        ? '2026-10-19T13:26:00.000Z'
+        : ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
+          ? '2026-10-19T09:57:00.000Z'
+          : scenario === 'feeding-dial'
+            ? '2026-10-19T08:26:00.000Z'
+            : scenario === 'night-forecast'
+              ? '2026-10-19T00:20:00.000Z'
+              : scenario === 'day-markers' || scenario === 'wake-up'
+                ? '2026-10-19T06:15:00.000Z'
+                : null;
   const now = frozen ? new Date(frozen) : new Date();
   const at = (minutes: number) => new Date(now.getTime() + minutes * 60000).toISOString();
   const nap: SleepActivity = {
@@ -73,6 +75,8 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
           <Preview
             scenario={
               [
+                'long-nap',
+                'waking-range',
                 'nap-progress',
                 'nap-paused',
                 'feeding-dial',
@@ -164,6 +168,21 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
                     startedAt: '2026-10-19T04:30:00.000Z',
                     endedAt: '2026-10-19T04:30:00.000Z',
                     status: 'completed',
+                  },
+                }}
+                onExecute={() => {}}
+              />
+            ) : null}
+            {scenario === 'waking-range' ? (
+              <ActivitySheet
+                {...callbacks}
+                intent={{
+                  type: 'edit',
+                  activity: {
+                    ...nap,
+                    kind: 'night-waking',
+                    startedAt: at(-120),
+                    endedAt: at(-66),
                   },
                 }}
                 onExecute={() => {}}

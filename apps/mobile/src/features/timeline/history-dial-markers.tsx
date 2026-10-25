@@ -22,9 +22,11 @@ export function HistoryDialMarkers({
   onPressRecord,
   onPressAnchor,
   napPosition = 'middle',
+  onPressGroup,
 }: {
   view: RadialCycleView;
   size: number;
+  onPressGroup?: (targets: HistoryDialTarget[]) => void;
   napPosition?: 'start' | 'middle';
   disabled: boolean;
   onPressRecord: (record: ProjectedRadialActivity) => void;
@@ -72,7 +74,7 @@ export function HistoryDialMarkers({
                 ? 'Opens every activity and boundary in this group'
                 : 'Opens this exact record for editing'
             }
-            onPress={() => (grouped ? setGroup(targets) : open(first))}
+            onPress={() => (grouped ? (onPressGroup ?? setGroup)(targets) : open(first))}
             style={{
               position: 'absolute',
               left: ((160 + Math.cos(radians) * DIAL_MARKER_RADIUS) * size) / 320 - targetSize / 2,

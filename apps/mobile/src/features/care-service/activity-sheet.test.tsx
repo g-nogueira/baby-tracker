@@ -425,7 +425,7 @@ it('shows the Bedtime routine range and duration, and edits the sleep-start endp
       .findAllByType('Text' as never)
       .map((node) => node.children.join(''))
       .join('|');
-  expect(texts()).toContain('7:45 – 7:55');
+  expect(texts()).toContain('7:45|–|7:55');
   expect(texts()).toContain('10 min long');
   expect(press('Long time to fall asleep')).toBeUndefined();
   await act(async () => press('Set Night sleep time')?.props.onPress());
@@ -498,4 +498,75 @@ it('keeps all diaper choices in the native footer through expansion and preserve
     startedAt: activity.startedAt,
     diaperType: 'mixed',
   });
+});
+
+it.each(['bedtime', 'night-waking'] as const)(
+  'opens %s End directly from the compact range and preserves Start when saved',
+  async (kind) => {
+    const activity = {
+      id: 'range-record',
+      revision: 'reviewed-v1',
+      kind,
+      status: 'completed' as const,
+      startedAt: '2026-10-15T02:43:00.000Z',
+      endedAt: '2026-10-15T03:37:00.000Z',
+      ...(kind === 'night-waking'
+        ? { pauseSeconds: 0, measuredAt: '2026-10-15T03:37:00.000Z' }
+        : {}),
+    } as PointActivity | SleepActivity;
+    await render({ type: 'edit', activity });
+    await act(async () =>
+      press(
+        kind === 'bedtime' ? 'Set Night sleep end time' : 'Set Night waking end time',
+      )?.props.onPress(),
+    );
+    expect(renderer.root.findByType('DateTimePicker' as never).props.value.toISOString()).toBe(
+      activity.endedAt,
+    );
+    const callback = renderer.root.findByType('DateTimePicker' as never).props.onChange;
+    vi.setSystemTime(new Date(now.getTime() + 1000));
+    await act(async () =>
+      renderer.update(
+        <ActivitySheet {...base} now={new Date()} intent={{ type: 'edit', activity }} />,
+      ),
+    );
+    expect(renderer.root.findByType('DateTimePicker' as never).props.onChange).toBe(callback);
+    await act(async () => callback({ type: 'set' }, new Date('2026-10-15T03:40:00.000Z')));
+    await act(async () => press('Save activity')?.props.onPress());
+    expect(base.onExecute).toHaveBeenCalledWith({
+      type: 'edit-activity',
+      expected: activity,
+      startedAt: activity.startedAt,
+      endedAt: '2026-10-15T03:40:00.000Z',
+    });
+  },
+);
+it('switches an open Start picker to End without reusing its initial time, and keeps drafts on cancel', async () => {
+  const activity: SleepActivity = {
+    id: 'waking',
+    revision: 'v1',
+    kind: 'night-waking',
+    status: 'completed',
+    startedAt: '2026-10-15T02:43:00.000Z',
+    endedAt: '2026-10-15T03:37:00.000Z',
+    pauseSeconds: 0,
+    measuredAt: now.toISOString(),
+  };
+  await render({ type: 'edit', activity });
+  await act(async () => press('Set Night waking time')?.props.onPress());
+  expect(renderer.root.findByType('DateTimePicker' as never).props.value.toISOString()).toBe(
+    activity.startedAt,
+  );
+  await act(async () => press('Set Night waking end time')?.props.onPress());
+  expect(renderer.root.findByType('DateTimePicker' as never).props.value.toISOString()).toBe(
+    activity.endedAt,
+  );
+  await act(async () =>
+    renderer.root.findByType('DateTimePicker' as never).props.onChange({ type: 'dismissed' }),
+  );
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Set Night waking end time')?.props.onPress());
+  expect(renderer.root.findByType('DateTimePicker' as never).props.value.toISOString()).toBe(
+    activity.endedAt,
+  );
 });

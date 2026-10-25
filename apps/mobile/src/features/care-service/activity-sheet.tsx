@@ -429,30 +429,50 @@ export function ActivitySheet({ intent, now, timezone, busy, error, onClose, onE
           </Text>
           {!expanded && active && (record.kind === 'nap' || record.kind === 'night-waking') ? (
             <Text style={styles.timer}>{formatLiveDuration(activityDuration(record, now))}</Text>
+          ) : completedRange || (expanded && timed) ? (
+            <View style={styles.timeRange}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Set ${activityLabels[kind]} time`}
+                accessibilityHint="Changes the start time"
+                disabled={busy}
+                onPress={() => void openTime('start')}
+                style={styles.rangeEndpoint}
+              >
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.timer, styles.range]}>
+                  {clockLabel(start, timezone, false)}
+                </Text>
+              </Pressable>
+              <Text accessible={false} style={[styles.timer, styles.range]}>
+                –
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Set ${activityLabels[kind]} end time`}
+                accessibilityHint="Changes the end time"
+                disabled={busy || active}
+                onPress={() => void openTime('end')}
+                style={styles.rangeEndpoint}
+              >
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.timer, styles.range]}>
+                  {completedRange || ending || record?.status === 'completed'
+                    ? clockLabel(end, timezone, false)
+                    : active
+                      ? '…'
+                      : 'Set time'}
+                </Text>
+              </Pressable>
+            </View>
           ) : (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Set ${activityLabels[kind]} time`}
               disabled={busy}
-              onPress={() => void openTime()}
-              style={{
-                width: '100%',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: completedRange ? 60 : 52,
-                flexShrink: 0,
-              }}
+              onPress={() => void openTime('start')}
+              style={styles.singleTime}
             >
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                style={[styles.timer, completedRange && styles.range]}
-              >
-                {completedRange
-                  ? `${clockLabel(start, timezone, false)} – ${clockLabel(end, timezone, false)}`
-                  : expanded && timed
-                    ? `${clockLabel(start, timezone, false)} – ${ending ? clockLabel(end, timezone, false) : active ? '…' : 'Set time'}`
-                    : clockLabel(start, timezone, false)}
+              <Text numberOfLines={1} adjustsFontSizeToFit style={styles.timer}>
+                {clockLabel(start, timezone, false)}
               </Text>
             </Pressable>
           )}
@@ -664,6 +684,29 @@ const createStyles = (theme: ActivityTheme) =>
     hero: { alignItems: 'center', gap: 16, marginTop: -28, paddingHorizontal: 24, flexShrink: 0 },
     title: { fontSize: 20, fontWeight: '500', color: theme.muted },
     summary: { marginTop: 4, fontSize: 14, color: theme.muted, opacity: 0.65, textAlign: 'center' },
+    timeRange: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      gap: 8,
+      minHeight: 60,
+      flexShrink: 0,
+    },
+    rangeEndpoint: {
+      flexShrink: 1,
+      minWidth: 44,
+      minHeight: 60,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    singleTime: {
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 52,
+      flexShrink: 0,
+    },
     range: { fontSize: 40, lineHeight: 52, letterSpacing: -0.5, textAlign: 'center' },
     timer: { fontSize: 38, color: theme.text, fontWeight: '500', fontVariant: ['tabular-nums'] },
     diaperHero: { gap: 12 },

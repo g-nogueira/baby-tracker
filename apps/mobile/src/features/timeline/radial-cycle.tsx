@@ -1,7 +1,9 @@
+import { NearbyActivitiesSheet } from './nearby-activities-sheet';
 import { homeCycleView } from './home-cycle-view';
 import { HistoryDialMarkers } from './history-dial-markers';
 import {
   historyDialView,
+  type HistoryDialTarget,
   historyDialGroups,
   historyActivityColor,
   DIAL_MARKER_RADIUS,
@@ -111,19 +113,25 @@ export function RadialCycle({
   const clusterSheet = useRef<TrueSheet>(null);
   const pendingRecord = useRef<ProjectedRadialActivity | null>(null);
   const [cluster, setCluster] = useState<readonly ProjectedRadialActivity[] | null>(null);
+  const [dialGroup, setDialGroup] = useState<HistoryDialTarget[] | null>(null);
   const { width } = useWindowDimensions();
   const size = Math.min(maxSize, width - 32);
   const scale = size / VIEWBOX_SIZE;
   const projection = view.projection;
+  const dialGroups = connected ? historyDialGroups(view, size, history ? 'middle' : 'start') : [];
   const groupedIds = new Set(
-    connected
-      ? historyDialGroups(view, size, history ? 'middle' : 'start')
-          .filter((targets) => targets.length > 1)
-          .flatMap((targets) =>
-            targets.flatMap((target) => (target.record ? [target.record.id] : [])),
-          )
-      : [],
+    dialGroups
+      .filter((targets) => targets.length > 1)
+      .flatMap((targets) => targets.flatMap((target) => (target.record ? [target.record.id] : []))),
   );
+  const openDuration = (record: ProjectedRadialActivity) => {
+    if (disabled) return;
+    const group = dialGroups.find((targets) =>
+      targets.some((target) => target.record?.id === record.id),
+    );
+    if (group && group.length > 1) setDialGroup(group);
+    else onPressRecord(record);
+  };
   const status =
     centerStatus.value === null
       ? centerStatus.label
@@ -228,33 +236,33 @@ export function RadialCycle({
           // A short grouped interval is represented by its cluster badge and chooser range.
           if (connected && actualSweep < 18 && (record.kind !== 'nap' || groupedIds.has(record.id)))
             return null;
-          if (theme.night)
+          if (theme.night) {
+            const color = historyActivityColor(record.kind);
             return (
               <Path
                 key={`arc:${record.id}`}
-                d={bandPath(start, start + Math.max(0.8, actualSweep), radius, history ? 28 : 22)}
-                fill={
-                  history
-                    ? historyActivityColor(record.kind)
-                    : radialActivityColor(record.kind, true)
-                }
-                fillOpacity={0.12}
-                stroke={
-                  history
-                    ? historyActivityColor(record.kind)
-                    : radialActivityColor(record.kind, true)
-                }
-                strokeWidth={history ? 1.8 : 1.2}
-                strokeOpacity={history ? 1 : 0.65}
+                testID={`duration:${record.id}`}
+                d={bandPath(start, start + visualSweep, radius, 28)}
+                fill={color}
+                fillOpacity={0.16}
+                stroke={color}
+                strokeWidth={1.8}
+                strokeOpacity={1}
+                strokeLinejoin="round"
+                strokeLinecap="round"
                 strokeDasharray={arc.active ? '2 3' : undefined}
+                onPress={() => openDuration(record)}
               />
             );
+          }
           return (
             <Path
               d={arcPath(start, start + visualSweep, radius)}
               fill="none"
               key={`arc:${record.id}`}
               opacity={arc.active ? 1 : 0.82}
+              testID={`duration:${record.id}`}
+              onPress={() => openDuration(record)}
               stroke={radialActivityColor(record.kind, theme.night)}
               strokeLinecap="round"
               strokeWidth={theme.night ? (record.projection.lane === 'outer' ? 24 : 16) : 7}
@@ -302,6 +310,7 @@ export function RadialCycle({
           disabled={disabled}
           onPressRecord={onPressRecord}
           onPressAnchor={onPressAnchor}
+          onPressGroup={setDialGroup}
         />
       ) : null}
       {!connected
@@ -439,6 +448,19 @@ export function RadialCycle({
             );
           })()
         : null}
+      {dialGroup ? (
+        <NearbyActivitiesSheet
+          targets={dialGroup}
+          view={view}
+          disabled={disabled}
+          onDismiss={() => setDialGroup(null)}
+          onSelect={(target) => {
+            if (disabled) return;
+            if (target.record) onPressRecord(target.record);
+            else if (target.anchor.recordId) onPressAnchor?.(target.anchor.recordId);
+          }}
+        />
+      ) : null}
       {cluster ? (
         <TrueSheet
           ref={clusterSheet}
