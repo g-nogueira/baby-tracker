@@ -1,3 +1,4 @@
+import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { NearbyActivitiesSheet } from './nearby-activities-sheet';
@@ -53,13 +54,19 @@ export function HistoryDialMarkers({
       {historyDialGroups(view, size, napPosition).map((targets) => {
         const { front: first, back, angle } = historyDialGroupBadge(targets);
         const boundary = targets.find((target) => target.anchor);
-        const radians = ((angle - 90) * Math.PI) / 180;
+        const singleNapArc =
+          targets.length === 1 && first.record?.kind === 'nap' ? first.record.projection.arc : null;
+        // A single Nap's artwork sits within its duration capsule; records retain their real times.
+        const displayAngle = singleNapArc
+          ? (singleNapArc.start.angleDegrees + singleNapArc.end.angleDegrees) / 2
+          : angle;
+        const radians = ((displayAngle - 90) * Math.PI) / 180;
         const color = historyActivityColor(historyTargetIcon(first));
         const grouped = targets.length > 1;
         // Keep neighboring centers tappable when their badge edges overlap.
         const targetSize = grouped ? 44 : 36;
         const activeNursing = first.record?.kind === 'nursing' && first.record.status === 'active';
-        const bareNap = napPosition === 'middle' && !grouped && first.record?.kind === 'nap';
+        const bareNap = !grouped && first.record?.kind === 'nap' && Boolean(singleNapArc);
         return (
           <Pressable
             key={first.id}
@@ -119,36 +126,20 @@ export function HistoryDialMarkers({
                   <ActivityIcon name="more-filled" color={theme.muted} size={24} />
                 </View>
               </>
+            ) : bareNap ? (
+              <ActivityIcon name="nap" size={22} color={color} />
             ) : (
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  borderWidth: bareNap ? 0 : 2,
-                  borderColor: color,
-                  borderStyle: activeNursing ? 'dotted' : 'solid',
-                  backgroundColor: bareNap ? 'transparent' : `${color}16`,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  shadowColor: color,
-                  shadowOpacity: activeNursing ? 0.5 : 0.18,
-                  shadowRadius: 10,
-                  shadowOffset: { width: 0, height: 0 },
-                }}
-              >
-                <ActivityIcon
-                  name={historyTargetIcon(first)}
-                  color={color}
-                  size={
-                    bareNap
-                      ? 21
-                      : first.record?.kind === 'diaper' || first.record?.kind === 'nursing'
-                        ? 22
-                        : 27
-                  }
-                />
-              </View>
+              <ActivityBadge
+                icon={historyTargetIcon(first)}
+                color={color}
+                size={34}
+                active={activeNursing}
+                outlined
+                artworkScale={
+                  first.record?.kind === 'diaper' || first.record?.kind === 'nursing' ? 0.6 : 0.75
+                }
+                backgroundColor={`${color}16`}
+              />
             )}
             {boundary?.anchor ? (
               <Text

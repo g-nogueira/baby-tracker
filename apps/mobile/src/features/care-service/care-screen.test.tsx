@@ -81,6 +81,12 @@ beforeAll(async () => {
 });
 const hooks = vi.hoisted(() => ({ model: {} as Record<string, unknown> }));
 vi.mock('./use-care-tracker', () => ({ useCareTracker: () => ({ ...hooks.model }) }));
+vi.mock('./home-preferences-store', () => ({
+  homePreferencesStore: {
+    load: async () => ({ actions: ['night', 'sleep', 'nursing', 'diaper'], bedtimeFromHour: 17 }),
+    save: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 vi.mock('expo-router', () => ({ Link: 'Link' }));
 const gestures = vi.hoisted(() => ({
   current: null as null | {
@@ -724,4 +730,16 @@ it('shows the resumed stretch in the dial and accumulated sleep in the bar', asy
     value: '<1 min',
   });
   expect(text()).toContain('20:23');
+});
+
+it('hides early Bedtime, exposes profile action preferences and keeps live care writes separate', async () => {
+  hooks.model.current = snapshot([]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(press('Night sleep')).toBeUndefined();
+  await act(async () => press('Profile and sync')?.props.onPress());
+  expect(press('Show Medicine action')).toBeDefined();
+  await act(async () => press('Show Medicine action')?.props.onPress());
+  expect(press('Medicine')).toBeDefined();
+  expect(hooks.model.execute).not.toHaveBeenCalled();
 });

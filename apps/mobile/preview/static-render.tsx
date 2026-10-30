@@ -1,3 +1,4 @@
+import { resumedNap } from './nap-scenarios';
 import { renderToString } from 'react-dom/server';
 import { AppRegistry, Dimensions, View } from 'react-native';
 import regular from '../assets/napper/Saans-Regular.ttf';
@@ -20,21 +21,23 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
     window: { width, height, scale: 1, fontScale: 1 },
     screen: { width, height, scale: 1, fontScale: 1 },
   });
-  const frozen = scenario.startsWith('log-')
-    ? '2026-10-19T10:30:00.000Z'
-    : ['long-nap', 'waking-range'].includes(scenario)
-      ? '2026-10-19T15:00:00.000Z'
-      : scenario.startsWith('nap-')
-        ? '2026-10-19T13:26:00.000Z'
-        : ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
-          ? '2026-10-19T09:57:00.000Z'
-          : scenario === 'feeding-dial'
-            ? '2026-10-19T08:26:00.000Z'
-            : scenario === 'night-forecast'
-              ? '2026-10-19T00:20:00.000Z'
-              : scenario === 'day-markers' || scenario === 'wake-up'
-                ? '2026-10-19T06:15:00.000Z'
-                : null;
+  const frozen = ['nap-resumed', 'nap-live-drawer', 'nap-edit-drawer'].includes(scenario)
+    ? '2026-10-29T12:33:00.000Z'
+    : scenario.startsWith('log-')
+      ? '2026-10-19T10:30:00.000Z'
+      : ['long-nap', 'waking-range'].includes(scenario)
+        ? '2026-10-19T15:00:00.000Z'
+        : scenario.startsWith('nap-')
+          ? '2026-10-19T13:26:00.000Z'
+          : ['overlapping-dial', 'nearby-activities', 'diaper'].includes(scenario)
+            ? '2026-10-19T09:57:00.000Z'
+            : scenario === 'feeding-dial'
+              ? '2026-10-19T08:26:00.000Z'
+              : scenario === 'night-forecast'
+                ? '2026-10-19T00:20:00.000Z'
+                : scenario === 'day-markers' || scenario === 'wake-up'
+                  ? '2026-10-19T06:15:00.000Z'
+                  : null;
   const now = frozen ? new Date(frozen) : new Date();
   const at = (minutes: number) => new Date(now.getTime() + minutes * 60000).toISOString();
   const nap: SleepActivity = {
@@ -77,6 +80,7 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
               [
                 'long-nap',
                 'waking-range',
+                'nap-resumed',
                 'nap-live-drawer',
                 'nap-edit-drawer',
                 'nap-progress',
@@ -196,14 +200,7 @@ export function renderPreview(scenario: string, width = 390, height = 844) {
                 initialExpanded={scenario === 'nap-edit-drawer'}
                 intent={{
                   type: 'edit',
-                  activity: {
-                    ...nap,
-                    startedAt: at(-56),
-                    endedAt: null,
-                    status: 'active',
-                    pauseSeconds: 876,
-                    pauses: [{ id: 'pause:0', startedAt: at(-15), endedAt: at(-0.4) }],
-                  },
+                  activity: resumedNap(now.getTime()),
                 }}
                 onExecute={() => {}}
               />

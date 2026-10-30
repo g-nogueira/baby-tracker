@@ -1,3 +1,5 @@
+import { HomePreferencesFields } from './home-preferences-fields';
+import type { useHomePreferences } from './use-home-preferences';
 import { Text } from '@/features/shared/tracking-text';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { Link } from 'expo-router';
@@ -9,9 +11,11 @@ import type { useCareTracker } from './use-care-tracker';
 
 export function ProfileSheet({
   model,
+  preferences,
   onClose,
 }: {
   model: ReturnType<typeof useCareTracker>;
+  preferences?: ReturnType<typeof useHomePreferences>;
   onClose: () => void;
 }) {
   const theme = useActivityTheme();
@@ -50,6 +54,7 @@ export function ProfileSheet({
             {model.refreshing ? 'Refreshing…' : 'Refresh shared records'}
           </Text>
         </Pressable>
+        {preferences ? <HomePreferencesFields preferences={preferences} /> : null}
         <View style={styles.links}>
           <Link href="/local" style={[styles.link, { color: theme.muted }]}>
             Separate on-device tracker

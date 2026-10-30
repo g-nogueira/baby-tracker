@@ -46,6 +46,8 @@ export function ActivityIcon({
     close: 'M6 6L18 18 M18 6L6 18',
     stop: 'M6 6H18V18H6Z',
     stopwatch: 'M9 2H15 M12 2V5 M18 6L20 4 M12 8V13L15 15 M20 13A8 8 0 1 1 4 13A8 8 0 1 1 20 13Z',
+    'flag-filled':
+      'M4 2H6V22H4Z M6 3H10V7H6Z M10 7H14V11H10Z M14 3H18V7H14Z M18 7H22V11H18Z M6 11H10V15H6Z M14 11H18V15H14Z M21 3H22V15H21Z',
     flag: 'M4 22V3 Q8 0 13 3 Q17 6 21 3 V14 Q17 17 13 14 Q8 11 4 14 M4 3V14',
     pause: 'M8 5V19 M16 5V19',
     play: 'M8 5L19 12L8 19Z',
@@ -96,7 +98,7 @@ export function ActivityIcon({
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path
         d={paths[kind] ?? paths.check}
-        transform={kind === 'pacifier' ? 'rotate(40 12 12)' : undefined}
+        transform={kind === 'pacifier' ? 'rotate(25 12 12)' : undefined}
         fill={kind === 'stop' || kind.endsWith('-filled') ? color : 'none'}
         stroke={color}
         strokeWidth={1.7}

@@ -43,7 +43,7 @@ export function NapLiveController({
         style={[styles.body, disabled && styles.disabled]}
       >
         <View style={styles.artwork}>
-          <ActivityIcon name="nap" size={42} />
+          <ActivityIcon name="nap" size={34} />
         </View>
         <View style={styles.copy}>
           <View style={styles.times}>
@@ -54,7 +54,7 @@ export function NapLiveController({
               </Text>
             </View>
             <View accessible accessibilityLabel={progress.estimateLabel} style={styles.time}>
-              <ActivityIcon name="flag" size={14} color={foreground} />
+              <ActivityIcon name="flag-filled" size={16} color={foreground} />
               <Text numberOfLines={1} style={[styles.estimate, { color: foreground }]}>
                 {progress.remainingLabel}
               </Text>
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
   times: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 4 },
   time: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1, minWidth: 0 },
   elapsed: { fontSize: 17, lineHeight: 22, fontWeight: '400', flexShrink: 1 },
-  estimate: { fontSize: 14, lineHeight: 22, fontWeight: '400', flexShrink: 1 },
+  estimate: { fontSize: 17, lineHeight: 22, fontWeight: '400', flexShrink: 1 },
   track: { height: 4, borderRadius: 2, backgroundColor: '#37345F', overflow: 'hidden' },
   fill: { height: 4, borderRadius: 2, backgroundColor: '#8986FF' },
   control: {

@@ -90,6 +90,7 @@ export const TrueSheet = forwardRef(function Sheet(props: Props, ref) {
           <div
             style={{
               position: 'absolute',
+              zIndex: 2,
               bottom: 0,
               left: 0,
               right: 0,

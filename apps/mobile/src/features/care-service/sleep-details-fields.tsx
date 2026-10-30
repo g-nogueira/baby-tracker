@@ -44,7 +44,7 @@ export function SleepDetailsFields({
       onPress={onPress}
       style={{
         width: width as `${number}%`,
-        minHeight: 100,
+        minHeight: 92,
         borderRadius: 12,
         backgroundColor: selected ? theme.accentSoft : theme.field,
         borderWidth: 1,
@@ -55,8 +55,8 @@ export function SleepDetailsFields({
         gap: 8,
       }}
     >
-      <ActivityIcon name={icon} size={44} />
-      <Text style={{ fontSize: 12, color: theme.muted, textAlign: 'center' }}>{label}</Text>
+      <ActivityIcon name={icon} size={40} />
+      <Text style={{ fontSize: 13, color: theme.muted, textAlign: 'center' }}>{label}</Text>
     </Pressable>
   );
   return (
@@ -64,7 +64,7 @@ export function SleepDetailsFields({
       {kind === 'bedtime' || kind === 'nap' ? (
         <>
           <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 16, color: theme.text }}>Start</Text>
+            <Text style={{ fontSize: 16, fontWeight: '500', color: theme.text }}>Start</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {(
                 [
@@ -89,7 +89,7 @@ export function SleepDetailsFields({
             </View>
           </View>
           <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 16, color: theme.text }}>How</Text>
+            <Text style={{ fontSize: 16, fontWeight: '500', color: theme.text }}>How</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {methods.map(([key, label, icon]) =>
                 option(key, label, icon, details.sleepMethod === key, () =>
@@ -101,7 +101,7 @@ export function SleepDetailsFields({
         </>
       ) : (
         <View style={{ gap: 12 }}>
-          <Text style={{ fontSize: 16, color: theme.text }}>Wake up mood</Text>
+          <Text style={{ fontSize: 16, fontWeight: '500', color: theme.text }}>Wake up mood</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {(
               [
@@ -118,7 +118,7 @@ export function SleepDetailsFields({
         </View>
       )}
       <View style={{ gap: 12 }}>
-        <Text style={{ fontSize: 16, color: theme.text }}>Comment</Text>
+        <Text style={{ fontSize: 16, fontWeight: '500', color: theme.text }}>Comment</Text>
         <TextInput
           accessibilityLabel="Activity comment"
           placeholder="No comment added yet"

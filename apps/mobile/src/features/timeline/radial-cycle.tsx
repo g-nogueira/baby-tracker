@@ -167,7 +167,7 @@ export function RadialCycle({
             theme.night ? 135 : 126,
           )}
           fill="none"
-          stroke={history ? '#2B294A' : connected ? '#191830' : theme.track}
+          stroke={history ? '#2B294A' : connected ? '#22213F' : theme.track}
           strokeLinecap="round"
           strokeWidth={theme.night ? 30 : 12}
         />
@@ -250,7 +250,7 @@ export function RadialCycle({
                 strokeOpacity={1}
                 strokeLinejoin="round"
                 strokeLinecap="round"
-                strokeDasharray={arc.active ? '2 3' : undefined}
+                strokeDasharray={arc.active ? '0.1 4.5' : undefined}
                 onPress={() => openDuration(record)}
               />
             );
