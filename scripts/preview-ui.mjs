@@ -75,6 +75,8 @@ if (process.argv.includes('--static')) {
   for (const scenario of [
     'long-nap',
     'waking-range',
+    'nap-live-drawer',
+    'nap-edit-drawer',
     'nap-progress',
     'nap-paused',
     'day',

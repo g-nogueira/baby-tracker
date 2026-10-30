@@ -570,3 +570,92 @@ it('switches an open Start picker to End without reusing its initial time, and k
     activity.endedAt,
   );
 });
+
+it('edits a running Nap end and pause history as one reviewed draft, saving only on confirmation', async () => {
+  const activity: SleepActivity = {
+    id: 'live',
+    revision: 'reviewed',
+    kind: 'nap',
+    status: 'active',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    measuredAt: now.toISOString(),
+    pauseSeconds: 600,
+    pauses: [
+      { id: 'pause:0', startedAt: '2026-10-15T11:10:00.000Z', endedAt: '2026-10-15T11:20:00.000Z' },
+    ],
+  };
+  await render({ type: 'edit', activity });
+  expect(press('Stop Nap')).toBeDefined();
+  expect(press('Pause Nap')).toBeDefined();
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
+  expect(press('Stop Nap')).toBeUndefined();
+  expect(press('Pause Nap')).toBeUndefined();
+  expect(press('Save activity')?.props.disabled).toBe(true);
+  expect(press('Add pause')).toBeDefined();
+  await act(async () => press('Set Nap end time')?.props.onPress());
+  expect(renderer.root.findByType('DateTimePicker' as never).props.value.toISOString()).toBe(
+    now.toISOString(),
+  );
+  await act(async () =>
+    renderer.root
+      .findByType('DateTimePicker' as never)
+      .props.onChange({ type: 'set' }, new Date('2026-10-15T11:55:00.000Z')),
+  );
+  await act(async () => press('Remove pause 1')?.props.onPress());
+  expect(base.onExecute).not.toHaveBeenCalled();
+  await act(async () => press('Add pause')?.props.onPress());
+  expect(press('Save activity')?.props.disabled).toBe(false);
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-sleep',
+    expected: activity,
+    startedAt: activity.startedAt,
+    endedAt: '2026-10-15T11:55:00.000Z',
+    pauses: [{ startedAt: '2026-10-15T11:54:00.000Z', endedAt: '2026-10-15T11:55:00.000Z' }],
+  });
+});
+it('keeps pause picker drafts stable across clock ticks and saves edited intervals with their references', async () => {
+  const activity: SleepActivity = {
+    id: 'live',
+    revision: 'reviewed',
+    kind: 'nap',
+    status: 'active',
+    startedAt: '2026-10-15T11:00:00.000Z',
+    endedAt: null,
+    measuredAt: now.toISOString(),
+    pauseSeconds: 600,
+    pauses: [
+      { id: 'pause:0', startedAt: '2026-10-15T11:10:00.000Z', endedAt: '2026-10-15T11:20:00.000Z' },
+    ],
+  };
+  await render({ type: 'edit', activity });
+  await act(async () =>
+    renderer.root.findByType(SheetBoundary).props.onDetentChange({ nativeEvent: { index: 1 } }),
+  );
+  await act(async () => press('Edit pause 1')?.props.onPress());
+  await act(async () => press('Pause 1 End time')?.props.onPress());
+  const picker = renderer.root.findByType('DateTimePicker' as never);
+  const callback = picker.props.onChange;
+  await act(async () =>
+    renderer.update(
+      <ActivitySheet
+        {...base}
+        now={new Date(now.getTime() + 1000)}
+        intent={{ type: 'edit', activity }}
+      />,
+    ),
+  );
+  expect(renderer.root.findByType('DateTimePicker' as never).props.onChange).toBe(callback);
+  await act(async () => callback({ type: 'set' }, new Date('2026-10-15T11:25:00.000Z')));
+  await act(async () => press('Save activity')?.props.onPress());
+  expect(base.onExecute).toHaveBeenCalledWith({
+    type: 'edit-sleep',
+    expected: activity,
+    startedAt: activity.startedAt,
+    endedAt: null,
+    pauses: [{ ...activity.pauses?.[0], endedAt: '2026-10-15T11:25:00.000Z' }],
+  });
+});
