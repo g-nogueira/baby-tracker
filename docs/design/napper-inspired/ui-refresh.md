@@ -208,3 +208,13 @@ On a test profile, compare each state side by side with Napper on both phones: h
 historical cycles, first/active/paused/completed Nursing, Nap, Night waking, past care, exact time
 editing, nearby records, removal, drawer dragging, enlarged fonts and the keyboard. No development
 writes were made to the family's real account.
+
+## Nap drawer follow-up
+
+The compact live Nap drawer uses equal outlined Pause/Resume and Stop controls, smaller activity
+artwork inside a running badge, and no date under its elapsed clock. The expanded drawer uses a
+Save control, inline editable End, and draft-only pause rows with Add/Edit/Remove controls. Picker
+changes and pause edits do not write until Save. Invalid pause ordering/ranges disable Save.
+The footer reserves visible scroll space and has an opaque surface while expanded. Open pauses
+are closed at an explicitly chosen End; the separate Stop command keeps its pause-start rule.
+The new native picker, detents and footer geometry still require Android/iPhone validation.
