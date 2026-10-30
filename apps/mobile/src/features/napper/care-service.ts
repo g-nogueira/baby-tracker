@@ -175,11 +175,11 @@ export class NapperCareService implements CareService {
           const date =
             command.type === 'record-past'
               ? day(command.activity.startedAt)
-              : command.type === 'edit-activity' && expected
+              : (command.type === 'edit-activity' || command.type === 'edit-sleep') && expected
                 ? calendarDayForInstant(new Date(String(expected.start)), this.tracker.timezone)
                 : calendarDayForInstant(this.now(), this.tracker.timezone);
           const additional =
-            command.type === 'edit-activity'
+            command.type === 'edit-activity' || command.type === 'edit-sleep'
               ? [day(command.startedAt), ...(command.endedAt ? [day(command.endedAt)] : [])]
               : command.type === 'record-past' &&
                   'endedAt' in command.activity &&

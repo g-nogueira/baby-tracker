@@ -55,7 +55,13 @@ import type { CareActivity, CareCommand, CareKind, NursingActivity } from './con
 import { careCycleViews } from './cycle-view';
 import { nursingTimes } from './nursing';
 import { NursingSheet } from './nursing-sheet';
-import { activityDuration, byStart, sleepBoundaryAt, sleepContext } from './sleep-state';
+import {
+  sleepSegmentDuration,
+  activityDuration,
+  byStart,
+  sleepBoundaryAt,
+  sleepContext,
+} from './sleep-state';
 import { useCareTracker, type CareProviderFactory } from './use-care-tracker';
 
 type Drawer =
@@ -299,9 +305,9 @@ export function CareHome({
     else if (selection === 'day' && !state.night)
       center = {
         label:
-          state.nap?.status === 'paused' ? 'Nap paused' : state.nap ? 'Asleep for' : 'Awake for',
+          state.nap?.status === 'paused' ? 'Awake for' : state.nap ? 'Asleep for' : 'Awake for',
         value: state.nap
-          ? shortDuration(activityDuration(state.nap, now))
+          ? shortDuration(sleepSegmentDuration(state.nap, now))
           : focusElapsed(state.latestEnd),
         hint: state.nap ? 'Nap' : state.latestEnd ? 'Since the last sleep' : 'No sleep logged yet',
       };

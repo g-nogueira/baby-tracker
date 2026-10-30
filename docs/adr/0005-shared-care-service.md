@@ -162,3 +162,14 @@ collision warning/correction flow still require phone acceptance. Existing nativ
 are unchanged; this delivery does not require adding another native module.
 
 The connected presentation refresh and its static-review limits are documented in [the UI refresh notes](../design/napper-inspired/ui-refresh.md).
+
+## Sleep interval editing
+
+Sleep snapshots expose portable pause intervals with references scoped to the reviewed activity
+revision. The dial shows the current uninterrupted sleep/awake stretch; accumulated sleep in the
+live controller still excludes every pause. Aggregate-only providers retain the existing clock.
+`edit-sleep` replaces a reviewed interval and pause list through the care port. The Napper adapter
+retains metadata for referenced pauses, validates ordering/ranges, and uses the existing preflight
+and readback checks. An explicit end closes a running interval; reopening remains Continue Nap.
+The existing Stop-while-paused rule is preserved. Synthetic protocol tests cover these operations;
+manual pause editing against a live test account still requires device validation.

@@ -53,8 +53,21 @@ export interface NursingActivity extends ActivityBase {
   measuredAt: string;
   pauseSeconds: number;
 }
+/** Opaque pause references are valid only for the activity's reviewed revision. */
+export interface SleepPause {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+export interface SleepPauseDraft {
+  id?: string;
+  startedAt: string;
+  endedAt: string | null;
+}
 export interface SleepActivity extends ActivityBase {
   kind: 'nap' | 'night-waking';
+  /** Missing only for providers that expose aggregate pause totals. */
+  pauses?: readonly SleepPause[];
   /** Pause total at this UTC instant; paused sleep does not accrue after it. */
   measuredAt: string;
   pauseSeconds: number;
@@ -94,6 +107,14 @@ export type PastActivity = (
     }
 ) & { details?: ActivityDetails };
 export type CareCommand =
+  | {
+      type: 'edit-sleep';
+      expected: ActivityReference;
+      startedAt: string;
+      endedAt: string | null;
+      pauses: readonly SleepPauseDraft[];
+      details?: ActivityDetails;
+    }
   | { type: 'start-nursing'; side: Breast; at: string }
   | { type: 'change-nursing'; expected: ActivityReference; command: NursingCommand }
   | {

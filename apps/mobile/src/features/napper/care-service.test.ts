@@ -391,7 +391,9 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     expect(snapshot.issues).toEqual([]);
     const paused = await h.find('nap');
     expect(paused.status).toBe('paused');
-    expect(paused).not.toHaveProperty('pauses');
+    expect(paused).toHaveProperty('pauses', [
+      { id: 'pause:0', startedAt: stamp('09:20:00').replace('Z', '.000Z'), endedAt: null },
+    ]);
     expect(paused.kind === 'nap' && activityDuration(paused, new Date(stamp('09:30:00')))).toBe(
       20 * 60000,
     );
@@ -1247,4 +1249,132 @@ it('rejects a Wake-up removal when another caregiver edited it after review', as
     h.care.execute('test-baby', { type: 'remove-activity', expected }),
   ).rejects.toMatchObject({ code: 'conflict' });
   expect(h.removed).toHaveLength(0);
+});
+
+describe('portable sleep editing', () => {
+  const running = (): WireLog => ({
+    id: 'edit-nap',
+    category: 'NAP',
+    start: stamp('09:00:00'),
+    end: stamp('09:00:00'),
+    isOpen: true,
+    pauses: [
+      {
+        start: Date.parse(stamp('09:10:00')),
+        end: Date.parse(stamp('09:20:00')),
+        providerNote: 'retain',
+      },
+    ],
+    howBabySlept: 'IN_BED',
+  });
+  it('exposes neutral intervals, edits/removes/adds pauses and confirms a chosen running end', async () => {
+    const h = await careHarness(
+      [point('wake-up', stamp('06:00:00')), running()],
+      stamp('10:00:00'),
+    );
+    const nap = await h.find('nap');
+    expect(nap.kind === 'nap' && nap.pauses?.[0]).toEqual({
+      id: 'pause:0',
+      startedAt: '2026-10-15T09:10:00.000Z',
+      endedAt: '2026-10-15T09:20:00.000Z',
+    });
+    await h.care.execute('test-baby', {
+      type: 'edit-sleep',
+      expected: nap,
+      startedAt: nap.startedAt,
+      endedAt: stamp('09:50:00'),
+      pauses: [
+        { id: 'pause:0', startedAt: stamp('09:12:00'), endedAt: stamp('09:22:00') },
+        { startedAt: stamp('09:30:00'), endedAt: stamp('09:35:00') },
+      ],
+    });
+    expect(h.sent[0]).toMatchObject({
+      isOpen: false,
+      howBabySlept: 'IN_BED',
+      pauses: [
+        {
+          start: Date.parse(stamp('09:12:00')),
+          end: Date.parse(stamp('09:22:00')),
+          providerNote: 'retain',
+        },
+        { start: Date.parse(stamp('09:30:00')), end: Date.parse(stamp('09:35:00')) },
+      ],
+    });
+    const saved = await h.find('nap');
+    expect(saved.kind === 'nap' && activityDuration(saved, h.now())).toBe(35 * 60000);
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'edit-sleep',
+        expected: nap,
+        startedAt: nap.startedAt,
+        endedAt: stamp('09:50:00'),
+        pauses: [],
+      }),
+    ).rejects.toThrow('changed');
+    expect(h.sent).toHaveLength(1);
+    await h.care.execute('test-baby', {
+      type: 'edit-sleep',
+      expected: saved,
+      startedAt: saved.startedAt,
+      endedAt: saved.endedAt,
+      pauses: [],
+    });
+    expect(h.sent[1].pauses).toEqual([]);
+  });
+  it('rejects overlapping, out-of-range, duplicate and unknown pauses without writes', async () => {
+    const h = await careHarness(
+      [point('wake-up', stamp('06:00:00')), running()],
+      stamp('10:00:00'),
+    );
+    const nap = await h.find('nap');
+    for (const pauses of [
+      [{ startedAt: stamp('08:59:00'), endedAt: stamp('09:01:00') }],
+      [
+        { startedAt: stamp('09:10:00'), endedAt: stamp('09:30:00') },
+        { startedAt: stamp('09:20:00'), endedAt: stamp('09:40:00') },
+      ],
+      [{ id: 'pause:99', startedAt: stamp('09:10:00'), endedAt: stamp('09:20:00') }],
+      [
+        { id: 'pause:0', startedAt: stamp('09:10:00'), endedAt: stamp('09:20:00') },
+        { id: 'pause:0', startedAt: stamp('09:30:00'), endedAt: stamp('09:40:00') },
+      ],
+      [{ startedAt: stamp('09:10:00'), endedAt: null }],
+    ])
+      await expect(
+        h.care.execute('test-baby', {
+          type: 'edit-sleep',
+          expected: nap,
+          startedAt: nap.startedAt,
+          endedAt: stamp('09:50:00'),
+          pauses,
+        }),
+      ).rejects.toThrow();
+    expect(h.sent).toEqual([]);
+  });
+  it('preserves running/paused state and rejects a stale remotely changed pause before writing', async () => {
+    const wire = running();
+    const h = await careHarness([point('wake-up', stamp('06:00:00')), wire], stamp('10:00:00'));
+    const nap = await h.find('nap');
+    await h.care.execute('test-baby', {
+      type: 'edit-sleep',
+      expected: nap,
+      startedAt: nap.startedAt,
+      endedAt: null,
+      pauses: [{ id: 'pause:0', startedAt: stamp('09:10:00'), endedAt: null }],
+    });
+    const paused = await h.find('nap');
+    expect(paused.status).toBe('paused');
+    const count = h.sent.length;
+    h.setRows(h.rows().map((r) => (r.id === wire.id ? { ...r, pauses: [] } : r)));
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'edit-sleep',
+        expected: paused,
+        startedAt: nap.startedAt,
+        endedAt: null,
+        pauses: [],
+      }),
+    ).rejects.toThrow('changed');
+    expect(h.sent).toHaveLength(count);
+  });
 });

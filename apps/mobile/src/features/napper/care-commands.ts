@@ -1,3 +1,4 @@
+import { editSleep } from './sleep-edit';
 import { applyActivityDetails } from './care-details';
 import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calendar-day';
 import {
@@ -259,6 +260,11 @@ export function prepareCareWrites(
           pauses: [...pauses, { start: end, end: at.getTime() }],
         },
       ];
+      break;
+    }
+    case 'edit-sleep': {
+      if (!expected) fail('Refresh this sleep activity before editing it.');
+      requests = [editSleep(expected, command, now, timezone)];
       break;
     }
     case 'edit-activity': {
