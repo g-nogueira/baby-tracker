@@ -1,3 +1,5 @@
+import { useHomePreferences } from './use-home-preferences';
+import { visibleHomeActions } from './home-preferences';
 import { napProgress } from './nap-progress';
 import { RoundAction } from '@/features/shared/round-action';
 import { CareLog } from './care-log';
@@ -90,6 +92,7 @@ export function CareHome({
   model: ReturnType<typeof useCareTracker>;
   initialHistoryView?: 'dial' | 'log' | 'totals';
 }) {
+  const preferences = useHomePreferences();
   const scroll = useRef<ScrollView>(null);
   const logOffset = useRef(0);
   const dragY = useRef(new Animated.Value(0)).current;
@@ -358,7 +361,7 @@ export function CareHome({
   );
   const homeTop = historyMode
     ? Math.max(28, Math.min(44, viewport.height * 0.05))
-    : Math.max(16, Math.min(28, (homeHeight - dialMaxSize - 145) * 0.18));
+    : Math.max(26, Math.min(38, (homeHeight - dialMaxSize - 135) * 0.22));
   const actionGap = Math.max(16, Math.min(24, (homeHeight - dialMaxSize - 130) * 0.3));
   const displayCenter = historyMode
     ? {
@@ -429,6 +432,9 @@ export function CareHome({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Open cycle history"
+                accessibilityHint="Tap or pull down to show the calendar"
+                disabled={model.busy}
+                {...navigationGesture.panHandlers}
                 onPress={() => setHistoryMode(true)}
                 style={styles.historyHint}
               >
@@ -489,7 +495,17 @@ export function CareHome({
                 <HomeQuickActions
                   compact
                   actions={actions
-                    .filter((action) => action.id !== 'medicine')
+                    .filter((action) =>
+                      visibleHomeActions(
+                        preferences.value,
+                        now,
+                        model.timezone,
+                        Boolean(state.night),
+                        Boolean(state.nap || state.waking),
+                      ).includes(
+                        action.id as 'night' | 'sleep' | 'nursing' | 'diaper' | 'medicine',
+                      ),
+                    )
                     .map((action) => ({
                       ...action,
                       color: theme.night
@@ -878,7 +894,7 @@ export function CareHome({
           />
         ) : null}
         {drawer?.type === 'profile' ? (
-          <ProfileSheet model={model} onClose={() => setDrawer(null)} />
+          <ProfileSheet preferences={preferences} model={model} onClose={() => setDrawer(null)} />
         ) : null}
         {drawer?.type === 'activity' ? (
           <ActivitySheet
@@ -993,7 +1009,7 @@ const nightStars = Array.from({ length: 110 }, (_, i) => ({
   x: (i * 127 + 19) % 400,
   y: (i * 197 + 31) % 900,
   radius: i % 4 === 0 ? 0.75 : 0.4,
-  opacity: 0.15 + (i % 3) * 0.1,
+  opacity: 0.2 + (i % 3) * 0.13,
 }));
 const skyStyle = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
 const createStyles = (theme: ActivityTheme) =>
@@ -1055,13 +1071,13 @@ const createStyles = (theme: ActivityTheme) =>
     cycleHint: { fontSize: 14, color: theme.muted },
     eyebrow: { color: theme.muted, fontSize: 10, fontWeight: '600', letterSpacing: 2 },
     profileButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 2,
-      borderColor: theme.accent,
+      borderColor: '#B1ACF6',
       backgroundColor: 'transparent',
     },
     title: { fontSize: 24, fontWeight: '500', color: theme.text },
@@ -1071,7 +1087,7 @@ const createStyles = (theme: ActivityTheme) =>
     dateButton: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
     arrow: { fontSize: 26, color: theme.muted },
     link: { minHeight: 44, paddingVertical: 12 },
-    dockHost: { position: 'absolute', left: 16, right: 16, zIndex: 30, elevation: 10 },
+    dockHost: { position: 'absolute', left: 12, right: 12, zIndex: 30, elevation: 10 },
     dock: {
       height: 62,
       maxWidth: 448,

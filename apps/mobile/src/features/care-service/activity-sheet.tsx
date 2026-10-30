@@ -70,7 +70,7 @@ export const nightActivityColors: Record<CareKind, string> = {
   nap: '#8587FF',
   'night-waking': '#F09C8C',
   nursing: '#8EEBBE',
-  diaper: '#A3CCB0',
+  diaper: '#F1A0DB',
   medicine: '#DDE876',
 };
 type Transition =
@@ -337,7 +337,16 @@ export function ActivitySheet({
         </View>
       ) : null}
       {record?.kind === 'nap' && active && !expanded ? (
-        <View style={{ flexDirection: 'row', gap: 20, justifyContent: 'center', width: '100%' }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 20,
+            justifyContent: 'center',
+            width: '100%',
+            height: 104,
+            flexShrink: 0,
+          }}
+        >
           <OutlinedRoundAction
             label={record.status === 'paused' ? 'Resume Nap' : 'Pause Nap'}
             icon={record.status === 'paused' ? 'play-filled' : 'pause-filled'}
@@ -455,7 +464,11 @@ export function ActivitySheet({
       onDetentChange={({ nativeEvent }) => setExpanded(nativeEvent.index === 1)}
     >
       <ScrollView
-        style={kind === 'nap' && expanded ? { marginBottom: footerHeight } : undefined}
+        style={
+          kind === 'nap' && expanded
+            ? { flex: 1, minHeight: 0, marginBottom: footerHeight }
+            : undefined
+        }
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
@@ -526,9 +539,17 @@ export function ActivitySheet({
                 accessibilityHint="Changes the end time"
                 disabled={busy || (active && !editableSleep)}
                 onPress={() => void openTime('end')}
-                style={styles.rangeEndpoint}
+                style={[styles.rangeEndpoint, active && editableSleep && !ending && styles.setEnd]}
               >
-                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.timer, styles.range]}>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={
+                    active && editableSleep && !ending
+                      ? styles.pendingEnd
+                      : [styles.timer, styles.range]
+                  }
+                >
                   {completedRange || ending || record?.status === 'completed'
                     ? clockLabel(end, timezone, false)
                     : active && !editableSleep
@@ -705,11 +726,13 @@ export function ActivitySheet({
             </View>
           </>
         ) : null}
-        {!valid ? (
+        {!valid && !pauseIssue ? (
           <Text accessibilityRole="alert" style={styles.error}>
             {kind === 'nursing' && last === null
               ? 'Choose the last breast used.'
-              : 'Keep Start and End in order and in the past, with a valid breast split.'}
+              : kind === 'nursing'
+                ? 'Keep Start and End in order and in the past, with a valid breast split.'
+                : 'Keep Start and End in order and in the past.'}
           </Text>
         ) : null}
         {pickerError || error ? (
@@ -740,7 +763,14 @@ export function ActivitySheet({
 const createStyles = (theme: ActivityTheme) =>
   StyleSheet.create({
     content: { padding: 20, paddingTop: 16, paddingBottom: 160, gap: 28 },
-    footer: { paddingTop: 12, paddingBottom: 24, alignItems: 'center', gap: 8 },
+    footer: {
+      zIndex: 5,
+      elevation: 6,
+      paddingTop: 12,
+      paddingBottom: 24,
+      alignItems: 'center',
+      gap: 8,
+    },
     footerActions: {
       maxWidth: 300,
       alignSelf: 'center',
@@ -786,6 +816,7 @@ const createStyles = (theme: ActivityTheme) =>
       minHeight: 60,
       flexShrink: 0,
     },
+    pendingEnd: { fontSize: 16, fontWeight: '400', color: theme.muted, opacity: 0.6 },
     rangeEndpoint: {
       flexShrink: 1,
       minWidth: 44,

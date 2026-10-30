@@ -50,6 +50,10 @@ const config = {
         find: '@react-native-community/datetimepicker',
         replacement: path.join(mobile, 'preview/date-picker.tsx'),
       },
+      {
+        find: 'expo-sqlite/kv-store',
+        replacement: path.join(mobile, 'preview/preferences-store.ts'),
+      },
       { find: 'expo-router', replacement: path.join(mobile, 'preview/router.tsx') },
       { find: '@', replacement: path.join(mobile, 'src') },
     ],
@@ -75,6 +79,7 @@ if (process.argv.includes('--static')) {
   for (const scenario of [
     'long-nap',
     'waking-range',
+    'nap-resumed',
     'nap-live-drawer',
     'nap-edit-drawer',
     'nap-progress',

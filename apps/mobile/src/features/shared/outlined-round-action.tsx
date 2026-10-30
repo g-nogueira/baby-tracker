@@ -23,7 +23,13 @@ export function OutlinedRoundAction({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={{ alignItems: 'center', gap: 6, opacity: disabled ? 0.45 : 1 }}
+      style={{
+        width: 94,
+        minWidth: 94,
+        alignItems: 'center',
+        gap: 6,
+        opacity: disabled ? 0.45 : 1,
+      }}
     >
       <View
         style={{

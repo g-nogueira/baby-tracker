@@ -161,7 +161,7 @@ The geometry still uses the real start/end angles. Disabled views block arc acti
 
 The large drawer range has independent Start and End buttons. Tapping End initializes the picker
 from the end instant, even while the Start picker is already open. Completed Bedtime and Night waking
-end changes retain the original start and reviewed revision. Active sleep still has a read-only end.
+end changes retain the original start and reviewed revision. Running sleep exposes Set time for an explicit End, saved with the reviewed interval and pauses.
 
 | Running Nap | Paused Nap | Narrow Nap bar (320px) |
 | --- | --- | --- |
@@ -175,8 +175,8 @@ time and progress exclude pauses and freeze while paused; overdue estimates stay
 negative remaining time. The estimate's source is included in accessibility text. Buttons retain
 the reviewed record revision and use the existing care-service commands and write guards.
 
-Validation passed: `pnpm check` (515 tests), the Lisbon timezone care/timeline suite
-(210 tests), Android/iOS JavaScript exports and the standalone preview build.
+Validation passed: `pnpm check` (527 tests), the Lisbon timezone care/timeline suite
+(222 tests), Android/iOS JavaScript exports and the standalone preview build.
 The connected-home tests execute Expo's Android transform with React Compiler enabled, including
 a production render. Startup tests cover pending/successful/failed font loading. They cover history navigation, empty-night cycle switching, the activity
 menu, persistent Nursing controls, clock updates and reopened feeds. A marker regression verifies
@@ -218,3 +218,29 @@ changes and pause edits do not write until Save. Invalid pause ordering/ranges d
 The footer reserves visible scroll space and has an opaque surface while expanded. Open pauses
 are closed at an explicitly chosen End; the separate Stop command keeps its pause-start rule.
 The new native picker, detents and footer geometry still require Android/iPhone validation.
+
+## Sleep pauses and Home follow-up
+
+The resumed-Nap fixture has 41:13 accumulated sleep and a 14:36 pause. After resuming,
+the centre shows the current uninterrupted sleep stretch (`<1 min`); the live bar retains
+41:13 and excludes pause time. While paused the centre shows the current awake stretch.
+Opaque pause references and editable intervals cross the replaceable care-service contract;
+provider metadata stays in the adapter. Existing revision, collision and readback guards apply.
+
+Home actions can be selected in Profile and persist as device UI preferences only. Bedtime
+appears from 17:00 in the display timezone by default; its threshold is configurable. Running
+sleep controls remain accessible even when hidden in preferences. The top chevron opens the
+existing calendar/history through tap or pull. Predictions, subscription messaging and locks
+are outside this change.
+
+Dial Nap artwork sits inside its interval band without an extra overlapping badge. Running
+badges use round dotted rings and layered glow; artwork, live-bar glyphs, typography and spacing
+were adjusted against the supplied references. These static renders share synthetic records.
+
+| Resumed Nap | Compact controls | Expanded editor | Narrow editor (320px) |
+| --- | --- | --- | --- |
+| ![Resumed Nap](ui-refresh/nap-resumed.png) | ![Compact controls](ui-refresh/nap-live-drawer.png) | ![Expanded editor](ui-refresh/nap-edit-drawer.png) | ![Narrow editor](ui-refresh/nap-edit-small.png) |
+
+The pause editor, native picker, floating footer, scroll reachability, safe areas and chevron
+pull still require installed Android/iPhone validation. No real-account API calls or family
+record changes were made during this follow-up. Test-profile round trips remain pending.
