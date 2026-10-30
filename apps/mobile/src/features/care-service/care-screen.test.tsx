@@ -497,7 +497,7 @@ it('keeps a paused Nap editable alongside Nursing and care actions', async () =>
   hooks.model.current = snapshot([nap, active]);
   hooks.model.history = hooks.model.current;
   await render();
-  expect(text()).toContain('Nap paused');
+  expect(text()).toContain('Awake for');
   expect(press('Stop running Nap')?.props.disabled).toBe(false);
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   expect(press('Diaper,')?.props.disabled).toBe(false);
@@ -700,4 +700,28 @@ it('renders chronological log ranges and phase summaries while opening the exact
     activity: nap,
   });
   expect(hooks.model.execute).not.toHaveBeenCalled();
+});
+
+it('shows the resumed stretch in the dial and accumulated sleep in the bar', async () => {
+  const nap: SleepActivity = {
+    id: 'resumed',
+    revision: 'v1',
+    kind: 'nap',
+    status: 'active',
+    startedAt: '2026-10-15T00:30:00.000Z',
+    endedAt: null,
+    measuredAt: new Date().toISOString(),
+    pauseSeconds: 2100,
+    pauses: [
+      { id: 'p', startedAt: '2026-10-15T00:50:00.000Z', endedAt: '2026-10-15T01:25:00.000Z' },
+    ],
+  };
+  hooks.model.current = snapshot([nap]);
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(renderer.root.findByType(RadialCycle).props.centerStatus).toMatchObject({
+    label: 'Asleep for',
+    value: '<1 min',
+  });
+  expect(text()).toContain('20:23');
 });

@@ -165,6 +165,11 @@ export function readCareRecord(wire: WireLog, revision: string, now: Date): Care
           ? 'paused'
           : 'active'
         : 'completed',
+      pauses: pauses.map((p, index) => ({
+        id: `pause:${index}`,
+        startedAt: new Date(p.start).toISOString(),
+        endedAt: p.end === null ? null : new Date(p.end).toISOString(),
+      })),
       measuredAt: now.toISOString(),
       pauseSeconds: pauses.reduce((sum, p) => sum + ((p.end ?? now.getTime()) - p.start), 0) / 1000,
     };

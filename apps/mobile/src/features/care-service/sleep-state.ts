@@ -70,3 +70,11 @@ export function activityDuration(activity: SleepActivity, now: Date): number {
   );
   return Math.max(0, through - Date.parse(activity.startedAt) - activity.pauseSeconds * 1000);
 }
+
+/** Current uninterrupted phase; aggregate-only providers retain their existing total clock. */
+export function sleepSegmentDuration(activity: SleepActivity, now: Date): number {
+  if (!activity.pauses) return activityDuration(activity, now);
+  const last = activity.pauses.at(-1);
+  const start = last ? (last.endedAt ?? last.startedAt) : activity.startedAt;
+  return Math.max(0, Date.parse(activity.endedAt ?? now.toISOString()) - Date.parse(start));
+}
