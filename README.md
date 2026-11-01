@@ -50,6 +50,42 @@ Rebuild native development clients after installing the new SecureStore, Gesture
 Reanimated, TrueSheet 3.11.12, and slider dependencies. Android/iOS JavaScript export validation
 does not prove native installation, API compatibility, or gesture behavior on a phone.
 
+## Android APK with EAS
+
+From the repository root (or `apps/mobile`), run:
+
+```bash
+npm run build:apk
+```
+
+The script runs `npx eas-cli@latest build --platform android --profile preview` from
+`apps/mobile`, where EAS configuration belongs in this workspace. Sign in to Expo when
+prompted and link the existing `gnogueira/baby-tracker` project if it is not already linked
+in your local app configuration. EAS manages Android signing credentials and returns a build
+URL; download the APK from the successful build page and install it on the phone. This
+preview is a standalone internal build and does not require Metro or a local Android SDK.
+
+`apps/mobile/eas.json` retains the development, preview and production profiles. All inherit
+Node 24.22.1 and pnpm 11.20.0, matching the repository's Node requirement and pinned pnpm
+version. Preview explicitly produces an APK; production keeps automatic build version
+increments and remote version management. The development-client profile requires
+`expo-dev-client` to be installed before using that profile; it is not needed for preview.
+
+EAS keeps frozen-lockfile installation enabled. If dependency installation fails, inspect
+the first `ERR_PNPM_*` entry under **Install dependencies**, together with the Node/pnpm
+versions under **Spin up build environment**. Locally check from the repository root:
+
+```bash
+node --version
+pnpm --version
+pnpm install --frozen-lockfile
+```
+
+Commit intentional dependency changes together with the updated root `pnpm-lock.yaml`.
+Do not disable the frozen-lockfile check to hide an install failure. Local dependency
+checks do not validate the remote install, signing or native compilation; check that
+the EAS build completes successfully before distributing the APK.
+
 ## API development
 
 Prerequisites: .NET SDK 10 and Docker with Compose.
