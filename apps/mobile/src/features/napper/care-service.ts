@@ -72,6 +72,7 @@ export class NapperCareService implements CareService {
       } catch (error) {
         result.issues.push({
           id: String(wire.id),
+          activityIds: [String(wire.id)],
           message:
             error instanceof CareServiceError ? error.message : 'This activity could not be read.',
           blocksWrites: wire.isOpen !== false || kind === 'bedtime' || kind === 'wake-up',
@@ -83,6 +84,8 @@ export class NapperCareService implements CareService {
       if (conflict.rule === 'waking-start' && conflict.ids.length === 1) continue;
       result.issues.push({
         id: conflict.key,
+        rule: conflict.rule,
+        activityIds: conflict.ids,
         message: conflict.message,
         // Keep records editable so a caregiver can repair a known, completed conflict.
         blocksWrites: false,

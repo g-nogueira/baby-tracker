@@ -834,6 +834,8 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     expect(snapshot.issues).toEqual([
       expect.objectContaining({
         message: 'A night waking must finish by the morning Wake up.',
+        rule: 'waking-end',
+        activityIds: ['LOG_wake-up_test', 'waking'],
         blocksWrites: false,
       }),
     ]);
