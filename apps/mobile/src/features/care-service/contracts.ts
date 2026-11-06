@@ -83,6 +83,9 @@ export interface CareIssue {
   id: string;
   message: string;
   blocksWrites: boolean;
+  /** Portable rule and source records for cycle-scoped, actionable review. */
+  rule?: string;
+  activityIds?: readonly string[];
 }
 export interface CareSnapshot {
   activities: CareActivity[];

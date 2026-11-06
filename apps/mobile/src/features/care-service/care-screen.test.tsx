@@ -14,6 +14,7 @@ import type {
 import type { CareScreen } from './care-screen';
 import { NursingSheet } from './nursing-sheet';
 import { ActivitySheet } from './activity-sheet';
+import { CareIssuesSheet } from './care-issues-sheet';
 import { RadialCycle, RadialCycleSelector } from '@/features/timeline/radial-cycle';
 
 /** Exercise Expo's Android transform: source-only rendering misses compiler ordering bugs. */
@@ -443,7 +444,7 @@ it.each(['current', 'history'])(
     expect(press('Stop running Nursing')?.props.disabled).toBe(false);
   },
 );
-it('shows an imported sleep collision once while leaving completed records editable and Nursing usable', async () => {
+it('consolidates imported collisions and opens the exact reviewed record after native dismissal', async () => {
   const wake: PointActivity = {
     id: 'wake',
     revision: 'wake-v1',
@@ -460,22 +461,95 @@ it('shows an imported sleep collision once while leaving completed records edita
   const message = 'A night waking must finish by the morning Wake up.';
   hooks.model.current = {
     activities: [bed, wake, completed, active],
-    issues: [{ id: 'collision', message, blocksWrites: false }],
+    issues: [
+      {
+        id: 'collision',
+        message,
+        rule: 'waking-end',
+        activityIds: ['wake', 'waking'],
+        blocksWrites: false,
+      },
+      {
+        id: 'another-collision',
+        message,
+        rule: 'waking-end',
+        activityIds: ['wake', 'waking'],
+        blocksWrites: false,
+      },
+    ],
   };
   hooks.model.history = hooks.model.current;
   await render();
-  expect(text().split(message)).toHaveLength(2);
+  expect(text()).not.toContain(message);
+  expect(text()).toContain('2 recorded time issues need review');
   expect(press('Stop running Nursing')?.props.disabled).toBe(false);
-  const group = renderer.root
-    .findAllByType('Pressable' as never)
-    .find((node) => String(node.props.accessibilityLabel).includes('nearby activities'));
-  expect(group).toBeDefined();
-  await act(async () => group?.props.onPress());
-  await act(async () => press('Edit Wake up')?.props.onPress());
+  await act(async () => press('Review activity issues')?.props.onPress());
+  expect(text().split(message)).toHaveLength(2);
+  expect(text()).toContain('2026');
+  await act(async () => press('Review Night waking at')?.props.onPress());
+  expect(renderer.root.findAllByType(CareIssuesSheet)).toHaveLength(0);
   expect(renderer.root.findByType(ActivitySheet).props.intent).toEqual({
     type: 'edit',
-    activity: wake,
+    activity: completed,
   });
+  expect(hooks.model.execute).not.toHaveBeenCalled();
+});
+
+it('does not show neighboring-day conflicts on Home or mix current issues into selected history', async () => {
+  vi.setSystemTime(new Date('2026-11-06T16:40:00.000Z'));
+  hooks.model.today = '2026-11-06';
+  hooks.model.date = '2026-11-06';
+  const oldWake = {
+    ...bed,
+    id: 'old-wake',
+    kind: 'wake-up' as const,
+    startedAt: '2026-11-04T07:00:00.000Z',
+    endedAt: '2026-11-04T07:00:00.000Z',
+  };
+  const olderWake = {
+    ...oldWake,
+    id: 'older-wake',
+    startedAt: '2026-11-03T07:00:00.000Z',
+    endedAt: '2026-11-03T07:00:00.000Z',
+  };
+  const todayWake = {
+    ...oldWake,
+    id: 'today-wake',
+    startedAt: '2026-11-06T08:25:00.000Z',
+    endedAt: '2026-11-06T08:25:00.000Z',
+  };
+  hooks.model.current = {
+    activities: [olderWake, oldWake, todayWake],
+    issues: [
+      {
+        id: 'old-conflict',
+        rule: 'boundaries',
+        activityIds: ['older-wake', 'old-wake'],
+        message: 'Old sleep boundaries conflict.',
+        blocksWrites: false,
+      },
+    ],
+  };
+  hooks.model.history = hooks.model.current;
+  await render();
+  expect(press('Review activity issues')).toBeUndefined();
+  await act(async () => press('History')?.props.onPress());
+  await act(async () => press('Activity list')?.props.onPress());
+  expect(press('Review activity issues')).toBeUndefined();
+  await act(async () => press('Cycle dial')?.props.onPress());
+  await act(async () => renderer.root.findByType(RadialCycleSelector).props.onChange('night'));
+  expect(text()).toContain('No night sleep logged');
+  expect(press('Review activity issues')).toBeUndefined();
+  await act(async () => press('Activity list')?.props.onPress());
+  hooks.model.current = {
+    ...(hooks.model.current as CareSnapshot),
+    issues: [{ id: 'current-conflict', message: 'Current-only conflict.', blocksWrites: false }],
+  };
+  hooks.model.history = snapshot([olderWake]);
+  hooks.model.date = '2026-11-03';
+  await update();
+  expect(press('Review activity issues')).toBeUndefined();
+  expect(text()).not.toContain('Current-only conflict.');
 });
 it('blocks writes and displays a fixed validation reason for an unsupported running record', async () => {
   hooks.model.current = {

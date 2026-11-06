@@ -3,6 +3,8 @@ import { visibleHomeActions } from './home-preferences';
 import { napProgress } from './nap-progress';
 import { RoundAction } from '@/features/shared/round-action';
 import { CareLog } from './care-log';
+import { groupReviewIssues } from './care-issue-state';
+import { CareIssuesSheet } from './care-issues-sheet';
 import { HistoryWeek } from './history-week';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityMenuSheet } from './activity-menu-sheet';
@@ -31,7 +33,11 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatLiveDuration } from '@/features/naps/nap-clock';
-import { instantForZonedDateTime, shiftCalendarDay } from '@/features/naps/calendar-day';
+import {
+  instantForZonedDateTime,
+  shiftCalendarDay,
+  zonedDayBounds,
+} from '@/features/naps/calendar-day';
 import {
   HomeQuickActions,
   type HomeQuickAction,
@@ -70,6 +76,7 @@ type Drawer =
   | { type: 'nursing'; id: string | null; snapshot?: NursingActivity }
   | { type: 'activity'; intent: ActivitySheetIntent }
   | { type: 'profile' }
+  | { type: 'issues' }
   | { type: 'actions' };
 export function CareScreen({ createProvider }: { createProvider: CareProviderFactory }) {
   const model = useCareTracker(createProvider);
@@ -153,13 +160,6 @@ export function CareHome({
     .sort(byStart)
     .at(-1);
   const blockingIssue = model.current.issues.find((i) => i.blocksWrites);
-  const reviewIssues = [
-    ...new Map(
-      [...model.current.issues, ...model.history.issues]
-        .filter((issue) => !issue.blocksWrites)
-        .map((issue) => [issue.id, issue]),
-    ).values(),
-  ];
   const blocked =
     model.busy ||
     model.needsRefresh ||
@@ -277,6 +277,40 @@ export function CareHome({
     ...(projection?.anchors.flatMap((a) => (a.recordId ? [a.recordId] : [])) ?? []),
   ]);
   const rows = history.filter((a) => projectedIds.has(a.id)).sort(byStart);
+  const reviewSnapshot = historyMode ? model.history : model.current;
+  let reviewView = view;
+  if (!historyMode)
+    try {
+      reviewView = careCycleViews(current, model.today, model.timezone, now, true)[selection];
+    } catch {
+      reviewView = null;
+    }
+  const [reviewStart, reviewEnd] = zonedDayBounds(
+    historyMode ? model.date : model.today,
+    model.timezone,
+  );
+  const reviewIds = reviewView?.projection
+    ? new Set([
+        ...reviewView.records.map((record) => record.id),
+        ...reviewView.projection.anchors.flatMap((anchor) =>
+          anchor.recordId ? [anchor.recordId] : [],
+        ),
+      ])
+    : new Set(
+        reviewSnapshot.activities
+          .filter(
+            (activity) =>
+              activity.startedAt < reviewEnd &&
+              (activity.endedAt ?? now.toISOString()) >= reviewStart,
+          )
+          .map((activity) => activity.id),
+      );
+  const reviewIssues = groupReviewIssues(
+    reviewSnapshot.issues,
+    reviewSnapshot.activities,
+    reviewIds,
+  );
+  const reviewCount = reviewIssues.reduce((count, group) => count + group.count, 0);
   let center = {
     label: selection === 'night' ? 'Night sleep' : 'Day sleep',
     value: shortDuration(
@@ -544,11 +578,27 @@ export function CareHome({
               {model.error}
             </Text>
           ) : null}
-          {reviewIssues.map((issue) => (
-            <Text key={issue.id} accessibilityRole="alert" style={styles.error}>
-              {issue.message}
-            </Text>
-          ))}
+          {reviewCount > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Review activity issues"
+              disabled={model.busy}
+              onPress={() => show({ type: 'issues' })}
+              style={{
+                backgroundColor: theme.raised,
+                borderRadius: 16,
+                padding: 16,
+                gap: 6,
+                marginVertical: 12,
+              }}
+            >
+              <Text style={{ color: theme.muted }}>
+                {reviewCount} recorded time {reviewCount === 1 ? 'issue needs' : 'issues need'}{' '}
+                review
+              </Text>
+              <Text style={{ color: theme.accent }}>Review activities</Text>
+            </Pressable>
+          ) : null}
           {historyMode && historyView === 'log' ? (
             <>
               <View
@@ -895,6 +945,18 @@ export function CareHome({
         ) : null}
         {drawer?.type === 'profile' ? (
           <ProfileSheet preferences={preferences} model={model} onClose={() => setDrawer(null)} />
+        ) : null}
+        {drawer?.type === 'issues' ? (
+          <CareIssuesSheet
+            groups={reviewIssues}
+            timezone={model.timezone}
+            disabled={blocked}
+            busy={model.busy}
+            refreshing={model.refreshing}
+            onRefresh={() => void model.refresh()}
+            onDismiss={() => setDrawer(null)}
+            onSelect={open}
+          />
         ) : null}
         {drawer?.type === 'activity' ? (
           <ActivitySheet

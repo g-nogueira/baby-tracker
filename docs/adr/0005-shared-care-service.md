@@ -173,3 +173,21 @@ retains metadata for referenced pauses, validates ordering/ranges, and uses the 
 and readback checks. An explicit end closes a running interval; reopening remains Continue Nap.
 The existing Stop-while-paused rule is preserved. Synthetic protocol tests cover these operations;
 manual pause editing against a live test account still requires device validation.
+
+## Cycle-scoped issue review
+
+Read issues may expose an optional portable rule and source activity IDs. The UI scopes known
+completed conflicts to the selected cycle, including its boundary records. It uses the current
+snapshot on Home and the selected history snapshot in history; unknown or unreadable source
+records stay visible rather than being assumed unrelated. If projection is unavailable, the
+display-timezone calendar day supplies a conservative fallback.
+
+One notice opens a grouped review sheet instead of repeating rule text on the dial and log.
+Grouping retains every distinct conflict and its exact source records/revisions. Cards show
+dates and times at both ends of intervals, and native dismissal precedes opening the existing
+editor. Refresh only rereads records. Collision validation, active-state blocking, revision
+checks and authoritative writes are unchanged; this does not normalize or repair stored data.
+
+Synthetic tests cover neighboring-day scope, duplicate messages, missing source records,
+provider metadata and exact editor handoff without writes. Installed-phone review, gesture
+and live-account validation remain pending.
