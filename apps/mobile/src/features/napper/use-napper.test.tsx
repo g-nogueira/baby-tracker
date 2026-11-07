@@ -9,6 +9,7 @@ const boundary = vi.hoisted(() => ({
   listener: null as null | ((state: string) => void),
 }));
 vi.mock('react-native', () => ({
+  Platform: { OS: 'android' },
   AppState: {
     addEventListener: (_event: string, listener: (state: string) => void) => {
       boundary.listener = listener;
@@ -16,7 +17,9 @@ vi.mock('react-native', () => ({
     },
   },
 }));
+vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '0.1.0' } } }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-id' }));
+vi.mock('expo-sqlite/kv-store', () => ({ default: { getItem: async () => null } }));
 vi.mock('./secure-credentials', () => ({
   napperDeviceId: async () => 'synthetic-device',
   SecureNapperCredentials: class {

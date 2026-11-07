@@ -86,6 +86,8 @@ Do not disable the frozen-lockfile check to hide an install failure. Local depen
 checks do not validate the remote install, signing or native compilation; check that
 the EAS build completes successfully before distributing the APK.
 
+To enable optional mobile sync logs and traces, see the [LAN Collector setup](infra/telemetry/README.md).
+
 ## API development
 
 Prerequisites: .NET SDK 10 and Docker with Compose.

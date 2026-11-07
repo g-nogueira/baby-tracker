@@ -19,6 +19,7 @@ import {
   type ActivityTheme,
 } from '@/features/shared/activity-theme';
 import { ProfileSheet } from './profile-sheet';
+import type { DiagnosticsPreferences } from '@/features/telemetry/diagnostics-settings';
 import Svg, { Circle, Defs, LinearGradient, Stop, Rect, RadialGradient } from 'react-native-svg';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
@@ -79,7 +80,13 @@ type Drawer =
   | { type: 'profile' }
   | { type: 'issues' }
   | { type: 'actions' };
-export function CareScreen({ createProvider }: { createProvider: CareProviderFactory }) {
+export function CareScreen({
+  createProvider,
+  diagnostics,
+}: {
+  createProvider: CareProviderFactory;
+  diagnostics?: DiagnosticsPreferences;
+}) {
   const model = useCareTracker(createProvider);
   if (model.stage !== 'ready' || !model.baby)
     return (
@@ -89,16 +96,18 @@ export function CareScreen({ createProvider }: { createProvider: CareProviderFac
         </ScrollView>
       </SafeAreaView>
     );
-  return <CareHome key={model.baby.id} model={model} />;
+  return <CareHome key={model.baby.id} model={model} diagnostics={diagnostics} />;
 }
 
 /** The connected home depends exclusively on care ports/read models; no provider payloads. */
 export function CareHome({
   model,
   initialHistoryView,
+  diagnostics,
 }: {
   model: ReturnType<typeof useCareTracker>;
   initialHistoryView?: 'dial' | 'log' | 'totals';
+  diagnostics?: DiagnosticsPreferences;
 }) {
   const preferences = useHomePreferences();
   const scroll = useRef<ScrollView>(null);
@@ -964,7 +973,12 @@ export function CareHome({
           />
         ) : null}
         {drawer?.type === 'profile' ? (
-          <ProfileSheet preferences={preferences} model={model} onClose={() => setDrawer(null)} />
+          <ProfileSheet
+            preferences={preferences}
+            diagnostics={diagnostics}
+            model={model}
+            onClose={() => setDrawer(null)}
+          />
         ) : null}
         {drawer?.type === 'issues' ? (
           <CareIssuesSheet

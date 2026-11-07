@@ -1,4 +1,9 @@
 import {
+  observeSync,
+  type SyncOutcome,
+  type SyncTelemetry,
+} from '@/features/telemetry/sync-telemetry';
+import {
   type CredentialStore,
   type NapperCredentials,
   NapperError,
@@ -20,6 +25,7 @@ export class NapperClient {
     private readonly device: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly now: () => Date = () => new Date(),
+    public readonly telemetry?: SyncTelemetry,
   ) {}
   async restore() {
     const epoch = this.epoch;
@@ -166,6 +172,17 @@ export class NapperClient {
     token: string | null,
     authentication: boolean,
   ): Promise<unknown> {
+    const operation =
+      method === 'GET'
+        ? 'http.read'
+        : method === 'PUT'
+          ? 'http.write'
+          : method === 'DELETE'
+            ? 'http.remove'
+            : null;
+    const finish = operation ? observeSync(this.telemetry, operation) : undefined;
+    let httpStatus: number | undefined;
+    let outcome: SyncOutcome = 'ok';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
@@ -185,6 +202,7 @@ export class NapperClient {
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
+      httpStatus = response.status;
       if (
         response.status === 401 ||
         response.status === 403 ||
@@ -245,6 +263,12 @@ export class NapperClient {
         throw new NapperError('invalid', 'Napper could not complete the request.');
       return result;
     } catch (error) {
+      outcome =
+        error instanceof NapperError
+          ? error.code
+          : method === 'PUT' || method === 'DELETE'
+            ? 'uncertain'
+            : 'network';
       if (error instanceof NapperError) throw error;
       throw new NapperError(
         method === 'PUT' || method === 'DELETE' ? 'uncertain' : 'network',
@@ -254,6 +278,7 @@ export class NapperClient {
       );
     } finally {
       clearTimeout(timer);
+      finish?.(outcome, httpStatus);
     }
   }
 }
