@@ -1,3 +1,4 @@
+import { normalizeCollectorUrl } from './diagnostics-settings';
 import {
   type SyncOperation,
   type SyncOutcome,
@@ -47,14 +48,11 @@ const attributes = (event: Observation) => [
 ];
 
 /** A small best-effort OTLP/HTTP JSON sink for the LAN Collector. No record payloads. */
-export function createOtlpSyncTelemetry(options: Options): SyncTelemetry | undefined {
-  const endpoint = options.endpoint?.trim().replace(/\/+$/, '');
-  // Require HTTPS and a base URL without user info, query parameters or fragments.
-  if (
-    !endpoint ||
-    !/^https:\/\/[a-z0-9][a-z0-9.-]*(?::[0-9]{1,5})?(?:\/[a-z0-9_-]+)*$/i.test(endpoint)
-  )
-    return undefined;
+export function createOtlpSyncTelemetry(
+  options: Options,
+): (SyncTelemetry & { dispose(): void }) | undefined {
+  const endpoint = normalizeCollectorUrl(options.endpoint ?? '');
+  if (!endpoint) return undefined;
   const fetcher = options.fetcher ?? fetch;
   const now = options.now ?? Date.now;
   const resource = {
@@ -71,10 +69,10 @@ export function createOtlpSyncTelemetry(options: Options): SyncTelemetry | undef
   let timer: ReturnType<typeof setTimeout> | undefined;
   let flushing = false;
   let nextAttempt = 0;
+  let disposed = false;
+  let request: AbortController | undefined;
 
-  const post = async (signal: 'logs' | 'traces', body: unknown) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const post = async (signal: 'logs' | 'traces', body: unknown, controller: AbortController) => {
     try {
       const response = await fetcher(`${endpoint}/v1/${signal}`, {
         method: 'POST',
@@ -87,12 +85,10 @@ export function createOtlpSyncTelemetry(options: Options): SyncTelemetry | undef
       return response.ok;
     } catch {
       return false;
-    } finally {
-      clearTimeout(timeout);
     }
   };
   function schedule() {
-    if (timer !== undefined || flushing || !queue.length) return;
+    if (disposed || timer !== undefined || flushing || !queue.length) return;
     timer = setTimeout(
       () => {
         timer = undefined;
@@ -102,8 +98,11 @@ export function createOtlpSyncTelemetry(options: Options): SyncTelemetry | undef
     );
   }
   async function flush() {
-    if (flushing || !queue.length) return;
+    if (disposed || flushing || !queue.length) return;
     flushing = true;
+    const controller = new AbortController();
+    request = controller;
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const batch = queue.splice(0, batchLimit);
       const logs = batch.map((event) => ({
@@ -125,25 +124,41 @@ export function createOtlpSyncTelemetry(options: Options): SyncTelemetry | undef
         attributes: attributes(event),
       }));
       const delivered = await Promise.all([
-        post('logs', { resourceLogs: [{ resource, scopeLogs: [{ scope, logRecords: logs }] }] }),
-        post('traces', { resourceSpans: [{ resource, scopeSpans: [{ scope, spans }] }] }),
+        post(
+          'logs',
+          { resourceLogs: [{ resource, scopeLogs: [{ scope, logRecords: logs }] }] },
+          controller,
+        ),
+        post(
+          'traces',
+          { resourceSpans: [{ resource, scopeSpans: [{ scope, spans }] }] },
+          controller,
+        ),
       ]);
       if (!delivered.every(Boolean)) nextAttempt = now() + backoffMs;
     } catch {
       nextAttempt = now() + backoffMs;
     } finally {
+      clearTimeout(timeout);
+      request = undefined;
       flushing = false;
       schedule();
     }
   }
 
   return {
+    dispose() {
+      disposed = true;
+      queue.length = 0;
+      if (timer !== undefined) clearTimeout(timer);
+      request?.abort();
+    },
     start(operation) {
-      if (!syncOperations.includes(operation)) return noop;
+      if (disposed || !syncOperations.includes(operation)) return noop;
       const startedAt = now();
       let finished = false;
       return (outcome, httpStatus) => {
-        if (finished || !syncOutcomes.includes(outcome)) return;
+        if (disposed || finished || !syncOutcomes.includes(outcome)) return;
         finished = true;
         if (
           !options.verbose &&

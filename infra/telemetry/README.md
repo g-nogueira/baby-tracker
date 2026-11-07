@@ -1,10 +1,18 @@
 # Mobile sync diagnostics
 
-Baby Tracker can send structured sync logs and matching OpenTelemetry spans to your LAN Collector. It is off until an HTTPS Collector URL is set in the mobile build. Saves, save verification, and failures are recorded when enabled; verbose mode also includes successful reads.
+Baby Tracker can send structured sync logs and matching OpenTelemetry spans to your LAN Collector. Diagnostics are off until you set a Collector URL on the phone. Saves, save verification, and failures are recorded when enabled; verbose mode also includes successful reads.
 
 Events include the operation, outcome, duration, HTTP status when available, app version, and OS. Each log and its span share a random trace ID. They contain no care records, account or device IDs, request URLs, credentials, or raw error messages. The app batches diagnostics in memory, drops failed batches, and backs off for a minute after a failed export. Sync never waits for telemetry.
 
-## Collector on the LAN
+## Enable and verify on a phone
+
+1. Open the **Profile** sheet using the icon at the top left of the tracker. Under **Diagnostics**, enter your Collector URL, for example `https://collector.example.net:4320`.
+2. Turn on **Verbose sync logs** if you want to include routine successful reads. Tap **Save diagnostics settings**. Changes take effect immediately and stay on this device.
+3. On the same LAN, allow local network access on iOS if prompted and refresh shared records. In OpenObserve, look for service `baby-tracker-mobile` in `baby_tracker_mobile_logs` and for its matching trace in `baby_tracker_mobile_traces`. With verbose mode off, refresh alone may not produce an event.
+
+To turn diagnostics off, clear the URL and save. Care sync continues if the Collector is unreachable, including when you're off the LAN.
+
+## One-time Collector setup
 
 Copy [collector.baby-tracker.json](collector.baby-tracker.json) into the existing Collector Compose directory (`/data/services/otel-collector`). It adds a separate TLS listener and two pipelines, and uses the base configuration's `memory_limiter` processor. Add the following entries to the existing Collector service, keeping its current ports, mounts, environment, and command flags:
 
@@ -33,17 +41,6 @@ docker compose run --rm --no-deps <collector-service> validate \
 docker compose up -d --no-deps <collector-service>
 ```
 
-## Enable and verify on a phone
+To disable ingestion for all phones, remove the dedicated port and config fragment from Compose and recreate the Collector.
 
-For local builds, set these variables in `apps/mobile/.env.local`. For EAS, set them as public variables in the `preview` environment (the preview build profile selects that environment). These values are embedded in the JS bundle.
-
-```dotenv
-EXPO_PUBLIC_BABY_TRACKER_OTLP_URL=https://collector.example.net:4320
-EXPO_PUBLIC_BABY_TRACKER_TELEMETRY_VERBOSE=1
-```
-
-Use your Collector's LAN hostname. Rebuild with `npm run build:apk` for Android or your iOS build profile with the same variables. Allow local network access on iOS if prompted. On the same LAN, open the app and refresh history. In OpenObserve, look for `service.name` = `baby-tracker-mobile` in `baby_tracker_mobile_logs` and for its matching trace in `baby_tracker_mobile_traces`. With verbose mode off, refresh alone may not produce an event. Off the LAN, diagnostics may be dropped and care sync continues as usual.
-
-To disable ingestion immediately, remove the dedicated port and config fragment from Compose and recreate the Collector. To stop mobile export attempts, remove `EXPO_PUBLIC_BABY_TRACKER_OTLP_URL` from the next build.
-
-References: [OTLP/HTTP JSON](https://opentelemetry.io/docs/specs/otlp/), [OpenObserve OTLP ingestion](https://openobserve.ai/docs/ingestion/logs/otlp/), [EAS environment variables](https://docs.expo.dev/eas/environment-variables/usage/), [iOS local network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
+References: [OTLP/HTTP JSON](https://opentelemetry.io/docs/specs/otlp/), [OpenObserve OTLP ingestion](https://openobserve.ai/docs/ingestion/logs/otlp/), [iOS local network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).

@@ -27,6 +27,8 @@ it.each([
   'http://collector.local',
   'https://user:secret@collector.local',
   'https://collector.local?token=secret',
+  'https://collector.local/v1/logs/',
+  'https://collector.local:65536',
 ])('disables export for an empty or unsafe endpoint', (endpoint) => {
   const { telemetry, fetcher } = setup(true, endpoint);
   expect(telemetry).toBeUndefined();

@@ -19,6 +19,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '0.1.0' } } }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-id' }));
+vi.mock('expo-sqlite/kv-store', () => ({ default: { getItem: async () => null } }));
 vi.mock('./secure-credentials', () => ({
   napperDeviceId: async () => 'synthetic-device',
   SecureNapperCredentials: class {
@@ -54,12 +55,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-13T12:00:00Z'));
   boundary.saved = null;
   boundary.listener = null;
-  vi.stubEnv('EXPO_PUBLIC_BABY_TRACKER_OTLP_URL', '');
 });
 afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount());
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 it('logs in, chooses a real profile, restores it after restart and reads again on foreground', async () => {

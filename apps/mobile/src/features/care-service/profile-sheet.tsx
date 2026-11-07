@@ -8,14 +8,18 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useActivityTheme } from '@/features/shared/activity-theme';
 import { SheetToolbar } from './sheet-toolbar';
 import type { useCareTracker } from './use-care-tracker';
+import { DiagnosticsFields } from '@/features/telemetry/diagnostics-fields';
+import type { DiagnosticsPreferences } from '@/features/telemetry/diagnostics-settings';
 
 export function ProfileSheet({
   model,
   preferences,
+  diagnostics,
   onClose,
 }: {
   model: ReturnType<typeof useCareTracker>;
   preferences?: ReturnType<typeof useHomePreferences>;
+  diagnostics?: DiagnosticsPreferences;
   onClose: () => void;
 }) {
   const theme = useActivityTheme();
@@ -33,7 +37,7 @@ export function ProfileSheet({
       grabberOptions={{ color: theme.muted, width: 42, adaptive: false }}
       accessibilityOptions={{ paneTitle: 'Profile and sync' }}
     >
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <SheetToolbar
           label="Profile"
           busy={model.busy}
@@ -54,6 +58,7 @@ export function ProfileSheet({
             {model.refreshing ? 'Refreshing…' : 'Refresh shared records'}
           </Text>
         </Pressable>
+        {diagnostics ? <DiagnosticsFields preferences={diagnostics} /> : null}
         {preferences ? <HomePreferencesFields preferences={preferences} /> : null}
         <View style={styles.links}>
           <Link href="/local" style={[styles.link, { color: theme.muted }]}>
