@@ -1,4 +1,5 @@
 import { SleepPauseEditor, sleepPauseIssue } from './sleep-pause-editor';
+import { SaveRecoveryNotice, type SaveRecovery } from './save-recovery-notice';
 import { OutlinedRoundAction } from '@/features/shared/outlined-round-action';
 import { ActivityBadge } from '@/features/shared/icons/activity-badge';
 import { RoundAction } from '@/features/shared/round-action';
@@ -92,6 +93,7 @@ interface Props {
   timezone: string;
   busy: boolean;
   error: string | null;
+  recovery?: SaveRecovery;
   onClose: () => void;
   onExecute: (command: CareCommand) => void;
 }
@@ -112,6 +114,7 @@ export function ActivitySheet({
   timezone,
   busy,
   error,
+  recovery,
   onClose,
   onExecute,
 }: Props) {
@@ -452,7 +455,16 @@ export function ActivitySheet({
         0.96,
       ]}
       scrollable
-      footer={footer}
+      footer={
+        recovery ? (
+          <SaveRecoveryNotice
+            {...recovery}
+            onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
+          />
+        ) : (
+          footer
+        )
+      }
       cornerRadius={28}
       draggable
       dismissible

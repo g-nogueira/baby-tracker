@@ -5,6 +5,7 @@ import { RoundAction } from '@/features/shared/round-action';
 import { CareLog } from './care-log';
 import { groupReviewIssues } from './care-issue-state';
 import { CareIssuesSheet } from './care-issues-sheet';
+import { SaveRecoveryNotice } from './save-recovery-notice';
 import { HistoryWeek } from './history-week';
 import { Text } from '@/features/shared/tracking-text';
 import { ActivityMenuSheet } from './activity-menu-sheet';
@@ -127,6 +128,7 @@ export function CareHome({
   const styles = connectedStyles;
   const [selectedManually, setSelectedManually] = useState(false);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
+  const submittedDrawer = useRef<{ drawer: Drawer; recoveryVersion: number } | null>(null);
   const [reserved, setReserved] = useState(0);
   const navigationGesture = useMemo(
     () =>
@@ -167,6 +169,13 @@ export function CareHome({
     Boolean(blockingIssue || state.problem) ||
     activeFeeds.length > 1;
   useEffect(() => {
+    const submitted = submittedDrawer.current;
+    if (submitted && submitted.recoveryVersion !== model.recoveredSaveVersion) {
+      submittedDrawer.current = null;
+      setDrawer((current) => (current === submitted.drawer ? null : current));
+    }
+  }, [model.recoveredSaveVersion]);
+  useEffect(() => {
     if (!selectedManually && model.date === model.today)
       setSelection(state.night ? 'night' : 'day');
   }, [model.date, model.today, selectedManually, state.night]);
@@ -190,10 +199,25 @@ export function CareHome({
         : { type: 'activity', intent: { type: 'edit', activity } },
     );
   const execute = async (command: CareCommand, close = true) => {
+    const submitted =
+      close && drawer ? { drawer, recoveryVersion: model.recoveredSaveVersion } : null;
+    submittedDrawer.current = submitted;
     if (await model.execute(command)) {
-      if (close) setDrawer(null);
+      if (submittedDrawer.current === submitted) submittedDrawer.current = null;
+      if (close) setDrawer((current) => (current === drawer ? null : current));
     }
   };
+  const recovery =
+    model.needsRefresh || model.checkingSave
+      ? {
+          checking: model.checkingSave || model.refreshing || model.busy,
+          onReviewCloud: () => {
+            void model.refresh().then((ready) => {
+              if (ready) setDrawer((current) => (current === drawer ? null : current));
+            });
+          },
+        }
+      : undefined;
   let views: ReturnType<typeof careCycleViews> | null = null;
   try {
     views = careCycleViews(history, model.date, model.timezone, now, model.date === model.today);
@@ -568,12 +592,8 @@ export function CareHome({
                   : blockingIssue?.message)}
             </Text>
           ) : null}
-          {model.needsRefresh ? (
-            <Text accessibilityRole="alert" style={styles.error}>
-              Refresh and review the last save before making another change.
-            </Text>
-          ) : null}
-          {model.error ? (
+          {recovery ? <SaveRecoveryNotice {...recovery} /> : null}
+          {model.error && !recovery ? (
             <Text accessibilityRole="alert" style={styles.error}>
               {model.error}
             </Text>
@@ -968,7 +988,8 @@ export function CareHome({
                 : model.timezone
             }
             busy={blocked}
-            error={model.error}
+            error={recovery ? null : model.error}
+            recovery={recovery}
             onClose={() => setDrawer(null)}
             onExecute={(command) => void execute(command)}
           />
@@ -981,7 +1002,8 @@ export function CareHome({
             timezone={sheetFeed?.originTimezone ?? model.timezone}
             now={now}
             busy={blocked}
-            error={model.error}
+            error={recovery ? null : model.error}
+            recovery={recovery}
             onClose={() => setDrawer(null)}
             onStart={(side, at) =>
               void execute({ type: 'start-nursing', side, at: at.toISOString() }, false)

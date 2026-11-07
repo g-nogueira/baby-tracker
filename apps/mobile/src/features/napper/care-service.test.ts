@@ -719,6 +719,10 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({ code: 'uncertain' });
     expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING']);
     expect(h.rows().some((r) => r.category === 'WOKE_UP')).toBe(false);
+    h.setRows([bed, h.sent[0]]);
+    expect(await h.care.verifyPendingSave?.('test-baby')).toBe(false);
+    expect(h.care.needsRefresh).toBe(true);
+    h.setRows([bed, waking]);
     await expect(h.care.execute('test-baby', command)).rejects.toMatchObject({ code: 'uncertain' });
     expect(h.sent).toHaveLength(1);
     h.afterPut(() => undefined);
@@ -726,6 +730,39 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     await h.care.execute('test-baby', { ...command, expected: await h.find('bedtime') });
     expect(h.sent.map((r) => r.category)).toEqual(['NIGHT_WAKING', 'NIGHT_WAKING', 'WOKE_UP']);
     expect((await h.care.current('test-baby')).issues).toEqual([]);
+  });
+  it('automatically verifies a delayed Wake up readback without replaying the write', async () => {
+    const bed = point('bedtime', '2026-10-14T19:00:00Z');
+    const h = await careHarness([bed], stamp('07:14:00'));
+    let saved: WireLog[] = [];
+    h.afterPut(() => {
+      saved = h.rows();
+      h.setRows([bed]);
+    });
+    await expect(
+      h.care.execute('test-baby', {
+        type: 'wake-up',
+        expected: await h.find('bedtime'),
+        at: stamp('07:07:00'),
+      }),
+    ).rejects.toMatchObject({ code: 'uncertain' });
+    expect(await h.care.verifyPendingSave?.('test-baby')).toBe(false);
+    expect(h.care.needsRefresh).toBe(true);
+    h.setRows(saved);
+    await h.client.selectBaby('other-baby');
+    const reads = h.fetcher.mock.calls.length;
+    expect(await h.care.verifyPendingSave?.('test-baby')).toBe(false);
+    expect(h.fetcher.mock.calls).toHaveLength(reads);
+    await h.client.selectBaby('test-baby');
+    expect(
+      await Promise.all([
+        h.care.verifyPendingSave?.('test-baby'),
+        h.care.verifyPendingSave?.('test-baby'),
+      ]),
+    ).toEqual([true, true]);
+    expect(h.care.needsRefresh).toBe(false);
+    expect((await h.find('wake-up')).startedAt).toBe('2026-10-15T07:07:00.000Z');
+    expect(h.sent).toHaveLength(1);
   });
   it('rechecks the reviewed bedtime between closing a waking and adding Wake up', async () => {
     const bed = point('bedtime', '2026-10-14T19:00:00Z');
@@ -803,6 +840,8 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
       h.care.execute('test-baby', { type: 'wake-up', expected, at: stamp('05:57:00') }),
     ).rejects.toMatchObject({ code: 'uncertain' });
     expect(h.sent).toHaveLength(2);
+    expect(h.care.needsRefresh).toBe(true);
+    expect(await h.care.verifyPendingSave?.('test-baby')).toBe(false);
     expect(h.care.needsRefresh).toBe(true);
     const snapshot = await h.care.reconcile('test-baby');
     expect(snapshot.issues.some((i) => i.message.includes('after its bedtime'))).toBe(true);
@@ -1224,7 +1263,7 @@ describe('Wake-up removal', () => {
     },
   );
   it.each(['lost', 'stale'] as const)(
-    'requires reconciliation after an unconfirmed Wake-up removal (%s)',
+    'only verifies an unconfirmed Wake-up removal when the record is absent (%s)',
     async (mode) => {
       const h = await careHarness([bed, wake], now);
       const expected = await h.find('wake-up');
@@ -1237,8 +1276,11 @@ describe('Wake-up removal', () => {
         h.care.execute('test-baby', { type: 'remove-activity', expected }),
       ).rejects.toMatchObject({ code: 'uncertain' });
       expect(h.removed).toHaveLength(1);
-      await h.care.reconcile('test-baby');
+      expect(await h.care.verifyPendingSave?.('test-baby')).toBe(mode === 'lost');
+      expect(h.care.needsRefresh).toBe(mode === 'stale');
+      if (mode === 'stale') await h.care.reconcile('test-baby');
       expect(h.care.needsRefresh).toBe(false);
+      expect(h.removed).toHaveLength(1);
     },
   );
 });
