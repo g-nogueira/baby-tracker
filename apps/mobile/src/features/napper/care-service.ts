@@ -7,6 +7,7 @@ import {
   type CareSnapshot,
 } from '@/features/care-service/contracts';
 import { calendarDayForInstant } from '@/features/naps/calendar-day';
+import { observeSync, type SyncOperation } from '@/features/telemetry/sync-telemetry';
 import type { NapperClient } from './client';
 import { fingerprint, NapperError, type WireLog } from './contracts';
 import { prepareCareWrites, validateCareSleep } from './care-commands';
@@ -39,10 +40,16 @@ export class NapperCareService implements CareService {
     this.revisions.clear();
     this.latest.clear();
   }
-  private async boundary<T>(action: () => Promise<T>): Promise<T> {
+  private async boundary<T>(action: () => Promise<T>, operation?: SyncOperation): Promise<T> {
+    const finish = operation ? observeSync(this.tracker.client.telemetry, operation) : undefined;
     try {
-      return await action();
+      const result = await action();
+      finish?.(operation === 'sync.verify' && result === false ? 'pending' : 'ok');
+      return result;
     } catch (error) {
+      finish?.(
+        error instanceof CareServiceError || error instanceof NapperError ? error.code : 'network',
+      );
       if (error instanceof CareServiceError) throw error;
       if (error instanceof NapperError) throw new CareServiceError(error.code, error.message);
       throw new CareServiceError('network', 'The shared service could not be reached. Try again.');
@@ -119,7 +126,7 @@ export class NapperCareService implements CareService {
           'The signed-in session changed. Refresh the selected profile.',
         );
       return this.snapshot(profileId, rows);
-    });
+    }, 'sync.read');
   }
   reconcile(profileId: string) {
     return this.boundary(async () => {
@@ -130,10 +137,10 @@ export class NapperCareService implements CareService {
         );
       await this.tracker.reconcile(profileId);
       return this.current(profileId);
-    });
+    }, 'sync.review');
   }
   verifyPendingSave(profileId: string) {
-    return this.boundary(() => this.tracker.verifyPendingSave(profileId));
+    return this.boundary(() => this.tracker.verifyPendingSave(profileId), 'sync.verify');
   }
   execute(profileId: string, command: CareCommand): Promise<void> {
     return this.boundary(async () => {
@@ -227,7 +234,7 @@ export class NapperCareService implements CareService {
       } finally {
         this.writing = false;
       }
-    });
+    }, 'sync.save');
   }
 }
 

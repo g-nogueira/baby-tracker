@@ -10,7 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "dev.gnogueira.babytracker",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Baby Tracker uses your local network to send optional sync diagnostics to your Collector."
+      }
     },
     "android": {
       "adaptiveIcon": {

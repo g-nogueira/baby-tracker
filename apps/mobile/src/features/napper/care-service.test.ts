@@ -7,6 +7,11 @@ import {
 } from '@/features/care-service/contracts';
 import { activityDuration, sleepContext } from '@/features/care-service/sleep-state';
 import { nursingTimes } from '@/features/care-service/nursing';
+import type {
+  SyncOperation,
+  SyncOutcome,
+  SyncTelemetry,
+} from '@/features/telemetry/sync-telemetry';
 import { NapperClient } from './client';
 import { napperProvider } from './care-service';
 import {
@@ -39,6 +44,7 @@ export async function careHarness(
   initial: WireLog[] = [],
   at = stamp('08:00:00'),
   todayOnly = false,
+  telemetry?: SyncTelemetry,
 ) {
   let now = new Date(at);
   let rows = structuredClone(initial);
@@ -95,6 +101,7 @@ export async function careHarness(
     'synthetic-device',
     fetcher,
     () => now,
+    telemetry,
   );
   await client.restore();
   const provider = napperProvider(
@@ -733,7 +740,12 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
   });
   it('automatically verifies a delayed Wake up readback without replaying the write', async () => {
     const bed = point('bedtime', '2026-10-14T19:00:00Z');
-    const h = await careHarness([bed], stamp('07:14:00'));
+    const events: [SyncOperation, SyncOutcome, number | undefined][] = [];
+    const h = await careHarness([bed], stamp('07:14:00'), false, {
+      start: (operation) => (outcome, status) => {
+        events.push([operation, outcome, status]);
+      },
+    });
     let saved: WireLog[] = [];
     h.afterPut(() => {
       saved = h.rows();
@@ -763,6 +775,11 @@ describe('provider-neutral care port backed by the observed Napper contracts', (
     expect(h.care.needsRefresh).toBe(false);
     expect((await h.find('wake-up')).startedAt).toBe('2026-10-15T07:07:00.000Z');
     expect(h.sent).toHaveLength(1);
+    expect(events).toContainEqual(['http.write', 'ok', 200]);
+    expect(events).toContainEqual(['sync.save', 'uncertain', undefined]);
+    expect(events).toContainEqual(['sync.verify', 'pending', undefined]);
+    expect(events).toContainEqual(['sync.verify', 'ok', undefined]);
+    expect(JSON.stringify(events)).not.toMatch(/test-baby|test-parent|07:07|LOG_/);
   });
   it('rechecks the reviewed bedtime between closing a waking and adding Wake up', async () => {
     const bed = point('bedtime', '2026-10-14T19:00:00Z');

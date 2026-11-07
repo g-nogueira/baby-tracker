@@ -1,0 +1,59 @@
+{
+  "receivers": {
+    "otlp/baby_tracker": {
+      "protocols": {
+        "http": {
+          "endpoint": "0.0.0.0:4320",
+          "max_request_body_size": 65536,
+          "tls": {
+            "cert_file": "/run/baby-tracker-otlp/tls.crt",
+            "key_file": "/run/baby-tracker-otlp/tls.key"
+          }
+        }
+      }
+    }
+  },
+  "processors": {
+    "batch/baby_tracker": {
+      "timeout": "2s",
+      "send_batch_size": 128,
+      "send_batch_max_size": 256
+    }
+  },
+  "exporters": {
+    "otlp_http/baby_tracker_logs": {
+      "endpoint": "${env:BABY_TRACKER_OPENOBSERVE_OTLP_ENDPOINT}",
+      "headers": {
+        "Authorization": "${env:OPENOBSERVE_AUTH}",
+        "stream-name": "baby_tracker_mobile_logs"
+      },
+      "timeout": "5s",
+      "sending_queue": { "queue_size": 128, "num_consumers": 1 },
+      "retry_on_failure": { "max_elapsed_time": "60s" }
+    },
+    "otlp_http/baby_tracker_traces": {
+      "endpoint": "${env:BABY_TRACKER_OPENOBSERVE_OTLP_ENDPOINT}",
+      "headers": {
+        "Authorization": "${env:OPENOBSERVE_AUTH}",
+        "stream-name": "baby_tracker_mobile_traces"
+      },
+      "timeout": "5s",
+      "sending_queue": { "queue_size": 128, "num_consumers": 1 },
+      "retry_on_failure": { "max_elapsed_time": "60s" }
+    }
+  },
+  "service": {
+    "pipelines": {
+      "logs/baby_tracker": {
+        "receivers": ["otlp/baby_tracker"],
+        "processors": ["memory_limiter", "batch/baby_tracker"],
+        "exporters": ["otlp_http/baby_tracker_logs"]
+      },
+      "traces/baby_tracker": {
+        "receivers": ["otlp/baby_tracker"],
+        "processors": ["memory_limiter", "batch/baby_tracker"],
+        "exporters": ["otlp_http/baby_tracker_traces"]
+      }
+    }
+  }
+}

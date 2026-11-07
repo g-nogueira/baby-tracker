@@ -9,6 +9,7 @@ const boundary = vi.hoisted(() => ({
   listener: null as null | ((state: string) => void),
 }));
 vi.mock('react-native', () => ({
+  Platform: { OS: 'android' },
   AppState: {
     addEventListener: (_event: string, listener: (state: string) => void) => {
       boundary.listener = listener;
@@ -16,6 +17,7 @@ vi.mock('react-native', () => ({
     },
   },
 }));
+vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '0.1.0' } } }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-id' }));
 vi.mock('./secure-credentials', () => ({
   napperDeviceId: async () => 'synthetic-device',
@@ -52,10 +54,12 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-13T12:00:00Z'));
   boundary.saved = null;
   boundary.listener = null;
+  vi.stubEnv('EXPO_PUBLIC_BABY_TRACKER_OTLP_URL', '');
 });
 afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount());
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 it('logs in, chooses a real profile, restores it after restart and reads again on foreground', async () => {
