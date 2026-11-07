@@ -24,6 +24,8 @@ interface State {
   busy: boolean;
   refreshing: boolean;
   readNeedsRefresh: boolean;
+  checkingSave: boolean;
+  recoveredSaveVersion: number;
 }
 export const deviceTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 /** Owns asynchronous reads and invalidates responses from an old profile/date/session. */
@@ -41,6 +43,8 @@ export function useCareTracker(createProvider: CareProviderFactory) {
     busy: false,
     refreshing: false,
     readNeedsRefresh: false,
+    checkingSave: false,
+    recoveredSaveVersion: 0,
   }));
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -73,39 +77,59 @@ export function useCareTracker(createProvider: CareProviderFactory) {
   const refresh = useCallback(
     async (manual = false, baby = stateRef.current.baby, requestedDate?: string) => {
       const service = tracker.current;
-      if (!service || !baby || busy.current) return;
+      if (!service || !baby || busy.current) return false;
       const date =
         requestedDate ??
         (followingToday.current
           ? calendarDayForInstant(new Date(), timezone)
           : stateRef.current.date);
       const nonce = ++generation.current;
+      const wasUnconfirmed = service.care.needsRefresh;
       setState((s) => ({ ...s, refreshing: true }));
       try {
-        const current = manual
-          ? await service.care.reconcile(baby.id)
-          : await service.care.current(baby.id);
+        const recovered = wasUnconfirmed && (await service.care.verifyPendingSave?.(baby.id));
+        if (!mounted.current || nonce !== generation.current) return false;
+        if (recovered)
+          setState((s) => ({
+            ...s,
+            recoveredSaveVersion: s.recoveredSaveVersion + 1,
+            readNeedsRefresh: true,
+          }));
+        const current =
+          manual && !recovered
+            ? await service.care.reconcile(baby.id)
+            : await service.care.current(baby.id);
         const history =
           date === calendarDayForInstant(new Date(), timezone)
             ? current
             : await service.care.history(baby.id, date);
-        if (mounted.current && nonce === generation.current)
-          setState((s) => ({
-            ...s,
-            current,
-            history,
-            date,
-            updatedAt: new Date(),
-            error: null,
-            stage: 'ready',
-            refreshing: false,
-            readNeedsRefresh: false,
-          }));
+        if (!mounted.current || nonce !== generation.current) return false;
+        const stillUnconfirmed = service.care.needsRefresh;
+        setState((s) => ({
+          ...s,
+          current,
+          history,
+          date,
+          updatedAt: new Date(),
+          error:
+            manual && wasUnconfirmed && !recovered && !stillUnconfirmed
+              ? 'Cloud records refreshed. The last change could not be verified.'
+              : null,
+          stage: 'ready',
+          refreshing: false,
+          readNeedsRefresh: false,
+        }));
+        return !stillUnconfirmed;
       } catch (error) {
         if (mounted.current && nonce === generation.current) {
           fail(error);
-          setState((s) => ({ ...s, refreshing: false }));
+          setState((s) => ({
+            ...s,
+            refreshing: false,
+            readNeedsRefresh: s.readNeedsRefresh || (wasUnconfirmed && !service.care.needsRefresh),
+          }));
         }
+        return false;
       }
     },
     [fail, timezone],
@@ -176,7 +200,7 @@ export function useCareTracker(createProvider: CareProviderFactory) {
       return false;
     } finally {
       busy.current = false;
-      if (mounted.current) setState((s) => ({ ...s, busy: false }));
+      if (mounted.current) setState((s) => ({ ...s, busy: false, checkingSave: false }));
     }
   };
   const execute = async (command: CareCommand) => {
@@ -195,7 +219,28 @@ export function useCareTracker(createProvider: CareProviderFactory) {
     }
     const nonce = generation.current + 1;
     return run(async () => {
-      await service.care.execute(baby.id, command);
+      try {
+        await service.care.execute(baby.id, command);
+      } catch (error) {
+        if (
+          !(error instanceof CareServiceError && error.code === 'uncertain') ||
+          !service.care.verifyPendingSave ||
+          !service.care.needsRefresh ||
+          !mounted.current ||
+          nonce !== generation.current
+        )
+          throw error;
+        setState((s) => ({ ...s, checkingSave: true }));
+        let confirmed = false;
+        try {
+          confirmed = await service.care.verifyPendingSave(baby.id);
+        } catch (verificationError) {
+          if (verificationError instanceof CareServiceError && verificationError.code === 'auth')
+            throw verificationError;
+        }
+        if (!confirmed) throw error;
+      }
+      if (!mounted.current || nonce !== generation.current) return;
       let current: CareSnapshot;
       try {
         current = await service.care.current(baby.id);

@@ -234,6 +234,8 @@ beforeEach(() => {
     providerName: 'Replaceable test service',
     busy: false,
     needsRefresh: false,
+    checkingSave: false,
+    recoveredSaveVersion: 0,
     updatedAt: new Date(),
     error: null,
     refreshing: false,
@@ -399,6 +401,47 @@ it('treats Night sleep as the containing phase with no separate bottom stop time
     command: 'start-night-waking',
     expected: bed,
   });
+});
+it('keeps an unconfirmed Wake up from being resubmitted and closes its draft on verified refresh', async () => {
+  hooks.model.current = snapshot([bed]);
+  hooks.model.history = hooks.model.current;
+  hooks.model.execute = vi.fn().mockResolvedValue(false);
+  await render();
+  await act(async () => press('Wake up,')?.props.onPress());
+  const command: import('./contracts').CareCommand = {
+    type: 'wake-up',
+    expected: bed,
+    at: new Date().toISOString(),
+  };
+  await act(async () => renderer.root.findByType(ActivitySheet).props.onExecute(command));
+  hooks.model.needsRefresh = true;
+  hooks.model.error =
+    'The saved activity could not be confirmed. Refresh before making another change.';
+  await update();
+  expect(renderer.root.findByType(ActivitySheet).props.busy).toBe(true);
+  const recoveryButton = renderer.root
+    .findByType(ActivitySheet)
+    .findAllByType('Pressable' as never)
+    .find((node) => node.props.accessibilityLabel === 'Review cloud records');
+  expect(recoveryButton).toBeDefined();
+  expect(text()).not.toContain('The saved activity could not be confirmed.');
+  const wake: PointActivity = {
+    id: 'recovered-wake',
+    revision: 'verified',
+    kind: 'wake-up',
+    status: 'completed',
+    startedAt: command.at,
+    endedAt: command.at,
+  };
+  hooks.model.current = snapshot([bed, wake]);
+  hooks.model.history = hooks.model.current;
+  hooks.model.needsRefresh = false;
+  hooks.model.recoveredSaveVersion = 1;
+  hooks.model.error = null;
+  await update();
+  expect(renderer.root.findAllByType(ActivitySheet)).toHaveLength(0);
+  expect(text()).toContain('Awake for');
+  expect(hooks.model.execute).toHaveBeenCalledOnce();
 });
 it('opens the exact Wake up anchor and permits new records on a past night while retaining current live controls', async () => {
   const wake: PointActivity = {

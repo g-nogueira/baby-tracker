@@ -10,15 +10,18 @@ import {
 } from './nursing';
 import { calendarDayForInstant, shiftCalendarDay } from '@/features/naps/calendar-day';
 
+interface PendingSave {
+  babyId: string;
+  accountId: string | null;
+  dates: readonly string[];
+  confirm: (logs: WireLog[]) => void;
+}
+
 /** Application boundary: remote truth is reread before/after every mutation; no local outbox. */
 export class NapperTracker {
   private mutationInFlight = false;
-  private uncertain: {
-    babyId: string;
-    accountId: string | null;
-    request: WireLog;
-    batch?: WireLog[];
-  } | null = null;
+  private uncertain: PendingSave | null = null;
+  private verification: { save: PendingSave; result: Promise<boolean> } | null = null;
   constructor(
     public readonly client: NapperClient,
     private readonly newId: () => string,
@@ -26,10 +29,15 @@ export class NapperTracker {
     private readonly now: () => Date = () => new Date(),
   ) {}
   get writeNeedsRefresh() {
-    return (
-      this.uncertain?.accountId === this.client.accountId &&
-      this.uncertain?.babyId === this.client.babyId
-    );
+    return this.pendingSave(this.client.babyId) !== null;
+  }
+  private pendingSave(babyId: string | null) {
+    const save = this.uncertain;
+    return save?.babyId === babyId &&
+      babyId === this.client.babyId &&
+      save.accountId === this.client.accountId
+      ? save
+      : null;
   }
   async current(babyId: string): Promise<WireLog[]> {
     const date = calendarDayForInstant(this.now(), this.timezone);
@@ -59,16 +67,36 @@ export class NapperTracker {
     return rows.reduce((all, logs) => mergeLogs(all, logs), []);
   }
   async reconcile(babyId: string) {
+    const save = this.pendingSave(babyId);
     const logs = await this.current(babyId);
-    if (this.uncertain?.babyId === babyId && this.uncertain.accountId === this.client.accountId) {
-      for (const request of this.uncertain.batch ?? [this.uncertain.request])
-        await this.history(
-          babyId,
-          calendarDayForInstant(new Date(String(request.start)), this.timezone),
-        );
-      this.uncertain = null;
+    if (save) {
+      await this.windows(babyId, save.dates);
+      if (this.pendingSave(babyId) === save) this.uncertain = null;
     }
     return logs;
+  }
+  /** Read-only recovery. A successful GET alone cannot establish that a save succeeded. */
+  async verifyPendingSave(babyId: string): Promise<boolean> {
+    const save = this.pendingSave(babyId);
+    if (!save || this.mutationInFlight) return false;
+    if (this.verification?.save === save) return this.verification.result;
+    const result = (async () => {
+      const logs = await this.windows(babyId, save.dates);
+      if (this.pendingSave(babyId) !== save) return false;
+      try {
+        save.confirm(logs);
+      } catch {
+        return false;
+      }
+      this.uncertain = null;
+      return true;
+    })();
+    this.verification = { save, result };
+    try {
+      return await result;
+    } finally {
+      if (this.verification?.save === save) this.verification = null;
+    }
   }
   /** Ordered provider writes share the Nursing lock. No batch/atomic API contract was observed. */
   async apply(
@@ -86,25 +114,29 @@ export class NapperTracker {
         'Refresh to check the previous save before making another change.',
       );
     this.mutationInFlight = true;
+    const accountId = this.client.accountId;
+    let before: WireLog[] = [];
     let requests: WireLog[] = [];
+    const days = new Set([date, ...additionalDates]);
     let accepted = 0;
+    const confirm = (saved: WireLog[], expected: WireLog[]) => {
+      for (const request of expected) {
+        const actual = saved.find((log) => log.id === request.id);
+        if (!actual || !matchesCareWrite(actual, request))
+          throw new NapperError('uncertain', 'The saved activity could not be confirmed.');
+      }
+    };
+    const confirmAll = (saved: WireLog[]) => {
+      confirm(saved, requests);
+      validateSaved?.(before, saved, requests);
+    };
     try {
-      const before = await this.windows(babyId, [date, ...additionalDates]);
+      before = await this.windows(babyId, [...days]);
       requests = prepare(before).map(nursingRequest);
       if (requests.length === 0)
         throw new NapperError('invalid', 'No activity change was prepared.');
-      const days = new Set([
-        date,
-        ...additionalDates,
-        ...requests.map((r) => calendarDayForInstant(new Date(String(r.start)), this.timezone)),
-      ]);
-      const confirm = (saved: WireLog[], expected: WireLog[]) => {
-        for (const request of expected) {
-          const actual = saved.find((log) => log.id === request.id);
-          if (!actual || !matchesCareWrite(actual, request))
-            throw new NapperError('uncertain', 'The saved activity could not be confirmed.');
-        }
-      };
+      for (const request of requests)
+        days.add(calendarDayForInstant(new Date(String(request.start)), this.timezone));
       for (const request of requests) {
         await this.client.put(babyId, request);
         accepted++;
@@ -119,8 +151,7 @@ export class NapperTracker {
         }
       }
       const saved = await this.windows(babyId, [...days]);
-      confirm(saved, requests);
-      validateSaved?.(before, saved, requests);
+      confirmAll(saved);
     } catch (error) {
       if (
         requests.length &&
@@ -128,9 +159,9 @@ export class NapperTracker {
       ) {
         this.uncertain = {
           babyId,
-          accountId: this.client.accountId,
-          request: requests[0],
-          batch: requests,
+          accountId,
+          dates: [...days],
+          confirm: confirmAll,
         };
         throw new NapperError(
           'uncertain',
@@ -158,10 +189,17 @@ export class NapperTracker {
         'Refresh to check the previous save before making another change.',
       );
     this.mutationInFlight = true;
+    const accountId = this.client.accountId;
+    let before: WireLog[] = [];
     let accepted = false;
     const date = calendarDayForInstant(new Date(String(expected.start)), this.timezone);
+    const confirm = (after: WireLog[]) => {
+      if (after.some((r) => r.id === expected.id))
+        throw new NapperError('uncertain', 'Removal could not be confirmed.');
+      validate(before, after);
+    };
     try {
-      const before = await this.windows(babyId, [date]);
+      before = await this.windows(babyId, [date]);
       const actual = before.find((r) => r.id === expected.id);
       if (!actual || fingerprint(actual) !== fingerprint(expected))
         throw new NapperError(
@@ -175,12 +213,10 @@ export class NapperTracker {
       await this.client.remove(babyId, String(expected.id));
       accepted = true;
       const after = await this.windows(babyId, [date]);
-      if (after.some((r) => r.id === expected.id))
-        throw new NapperError('uncertain', 'Removal could not be confirmed.');
-      validate(before, after);
+      confirm(after);
     } catch (error) {
       if (accepted || (error instanceof NapperError && error.code === 'uncertain')) {
-        this.uncertain = { babyId, accountId: this.client.accountId, request: expected };
+        this.uncertain = { babyId, accountId, dates: [date], confirm };
         throw new NapperError(
           'uncertain',
           'Removal could not be confirmed. Refresh and review before making another change.',
@@ -251,26 +287,35 @@ export class NapperTracker {
         'Refresh to check the previous save before making another change.',
       );
     this.mutationInFlight = true;
+    const accountId = this.client.accountId;
     try {
       const logs = date ? await this.history(babyId, date) : await this.current(babyId);
       const request = nursingRequest(await create(logs));
-      try {
-        await this.client.put(babyId, request);
-      } catch (error) {
-        if (error instanceof NapperError && error.code === 'uncertain')
-          this.uncertain = { babyId, accountId: this.client.accountId, request };
-        throw error;
-      }
-      try {
-        const resultDate = calendarDayForInstant(new Date(String(request.start)), this.timezone);
-        const saved = date ? await this.history(babyId, resultDate) : await this.current(babyId);
+      const resultDate = calendarDayForInstant(new Date(String(request.start)), this.timezone);
+      const confirm = (saved: WireLog[]) => {
         const actual = saved.find((log) => log.id === request.id);
         if (!actual || !matchesNursingWrite(actual, request))
           throw new NapperError('uncertain', 'The updated feed is not yet confirmed.');
+      };
+      const pending = {
+        babyId,
+        accountId,
+        dates: date ? [date, resultDate] : [resultDate],
+        confirm,
+      };
+      try {
+        await this.client.put(babyId, request);
+      } catch (error) {
+        if (error instanceof NapperError && error.code === 'uncertain') this.uncertain = pending;
+        throw error;
+      }
+      try {
+        const saved = date ? await this.history(babyId, resultDate) : await this.current(babyId);
+        confirm(saved);
         const current = date ? await this.current(babyId) : saved;
         return { logs: saved, current, source: date ? 'day' : 'current', date: resultDate };
       } catch {
-        this.uncertain = { babyId, accountId: this.client.accountId, request };
+        this.uncertain = pending;
         throw new NapperError(
           'uncertain',
           'Napper accepted the change, but its updated record could not be loaded. Refresh to check it.',

@@ -132,6 +132,9 @@ export class NapperCareService implements CareService {
       return this.current(profileId);
     });
   }
+  verifyPendingSave(profileId: string) {
+    return this.boundary(() => this.tracker.verifyPendingSave(profileId));
+  }
   execute(profileId: string, command: CareCommand): Promise<void> {
     return this.boundary(async () => {
       if (this.tracker.client.babyId !== profileId)

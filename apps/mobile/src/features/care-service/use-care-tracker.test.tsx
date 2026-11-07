@@ -1,7 +1,13 @@
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useCareTracker } from './use-care-tracker';
-import { emptySnapshot, type CareCommand, type CareProvider, type CareSnapshot } from './contracts';
+import {
+  CareServiceError,
+  emptySnapshot,
+  type CareCommand,
+  type CareProvider,
+  type CareSnapshot,
+} from './contracts';
 const boundary = vi.hoisted(() => ({ foreground: null as null | ((state: string) => void) }));
 vi.mock('react-native', () => ({
   AppState: {
@@ -128,9 +134,89 @@ it('treats a confirmed save followed by a view-read failure as saved and blocks 
     expect(await model.execute(command)).toBe(false);
   });
   expect(h.execute).toHaveBeenCalledOnce();
-  await act(async () => model.refresh());
+  await act(async () => {
+    await model.refresh();
+  });
   expect(model.needsRefresh).toBe(false);
   expect(model.current.activities).toHaveLength(1);
+});
+
+it.each(['immediate', 'foreground', 'poll'] as const)(
+  'confirms an uncertain save through %s readback without replaying it or abandoning review',
+  async (when) => {
+    const h = setup();
+    let pending = false;
+    let visible = when === 'immediate';
+    Object.defineProperty(h.provider.care, 'needsRefresh', { get: () => pending });
+    const verify = vi.fn(async () => {
+      if (visible) pending = false;
+      return visible;
+    });
+    h.provider.care.verifyPendingSave = verify;
+    h.provider.care.reconcile = vi.fn(async () => emptySnapshot());
+    h.execute.mockImplementationOnce(async () => {
+      pending = true;
+      throw new CareServiceError('uncertain', 'Synthetic unconfirmed change.');
+    });
+    await act(async () => {
+      renderer = create(<h.Harness />);
+    });
+    const command: CareCommand = {
+      type: 'start-nursing',
+      side: 'RIGHT',
+      at: new Date().toISOString(),
+    };
+    await act(async () => {
+      expect(await model.execute(command)).toBe(when === 'immediate');
+    });
+    expect(model.needsRefresh).toBe(when !== 'immediate');
+    if (when !== 'immediate') {
+      await act(async () => {
+        expect(await model.execute(command)).toBe(false);
+      });
+      visible = true;
+      await act(async () => {
+        if (when === 'foreground') boundary.foreground?.('active');
+        else await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(model.recoveredSaveVersion).toBe(1);
+    }
+    expect(model.needsRefresh).toBe(false);
+    expect(model.error).toBeNull();
+    expect(h.execute).toHaveBeenCalledOnce();
+    expect(h.provider.care.reconcile).not.toHaveBeenCalled();
+    expect(verify).toHaveBeenCalledTimes(when === 'immediate' ? 1 : 2);
+  },
+);
+it('allows explicit cloud review without reporting an unmatched save as confirmed', async () => {
+  const h = setup();
+  let pending = false;
+  Object.defineProperty(h.provider.care, 'needsRefresh', { get: () => pending });
+  h.provider.care.verifyPendingSave = vi.fn(async () => false);
+  h.provider.care.reconcile = vi.fn(async () => {
+    pending = false;
+    return emptySnapshot();
+  });
+  h.execute.mockImplementationOnce(async () => {
+    pending = true;
+    throw new CareServiceError('uncertain', 'Synthetic unconfirmed change.');
+  });
+  await act(async () => {
+    renderer = create(<h.Harness />);
+  });
+  await act(async () => {
+    expect(
+      await model.execute({ type: 'start-nursing', side: 'RIGHT', at: new Date().toISOString() }),
+    ).toBe(false);
+  });
+  expect(model.needsRefresh).toBe(true);
+  await act(async () => {
+    expect(await model.refresh()).toBe(true);
+  });
+  expect(model.needsRefresh).toBe(false);
+  expect(model.recoveredSaveVersion).toBe(0);
+  expect(model.error).toContain('could not be verified');
+  expect(h.execute).toHaveBeenCalledOnce();
 });
 it('follows the new local date after midnight while retaining an explicitly selected historical date', async () => {
   const h = setup();

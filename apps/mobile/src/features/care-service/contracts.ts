@@ -159,6 +159,9 @@ export interface CareService {
   current(profileId: string): Promise<CareSnapshot>;
   /** Includes neighboring days needed to resolve cycles spanning midnight. */
   history(profileId: string, date: string): Promise<CareSnapshot>;
+  /** Read-only: true only when the pending change and its validation are confirmed. */
+  verifyPendingSave?(profileId: string): Promise<boolean>;
+  /** Explicit review of fresh shared records when the last change cannot be verified. */
   reconcile(profileId: string): Promise<CareSnapshot>;
   /** Resolves only after the authoritative store confirms the requested change. */
   execute(profileId: string, command: CareCommand): Promise<void>;

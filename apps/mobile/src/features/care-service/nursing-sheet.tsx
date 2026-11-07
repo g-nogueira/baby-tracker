@@ -21,6 +21,7 @@ import { ActivityTimestampField } from '@/features/shared/activity-drawer/activi
 import { ActivityIcon } from '@/features/shared/icons/activity-icon';
 import type { ActivityReference, Breast, NursingActivity, NursingCommand } from './contracts';
 import { nursingTimes } from './nursing';
+import { SaveRecoveryNotice, type SaveRecovery } from './save-recovery-notice';
 
 interface Props {
   log: NursingActivity | null;
@@ -29,6 +30,7 @@ interface Props {
   now: Date;
   busy: boolean;
   error: string | null;
+  recovery?: SaveRecovery;
   onClose: () => void;
   onStart: (side: Breast, start: Date) => void;
   onChange: (command: NursingCommand) => void;
@@ -44,6 +46,7 @@ export function NursingSheet({
   now,
   busy,
   error,
+  recovery,
   onClose,
   onStart,
   onChange,
@@ -257,7 +260,7 @@ export function NursingSheet({
       initialDetentIndex={0}
       detents={[Math.min(0.78, (completed ? 450 : nursing ? 600 : 540) / height), 0.94]}
       scrollable
-      footer={footer}
+      footer={recovery ? <SaveRecoveryNotice {...recovery} /> : footer}
       cornerRadius={28}
       draggable
       dismissible

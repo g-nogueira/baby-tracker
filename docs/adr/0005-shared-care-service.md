@@ -191,3 +191,22 @@ checks and authoritative writes are unchanged; this does not normalize or repair
 Synthetic tests cover neighboring-day scope, duplicate messages, missing source records,
 provider metadata and exact editor handoff without writes. Installed-phone review, gesture
 and live-account validation remain pending.
+
+## Automatic verification of unconfirmed saves
+
+The shared tracker rereads cloud records when the app returns to the foreground and every
+30 seconds while it can poll. An unconfirmed write now triggers a read-only verification
+immediately, followed by verification on subsequent refreshes. The Napper adapter retains
+the expected write set, affected dates, and existing readback validation in memory. It checks
+the same account/profile, verifies every requested record, and reruns collision validation
+before automatically clearing the write block. Recovery never replays a PUT or DELETE.
+
+The editor closes when its save is verified. If a fresh view read fails after confirmation,
+writes stay blocked until a new snapshot loads. A partial or mismatched save stays unverified.
+The explicit **Review cloud records** action rereads the affected dates and refreshes the
+visible records. It exits the stale draft without labeling an unmatched write successful. Providers without the
+optional verification port retain normal refresh and explicit review.
+
+Synthetic tests cover delayed Wake-up readback, an incomplete transition, an intervening
+collision, profile isolation, foreground/poll recovery, and exact draft dismissal without
+replaying a write. Actual Napper/device validation remains pending.
